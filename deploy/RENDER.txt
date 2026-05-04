@@ -16,11 +16,19 @@
    PORTAL_BASE_URL=/
    PORTAL_TZ=America/Sao_Paulo
 
-   PORTAL_DB_HOST=<host do seu MySQL>
+   MySQL (OBRIGATORIO no Render — sem isso o host cai no padrao "mysql" do Docker
+   local e da erro: getaddrinfo for mysql failed / Name or service not known):
+
+   Opcao A — variaveis separadas:
+   PORTAL_DB_HOST=<hostname real ex. xxx.railway.app ou AWS RDS>
    PORTAL_DB_PORT=3306
    PORTAL_DB_NAME=<nome do banco>
    PORTAL_DB_USER=<usuario>
    PORTAL_DB_PASS=<senha>
+
+   Opcao B — uma URL so (substitui host/porta/nome/usuario/senha):
+   PORTAL_DATABASE_URL=mysql://usuario:senha@HOST:3306/nome_do_banco
+   (use rawurlencode na senha se tiver caracteres especiais, ou defina PORTAL_DB_*.)
 
    TRACKING_PUBLIC_URL=https://SEU-TRACKING.onrender.com/admin/dashboard
 

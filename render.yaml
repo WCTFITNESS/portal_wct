@@ -28,5 +28,8 @@ services:
         sync: false
       - key: PORTAL_DB_PASS
         sync: false
+      # Alternativa: uma URL mysql://user:pass@host:3306/db (defina no painel se preferir)
+      - key: PORTAL_DATABASE_URL
+        sync: false
       - key: TRACKING_PUBLIC_URL
         sync: false
