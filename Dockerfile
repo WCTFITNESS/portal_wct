@@ -10,6 +10,7 @@ RUN docker-php-ext-install pdo_mysql mysqli \
 COPY . /var/www/html/portal_wct/
 COPY deploy/portal/config.docker.php /var/www/html/portal_wct/config/config.php
 COPY deploy/portal/apache-passenv.conf /etc/apache2/conf-enabled/z-wct-passenv.conf
+COPY deploy/render/zzz-portal-docroot.conf /etc/apache2/conf-enabled/zzz-portal-docroot.conf
 
 RUN sed -i 's|DocumentRoot /var/www/html|DocumentRoot /var/www/html/portal_wct|' /etc/apache2/sites-available/000-default.conf \
     && chown -R www-data:www-data /var/www/html/portal_wct

@@ -24,7 +24,8 @@
 
    TRACKING_PUBLIC_URL=https://SEU-TRACKING.onrender.com/admin/dashboard
 
-   O Render define PORT sozinho; o entrypoint ajusta o Apache para escutar nessa porta.
+   O Render define PORT sozinho. O entrypoint alinha Listen E <VirtualHost *:PORT>
+   (só mudar Listen sem o VirtualHost costuma dar 403 Forbidden no Render).
 
 6) MySQL: o Portal usa PDO MySQL. O Postgres "de graca" do Render nao substitui.
    Opcoes: PlanetScale, Railway MySQL, Aiven, AWS RDS, ou MySQL em outro VPS.
