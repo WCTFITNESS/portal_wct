@@ -1,0 +1,93 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Repositories;
+
+use PDO;
+
+class SettingsRepository
+{
+    private ?bool $hasOauthCodeColumn = null;
+
+    public function __construct(private PDO $pdo)
+    {
+    }
+
+    public function getApiConfig(): ?array
+    {
+        $stmt = $this->pdo->query('SELECT * FROM api_settings LIMIT 1');
+        $data = $stmt->fetch();
+
+        return $data ?: null;
+    }
+
+    public function saveApiConfig(array $data): void
+    {
+        $this->ensureOauthCodeColumnExists();
+        $existing = $this->getApiConfig();
+
+        if ($existing) {
+            $stmt = $this->pdo->prepare(
+                'UPDATE api_settings
+                 SET app_id = :app_id,
+                     client_secret = :client_secret,
+                     redirect_uri = :redirect_uri,
+                     seller_id = :seller_id,
+                     oauth_code = :oauth_code,
+                     updated_at = NOW()
+                 WHERE id = :id'
+            );
+            $stmt->execute([
+                ':app_id' => $data['app_id'],
+                ':client_secret' => $data['client_secret'],
+                ':redirect_uri' => $data['redirect_uri'],
+                ':seller_id' => $data['seller_id'],
+                ':oauth_code' => $data['oauth_code'] !== '' ? $data['oauth_code'] : null,
+                ':id' => $existing['id'],
+            ]);
+
+            return;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO api_settings (app_id, client_secret, redirect_uri, seller_id, oauth_code, created_at, updated_at)
+             VALUES (:app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, NOW(), NOW())'
+        );
+        $stmt->execute([
+            ':app_id' => $data['app_id'],
+            ':client_secret' => $data['client_secret'],
+            ':redirect_uri' => $data['redirect_uri'],
+            ':seller_id' => $data['seller_id'],
+            ':oauth_code' => $data['oauth_code'] !== '' ? $data['oauth_code'] : null,
+        ]);
+    }
+
+    private function ensureOauthCodeColumnExists(): void
+    {
+        if ($this->hasOauthCodeColumn()) {
+            return;
+        }
+
+        $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN oauth_code VARCHAR(255) DEFAULT NULL AFTER seller_id');
+        $this->hasOauthCodeColumn = true;
+    }
+
+    private function hasOauthCodeColumn(): bool
+    {
+        if ($this->hasOauthCodeColumn !== null) {
+            return $this->hasOauthCodeColumn;
+        }
+
+        $stmt = $this->pdo->query(
+            "SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+               AND table_name = 'api_settings'
+               AND column_name = 'oauth_code'"
+        );
+
+        $this->hasOauthCodeColumn = ((int) $stmt->fetchColumn()) > 0;
+
+        return $this->hasOauthCodeColumn;
+    }
+}

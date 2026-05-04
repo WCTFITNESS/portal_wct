@@ -1,0 +1,16 @@
+# SO
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Exportacoes geradas em runtime
+storage/exports/
