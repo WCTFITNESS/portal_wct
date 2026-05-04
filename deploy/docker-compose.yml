@@ -23,7 +23,7 @@ services:
   portal-wct:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile.portal
+      dockerfile: Dockerfile
     environment:
       PORTAL_DB_HOST: mysql
       PORTAL_DB_PORT: "3306"

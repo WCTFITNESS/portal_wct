@@ -1,0 +1,37 @@
+================================================================================
+  Portal WCT no Render.com (Docker — igual ideia do Tracking)
+================================================================================
+
+1) No Render: New + > Web Service > conecte o repo portal_wct.
+
+2) Em "Runtime" escolha DOCKER (nao Native Node).
+
+3) Dockerfile Path:  Dockerfile   (na raiz do repositorio)
+   Docker Build Context Directory: vazio ou .
+
+4) Plano: Starter ou superior (Free pode limitar Docker; se falhar, use Starter).
+
+5) Variaveis de ambiente (Environment) — obrigatorias para o app subir:
+
+   PORTAL_BASE_URL=/
+   PORTAL_TZ=America/Sao_Paulo
+
+   PORTAL_DB_HOST=<host do seu MySQL>
+   PORTAL_DB_PORT=3306
+   PORTAL_DB_NAME=<nome do banco>
+   PORTAL_DB_USER=<usuario>
+   PORTAL_DB_PASS=<senha>
+
+   TRACKING_PUBLIC_URL=https://SEU-TRACKING.onrender.com/admin/dashboard
+
+   O Render define PORT sozinho; o entrypoint ajusta o Apache para escutar nessa porta.
+
+6) MySQL: o Portal usa PDO MySQL. O Postgres "de graca" do Render nao substitui.
+   Opcoes: PlanetScale, Railway MySQL, Aiven, AWS RDS, ou MySQL em outro VPS.
+   Importe database.sql nesse MySQL (estrutura + dados iniciais).
+
+7) Health Check Path sugerido: /index.php?page=dashboard
+
+8) Opcional: use o arquivo render.yaml na raiz como Blueprint (ajuste nome/regiao).
+
+================================================================================

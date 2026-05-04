@@ -1,0 +1,32 @@
+# Blueprint Render — ajuste o nome do servico e crie o Web Service a partir do repositorio.
+# Documentacao: https://render.com/docs/blueprint-spec
+#
+# MySQL: o Portal usa MySQL (nao Postgres). Crie um banco MySQL externo (PlanetScale, Railway,
+# Aiven, etc.) e preencha PORTAL_DB_* no painel ou abaixo.
+
+services:
+  - type: web
+    name: portal-wct
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /index.php?page=dashboard
+    envVars:
+      - key: PORTAL_BASE_URL
+        value: /
+      - key: PORTAL_TZ
+        value: America/Sao_Paulo
+      - key: PORTAL_DB_HOST
+        sync: false
+      - key: PORTAL_DB_PORT
+        value: "3306"
+        sync: false
+      - key: PORTAL_DB_NAME
+        sync: false
+      - key: PORTAL_DB_USER
+        sync: false
+      - key: PORTAL_DB_PASS
+        sync: false
+      - key: TRACKING_PUBLIC_URL
+        sync: false
