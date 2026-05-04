@@ -17,3 +17,6 @@ storage/exports/
 
 # Docker stack local (senhas / URLs)
 deploy/.env
+
+# Gerado no container (/ deploy/render/bake-db-runtime.php)
+config/db-runtime.php

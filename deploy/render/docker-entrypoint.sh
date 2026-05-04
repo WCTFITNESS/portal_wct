@@ -16,4 +16,7 @@ if [ -f "$SITE" ]; then
   sed -i "s|<VirtualHost \*:8080>|<VirtualHost *:${LISTEN_PORT}>|g" "$SITE"
 fi
 
+# Grava DB a partir das env vars do Docker (CLI vê sempre; evita PDO com host=mysql por mod_php).
+php /var/www/html/portal_wct/deploy/render/bake-db-runtime.php
+
 exec apache2-foreground
