@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
+$trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
 $allowedPages = ['dashboard', 'api-config', 'orders', 'repasse-mp', 'message-template', 'manual-send'];
 
@@ -20,6 +21,14 @@ $menuSections = [
     ],
     'Mercado Pago' => [
         ['id' => 'repasse-mp', 'label' => 'Repasse MP'],
+    ],
+    'Integração' => [
+        [
+            'id' => 'tracking-wct',
+            'label' => 'Tracking WCT',
+            'external' => true,
+            'href' => $trackingWctUrl,
+        ],
     ],
 ];
 
@@ -235,9 +244,13 @@ if ($page === 'repasse-mp' && isset($_GET['download']) && $_GET['download'] !== 
             <div class="menu-section-title"><?= htmlspecialchars($sectionTitle) ?></div>
             <ul class="menu-list">
                 <?php foreach ($items as $item): ?>
-                    <?php $isActive = $page === $item['id']; ?>
+                    <?php
+                    $isExternal = !empty($item['external']);
+                    $itemHref = $isExternal ? (string) ($item['href'] ?? '#') : ($baseUrl . '/index.php?page=' . urlencode($item['id']));
+                    $isActive = !$isExternal && $page === $item['id'];
+                    ?>
                     <li>
-                        <a class="menu-link<?= $isActive ? ' active' : '' ?>" href="<?= $baseUrl ?>/index.php?page=<?= urlencode($item['id']) ?>">
+                        <a class="menu-link<?= $isActive ? ' active' : '' ?>" href="<?= htmlspecialchars($itemHref) ?>"<?= $isExternal ? ' rel="noopener"' : '' ?>>
                             <?= htmlspecialchars($item['label']) ?>
                         </a>
                     </li>

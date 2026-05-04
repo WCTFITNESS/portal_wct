@@ -1,0 +1,30 @@
+Stack Docker: Portal WCT (PHP + MySQL) + Tracking (Node + Postgres) + Nginx
+
+1) Hosts (Windows: C:\Windows\System32\drivers\etc\hosts)
+   127.0.0.1 portal.wct.local
+   127.0.0.1 tracking.wct.local
+
+2) Copie env.example para .env na pasta deploy e ajuste se precisar.
+
+3) Na pasta deploy do projeto portal (ml-portal\deploy), execute:
+   docker compose up -d --build
+
+4) Acesse:
+   http://portal.wct.local:8088/portal_wct/index.php
+   http://tracking.wct.local:8088/
+
+   (8088 e o padrao de STACK_HTTP_PORT; se mudar no .env, use a porta escolhida.)
+
+5) Banco Tracking: o Postgres sobe vazio. Rode as migracoes/scripts do projeto tracking
+   no container se existirem (ex.: docker compose exec tracking-wct node scripts/initDb.js).
+
+6) Parar:
+   docker compose down
+
+Observacao: o Tracking usa PostgreSQL (DATABASE_URL). O Portal usa MySQL.
+Os links entre menus usam TRACKING_PUBLIC_URL e PORTAL_WCT_PUBLIC do .env.
+Se mudar STACK_HTTP_PORT no .env, atualize tambem essas duas URLs para a mesma porta.
+
+Requisito: o repositorio tracking-wct deve estar ao lado do ml-portal em:
+   ...\htdocs\tracking-wct
+(caminho usado pelo build em docker-compose.yml).

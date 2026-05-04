@@ -12,5 +12,7 @@ return [
     'app' => [
         'timezone' => 'America/Sao_Paulo',
         'base_url' => '/portal_wct',
+        /** URL do Tracking WCT (Node, ex.: http://localhost:3001/admin/dashboard) */
+        'tracking_wct_url' => 'http://localhost:3001/admin/dashboard',
     ],
 ];

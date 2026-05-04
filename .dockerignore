@@ -1,0 +1,4 @@
+.git
+.gitignore
+**/storage/exports/**
+deploy/mysql_data

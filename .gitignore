@@ -14,3 +14,6 @@ Desktop.ini
 
 # Exportacoes geradas em runtime
 storage/exports/
+
+# Docker stack local (senhas / URLs)
+deploy/.env
