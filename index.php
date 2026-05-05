@@ -76,6 +76,25 @@ if ($page === 'repasse-mp' && isset($_GET['download']) && $_GET['download'] !== 
     readfile($filePath);
     exit;
 }
+
+// Upload Repasse MP precisa redirecionar antes de qualquer output HTML (evita "headers already sent").
+if (
+    $page === 'repasse-mp'
+    && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && ($_POST['form_type'] ?? '') === 'mp_upload'
+) {
+    try {
+        $jobId = $app['repasseMpService']->createJobFromUpload($_FILES['repasse_mp_file'] ?? []);
+        header('Location: ' . $baseUrl . '/index.php?page=repasse-mp&job=' . rawurlencode($jobId), true, 302);
+    } catch (Throwable $exception) {
+        header(
+            'Location: ' . $baseUrl . '/index.php?page=repasse-mp&flash_err=' . rawurlencode($exception->getMessage()),
+            true,
+            302
+        );
+    }
+    exit;
+}
 ?>
 <!doctype html>
 <html lang="pt-BR">

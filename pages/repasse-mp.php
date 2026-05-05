@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 $feedback = null;
 $feedbackClass = 'ok';
+if (isset($_GET['flash_err']) && trim((string) $_GET['flash_err']) !== '') {
+    $feedback = trim((string) $_GET['flash_err']);
+    $feedbackClass = 'err';
+}
 $mpSettingsRepo = $app['mercadopagoSettingsRepository'];
 $repasseMpService = $app['repasseMpService'];
 $mpPaymentService = $app['mercadopagoPaymentService'];
@@ -22,12 +26,6 @@ $salesLookupPage = max(1, (int) ($_POST['sales_lookup_page'] ?? 1));
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        if (($_POST['form_type'] ?? '') === 'mp_upload') {
-            $jobId = $repasseMpService->createJobFromUpload($_FILES['repasse_mp_file'] ?? []);
-            header('Location: ' . $baseUrl . '/index.php?page=repasse-mp&job=' . rawurlencode($jobId), true, 302);
-            exit;
-        }
-
         if (($_POST['form_type'] ?? '') === 'mp_lookup') {
             $lookupResult = $mpPaymentService->searchStandalone($lookupMode, $lookupValue, $lookupDateFrom, $lookupDateTo, $lookupPage, 50);
             $feedback = (string) ($lookupResult['message'] ?? 'Busca avulsa concluida.');
