@@ -6,6 +6,18 @@ $config = require __DIR__ . '/config/config.php';
 
 date_default_timezone_set($config['app']['timezone']);
 
+/**
+ * Junta base_url (ex.: "/" ou "/portal_wct") com um caminho relativo sem gerar "//index.php"
+ * (o navegador trata "//..." como URL com host "index.php" -> ERR_NAME_NOT_RESOLVED).
+ */
+function portal_wct_public_path(string $baseUrl, string $relative): string
+{
+    $relative = ltrim($relative, '/');
+    $root = trim($baseUrl, '/');
+
+    return $root === '' ? '/' . $relative : '/' . $root . '/' . $relative;
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'App\\';
     $baseDir = __DIR__ . '/app/';
@@ -26,6 +38,6 @@ function redirect_to(string $path): void
 {
     global $config;
 
-    header('Location: ' . $config['app']['base_url'] . $path);
+    header('Location: ' . portal_wct_public_path($config['app']['base_url'], ltrim($path, '/')));
     exit;
 }

@@ -120,7 +120,7 @@ if (isset($_GET['job'])) {
             transition: width .25s ease;
         }
     </style>
-    <div id="repasse-mp-config" data-base-url="<?= htmlspecialchars($baseUrl) ?>" data-job="<?= htmlspecialchars($repasseJobId) ?>" hidden></div>
+    <div id="repasse-mp-config" data-path-prefix="<?= htmlspecialchars(trim($baseUrl, '/')) ?>" data-job="<?= htmlspecialchars($repasseJobId) ?>" hidden></div>
 
     <form method="post" enctype="multipart/form-data" id="repasse-mp-upload-form">
         <input type="hidden" name="form_type" value="mp_upload">
@@ -387,7 +387,13 @@ if (isset($_GET['job'])) {
 (function () {
     var cfg = document.getElementById('repasse-mp-config');
     var asyncJobId = cfg && cfg.getAttribute('data-job') ? cfg.getAttribute('data-job') : '';
-    var asyncBaseUrl = cfg && cfg.getAttribute('data-base-url') ? cfg.getAttribute('data-base-url') : '';
+    var pathPrefix = cfg && cfg.getAttribute('data-path-prefix') ? cfg.getAttribute('data-path-prefix') : '';
+
+    /** Evita //index.php quando o site esta na raiz (ERR_NAME_NOT_RESOLVED). */
+    function portalIndexUrl(query) {
+        var q = query.replace(/^\//, '');
+        return pathPrefix === '' ? '/' + q : '/' + pathPrefix + '/' + q;
+    }
 
     function escHtml(s) {
         var d = document.createElement('div');
@@ -427,7 +433,7 @@ if (isset($_GET['job'])) {
         if (!block || !result) return;
         var fn = result.file_name || '';
         var q = 'page=repasse-mp&download=' + encodeURIComponent(fn) + '&job=' + encodeURIComponent(asyncJobId);
-        var downloadUrl = asyncBaseUrl + '/index.php?' + q;
+        var downloadUrl = portalIndexUrl('index.php?' + q);
         block.style.display = 'block';
         block.innerHTML = '<p class="msg ok">Arquivo gerado. O download deve comecar em instantes. Se o navegador bloquear, use o link abaixo.</p>'
             + '<p>Processadas: <strong>' + escHtml(String(result.processed)) + '</strong> | '
@@ -438,7 +444,7 @@ if (isset($_GET['job'])) {
             + 'Nao encontradas: <strong>' + escHtml(String(result.not_found)) + '</strong> | '
             + 'Erros: <strong>' + escHtml(String(result.errors)) + '</strong> | '
             + 'Chamadas API: <strong>' + escHtml(String(result.api_calls)) + '</strong></p>'
-            + '<p><a href="' + escHtml(downloadUrl) + '" download>Baixar novamente</a></p>';
+            + '<p><a href="' + escHtml(downloadUrl) + '">Baixar novamente</a></p>';
 
         triggerRepasseMpAutoDownload(downloadUrl);
 
@@ -461,15 +467,15 @@ if (isset($_GET['job'])) {
     }
 
     async function runRepasseAsyncJob() {
-        if (!asyncJobId || !asyncBaseUrl) return;
+        if (!asyncJobId || !cfg) return;
         var overlay = document.getElementById('mp-processing-overlay');
         var titleEl = document.getElementById('mp-processing-title');
         var detailEl = document.getElementById('mp-processing-detail');
         var bar = document.getElementById('mp-progress-bar');
         if (overlay) overlay.classList.add('is-open');
         if (titleEl) titleEl.textContent = 'Consultando Mercado Pago...';
-        var chunkUrl = asyncBaseUrl + '/index.php?page=repasse-mp&repasse_action=chunk';
-        var finalizeUrl = asyncBaseUrl + '/index.php?page=repasse-mp&repasse_action=finalize';
+        var chunkUrl = portalIndexUrl('index.php?page=repasse-mp&repasse_action=chunk');
+        var finalizeUrl = portalIndexUrl('index.php?page=repasse-mp&repasse_action=finalize');
         try {
             while (true) {
                 var res = await fetch(chunkUrl, {
@@ -543,7 +549,7 @@ if (isset($_GET['job'])) {
         overlay.classList.add('is-open');
     });
 
-    if (asyncJobId && asyncBaseUrl) {
+    if (asyncJobId && cfg) {
         runRepasseAsyncJob();
     }
 

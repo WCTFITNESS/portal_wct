@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </p>
         <?php endif; ?>
         <p>
-            <a href="<?= htmlspecialchars($baseUrl) ?>/index.php?page=repasse&download=<?= urlencode($downloadFile) ?>">
+            <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=repasse&download=' . urlencode($downloadFile))) ?>">
                 Baixar planilha com número do pedido
             </a>
         </p>

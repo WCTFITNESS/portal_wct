@@ -85,10 +85,10 @@ if (
 ) {
     try {
         $jobId = $app['repasseMpService']->createJobFromUpload($_FILES['repasse_mp_file'] ?? []);
-        header('Location: ' . $baseUrl . '/index.php?page=repasse-mp&job=' . rawurlencode($jobId), true, 302);
+        header('Location: ' . portal_wct_public_path($baseUrl, 'index.php?page=repasse-mp&job=' . rawurlencode($jobId)), true, 302);
     } catch (Throwable $exception) {
         header(
-            'Location: ' . $baseUrl . '/index.php?page=repasse-mp&flash_err=' . rawurlencode($exception->getMessage()),
+            'Location: ' . portal_wct_public_path($baseUrl, 'index.php?page=repasse-mp&flash_err=' . rawurlencode($exception->getMessage())),
             true,
             302
         );
@@ -294,7 +294,7 @@ if (
                 <?php foreach ($items as $item): ?>
                     <?php
                     $isExternal = !empty($item['external']);
-                    $itemHref = $isExternal ? (string) ($item['href'] ?? '#') : ($baseUrl . '/index.php?page=' . urlencode($item['id']));
+                    $itemHref = $isExternal ? (string) ($item['href'] ?? '#') : portal_wct_public_path($baseUrl, 'index.php?page=' . urlencode($item['id']));
                     $isActive = !$isExternal && $page === $item['id'];
                     ?>
                     <li>
@@ -312,8 +312,8 @@ if (
             <?php if ($page === 'message-template' || $page === 'manual-send'): ?>
                 <div class="subnav-sticky">
                     <nav class="subnav">
-                        <a href="<?= htmlspecialchars($baseUrl) ?>/index.php?page=message-template" class="<?= $page === 'message-template' ? 'active' : '' ?>">Mensagem</a>
-                        <a href="<?= htmlspecialchars($baseUrl) ?>/index.php?page=manual-send" class="<?= $page === 'manual-send' ? 'active' : '' ?>">Mensagem manual</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=message-template')) ?>" class="<?= $page === 'message-template' ? 'active' : '' ?>">Mensagem</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=manual-send')) ?>" class="<?= $page === 'manual-send' ? 'active' : '' ?>">Mensagem manual</a>
                     </nav>
                 </div>
             <?php endif; ?>
