@@ -40,7 +40,7 @@ if ($driver === 'mysql') {
     try {
         $adminDsn = sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $host, $port);
         $adminPdo = new \PDO($adminDsn, $user, $pass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
         ]);
         $adminPdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
     } catch (\PDOException $e) {

@@ -22,6 +22,13 @@
    PORTAL_DATABASE_URL=postgresql://usuario:senha@HOST:5432/nome_do_banco
    (tambem aceita mysql://... para ambientes legados)
 
+   No Render, ao vincular um Postgres ao Web Service, o painel pode injetar
+   DATABASE_URL=postgresql://... — o Portal le essa variavel automaticamente.
+
+   Se ainda existir PORTAL_DATABASE_URL antiga em mysql:// e voce criou Postgres
+   nativo no Render, deixe as duas apenas temporariamente: o app prefere Postgres
+   nesse caso; ou apague a URL mysql manualmente para evitar confusao.
+
    Opcao B — variaveis separadas:
    PORTAL_DB_DRIVER=pgsql
    PORTAL_DB_HOST=<hostname real do postgres>

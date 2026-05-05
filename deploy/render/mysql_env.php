@@ -44,19 +44,31 @@ function portal_wct_parse_database_url(string $url): ?array
  */
 function portal_wct_db_from_environment(): array
 {
-    $urlRaw = getenv('PORTAL_DATABASE_URL');
-    $url = is_string($urlRaw) ? trim($urlRaw) : '';
-    if ($url !== '') {
-        $db = portal_wct_parse_database_url($url);
-        if ($db !== null) {
-            return $db;
-        }
+    $onRender = getenv('RENDER') !== false && (string) getenv('RENDER') !== '';
+
+    $portalUrl = getenv('PORTAL_DATABASE_URL');
+    $portalUrl = is_string($portalUrl) ? trim($portalUrl) : '';
+    $dataUrl = getenv('DATABASE_URL');
+    $dataUrl = is_string($dataUrl) ? trim($dataUrl) : '';
+
+    $fromPortal = $portalUrl !== '' ? portal_wct_parse_database_url($portalUrl) : null;
+    $fromData = $dataUrl !== '' ? portal_wct_parse_database_url($dataUrl) : null;
+
+    if ($onRender && $fromPortal !== null && $fromData !== null
+        && $fromPortal['driver'] === 'mysql' && $fromData['driver'] === 'pgsql') {
+        return $fromData;
+    }
+    if ($fromPortal !== null) {
+        return $fromPortal;
+    }
+    if ($fromData !== null) {
+        return $fromData;
     }
 
     $driverRaw = strtolower((string) (getenv('PORTAL_DB_DRIVER') ?: ''));
     $driver = in_array($driverRaw, ['mysql', 'pgsql'], true)
         ? $driverRaw
-        : 'mysql';
+        : ($onRender ? 'pgsql' : 'mysql');
 
     $defaultPort = $driver === 'pgsql' ? '5432' : '3306';
     $defaultUser = $driver === 'pgsql' ? 'postgres' : 'portal';
