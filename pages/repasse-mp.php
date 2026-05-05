@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 $feedback = null;
 $feedbackClass = 'ok';
-$summary = null;
-$downloadFile = null;
 $mpSettingsRepo = $app['mercadopagoSettingsRepository'];
 $repasseMpService = $app['repasseMpService'];
 $mpPaymentService = $app['mercadopagoPaymentService'];
@@ -25,10 +23,9 @@ $salesLookupPage = max(1, (int) ($_POST['sales_lookup_page'] ?? 1));
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (($_POST['form_type'] ?? '') === 'mp_upload') {
-            $result = $repasseMpService->processUploadedFile($_FILES['repasse_mp_file'] ?? []);
-            $summary = $result;
-            $downloadFile = $result['file_name'] ?? null;
-            $feedback = 'Arquivo processado com sucesso. Baixe a planilha com a coluna order.';
+            $jobId = $repasseMpService->createJobFromUpload($_FILES['repasse_mp_file'] ?? []);
+            header('Location: ' . $baseUrl . '/index.php?page=repasse-mp&job=' . rawurlencode($jobId), true, 302);
+            exit;
         }
 
         if (($_POST['form_type'] ?? '') === 'mp_lookup') {
@@ -57,11 +54,20 @@ $mpRow = $mpSettingsRepo->getSettings();
 $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
     ? 'Access token do Mercado Pago esta salvo.'
     : 'Nenhum token salvo ainda.';
+
+$repasseJobId = '';
+if (isset($_GET['job'])) {
+    $cand = (string) $_GET['job'];
+    if (strlen($cand) === 32 && ctype_xdigit($cand)) {
+        $repasseJobId = $cand;
+    }
+}
 ?>
 <section class="card">
     <h1>Repasse MP</h1>
     <p>Upload de planilha para buscar <code>order.id</code> no Mercado Pago. O sistema usa a <strong>coluna D</strong> como filtro e deduplica os valores para evitar chamadas repetidas na API.</p>
     <p>Mesmo com deduplicacao, todas as linhas originais sao mantidas no Excel final; linhas duplicadas recebem o mesmo <code>order</code> encontrado.</p>
+    <p style="font-size:.9rem;color:#555;">Planilhas grandes sao consultadas ao Mercado Pago em <strong>varias etapas</strong> (requisicoes curtas), para evitar timeout do servidor (502) em hospedagens como Render.</p>
 
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
@@ -100,7 +106,23 @@ $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
             color: #666;
             font-weight: normal;
         }
+        .mp-progress-wrap {
+            margin-top: 12px;
+            width: 100%;
+            max-width: 360px;
+            background: #e5e7eb;
+            border-radius: 6px;
+            height: 10px;
+            overflow: hidden;
+        }
+        .mp-progress-bar-inner {
+            height: 100%;
+            width: 0%;
+            background: #d50000;
+            transition: width .25s ease;
+        }
     </style>
+    <div id="repasse-mp-config" data-base-url="<?= htmlspecialchars($baseUrl) ?>" data-job="<?= htmlspecialchars($repasseJobId) ?>" hidden></div>
 
     <form method="post" enctype="multipart/form-data" id="repasse-mp-upload-form">
         <input type="hidden" name="form_type" value="mp_upload">
@@ -110,28 +132,15 @@ $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
     </form>
     <div id="mp-processing-overlay" class="mp-processing-overlay" aria-live="polite" aria-busy="true">
         <div class="mp-processing-box">
-            Processando arquivo, aguarde...
-            <small>Nao feche a pagina durante o processamento.</small>
+            <span id="mp-processing-title">Processando arquivo, aguarde...</span>
+            <div class="mp-progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                <div id="mp-progress-bar" class="mp-progress-bar-inner"></div>
+            </div>
+            <small id="mp-processing-detail">Preparando...</small>
         </div>
     </div>
 
-    <?php if ($downloadFile): ?>
-        <p>
-            Processadas: <strong><?= htmlspecialchars((string) ($summary['processed'] ?? 0)) ?></strong> |
-            Operacoes unicas (coluna D): <strong><?= htmlspecialchars((string) ($summary['unique_operations'] ?? 0)) ?></strong> |
-            Coluna detectada: <strong><?= htmlspecialchars((string) ((int) ($summary['operation_column_index'] ?? 3) + 1)) ?></strong> |
-            Nome da coluna detectada: <strong><?= htmlspecialchars((string) ($summary['operation_column_name'] ?? '')) ?></strong> |
-            Encontradas: <strong><?= htmlspecialchars((string) ($summary['found'] ?? 0)) ?></strong> |
-            Nao encontradas: <strong><?= htmlspecialchars((string) ($summary['not_found'] ?? 0)) ?></strong> |
-            Erros: <strong><?= htmlspecialchars((string) ($summary['errors'] ?? 0)) ?></strong> |
-            Chamadas API: <strong><?= htmlspecialchars((string) ($summary['api_calls'] ?? 0)) ?></strong>
-        </p>
-        <p>
-            <a href="<?= htmlspecialchars($baseUrl) ?>/index.php?page=repasse-mp&download=<?= urlencode((string) $downloadFile) ?>">
-                Baixar planilha com coluna order
-            </a>
-        </p>
-    <?php endif; ?>
+    <div id="repasse-mp-summary-block" style="display:none;margin-top:14px;" aria-live="polite"></div>
 </section>
 
 <section class="card">
@@ -246,8 +255,7 @@ $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
     <?php endif; ?>
 </section>
 
-<?php if (!empty($summary['preview']) && is_array($summary['preview'])): ?>
-<section class="card">
+<section id="repasse-mp-preview-card" class="card" style="display:none;">
     <h1>Previa</h1>
     <table>
         <thead>
@@ -260,21 +268,10 @@ $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
             <th>Status</th>
         </tr>
         </thead>
-        <tbody>
-        <?php foreach ($summary['preview'] as $item): ?>
-            <tr>
-                <td><?= htmlspecialchars((string) ($item['linha'] ?? '')) ?></td>
-                <td><?= htmlspecialchars((string) ($item['coluna_d'] ?? '')) ?></td>
-                <td><?= htmlspecialchars((string) ($item['order'] ?? '')) ?></td>
-                <td><?= htmlspecialchars((string) ($item['payment_id'] ?? '')) ?></td>
-                <td><?= htmlspecialchars((string) ($item['duplicadas'] ?? '')) ?></td>
-                <td><?= htmlspecialchars((string) ($item['status_consulta'] ?? '')) ?></td>
-            </tr>
-        <?php endforeach; ?>
+        <tbody id="repasse-mp-preview-tbody">
         </tbody>
     </table>
 </section>
-<?php endif; ?>
 
 <section class="card">
     <h1>Consulta Avulsa - Relatorio de Vendas</h1>
@@ -390,6 +387,124 @@ $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
 
 <script>
 (function () {
+    var cfg = document.getElementById('repasse-mp-config');
+    var asyncJobId = cfg && cfg.getAttribute('data-job') ? cfg.getAttribute('data-job') : '';
+    var asyncBaseUrl = cfg && cfg.getAttribute('data-base-url') ? cfg.getAttribute('data-base-url') : '';
+
+    function escHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function showRepasseAsyncError(msg) {
+        var block = document.getElementById('repasse-mp-summary-block');
+        if (!block) return;
+        block.style.display = 'block';
+        block.innerHTML = '<div class="msg err">' + escHtml(String(msg)) + '</div>';
+    }
+
+    function renderRepasseAsyncSummary(result) {
+        var block = document.getElementById('repasse-mp-summary-block');
+        if (!block || !result) return;
+        var fn = result.file_name || '';
+        var q = 'page=repasse-mp&download=' + encodeURIComponent(fn) + '&job=' + encodeURIComponent(asyncJobId);
+        block.style.display = 'block';
+        block.innerHTML = '<p class="msg ok">Arquivo processado com sucesso. Baixe a planilha com a coluna order.</p>'
+            + '<p>Processadas: <strong>' + escHtml(String(result.processed)) + '</strong> | '
+            + 'Operacoes unicas (coluna D): <strong>' + escHtml(String(result.unique_operations)) + '</strong> | '
+            + 'Coluna detectada: <strong>' + escHtml(String((parseInt(result.operation_column_index, 10) || 0) + 1)) + '</strong> | '
+            + 'Nome da coluna detectada: <strong>' + escHtml(String(result.operation_column_name || '')) + '</strong> | '
+            + 'Encontradas: <strong>' + escHtml(String(result.found)) + '</strong> | '
+            + 'Nao encontradas: <strong>' + escHtml(String(result.not_found)) + '</strong> | '
+            + 'Erros: <strong>' + escHtml(String(result.errors)) + '</strong> | '
+            + 'Chamadas API: <strong>' + escHtml(String(result.api_calls)) + '</strong></p>'
+            + '<p><a href="' + escHtml(asyncBaseUrl + '/index.php?' + q) + '">Baixar planilha com coluna order</a></p>';
+
+        var prevCard = document.getElementById('repasse-mp-preview-card');
+        var tbody = document.getElementById('repasse-mp-preview-tbody');
+        if (prevCard && tbody && result.preview && result.preview.length) {
+            prevCard.style.display = 'block';
+            tbody.innerHTML = '';
+            result.preview.forEach(function (item) {
+                var tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + escHtml(String(item.linha)) + '</td>'
+                    + '<td>' + escHtml(String(item.coluna_d)) + '</td>'
+                    + '<td>' + escHtml(String(item.order)) + '</td>'
+                    + '<td>' + escHtml(String(item.payment_id)) + '</td>'
+                    + '<td>' + escHtml(String(item.duplicadas)) + '</td>'
+                    + '<td>' + escHtml(String(item.status_consulta)) + '</td>';
+                tbody.appendChild(tr);
+            });
+        }
+    }
+
+    async function runRepasseAsyncJob() {
+        if (!asyncJobId || !asyncBaseUrl) return;
+        var overlay = document.getElementById('mp-processing-overlay');
+        var titleEl = document.getElementById('mp-processing-title');
+        var detailEl = document.getElementById('mp-processing-detail');
+        var bar = document.getElementById('mp-progress-bar');
+        if (overlay) overlay.classList.add('is-open');
+        if (titleEl) titleEl.textContent = 'Consultando Mercado Pago...';
+        var chunkUrl = asyncBaseUrl + '/index.php?page=repasse-mp&repasse_action=chunk';
+        var finalizeUrl = asyncBaseUrl + '/index.php?page=repasse-mp&repasse_action=finalize';
+        try {
+            while (true) {
+                var res = await fetch(chunkUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'job=' + encodeURIComponent(asyncJobId)
+                });
+                var raw = await res.text();
+                var j;
+                try {
+                    j = JSON.parse(raw);
+                } catch (e) {
+                    throw new Error('Resposta invalida do servidor (502/timeout?). Tente novamente ou reduza o arquivo.');
+                }
+                if (!j.ok) {
+                    throw new Error(j.error || 'Falha no lote.');
+                }
+                if (bar && typeof j.progress === 'number') {
+                    bar.style.width = Math.min(100, j.progress) + '%';
+                }
+                if (detailEl) {
+                    var cur = j.cursor !== undefined ? j.cursor : '';
+                    var tot = j.total !== undefined ? j.total : '';
+                    var extras = j.api_calls_total != null ? ' | Chamadas API acumuladas: ' + j.api_calls_total : '';
+                    detailEl.textContent = 'Operacoes unicas consultadas: ' + cur + ' / ' + tot + extras;
+                }
+                if (j.phase === 'matching_done' || j.phase === 'complete') {
+                    break;
+                }
+            }
+            if (titleEl) titleEl.textContent = 'Gerando planilha final...';
+            if (detailEl) detailEl.textContent = 'Montando a coluna order e gravando o XLSX (pode levar alguns minutos em arquivos muito grandes).';
+            if (bar) bar.style.width = '100%';
+            var fr = await fetch(finalizeUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'job=' + encodeURIComponent(asyncJobId)
+            });
+            var rawF = await fr.text();
+            var fj;
+            try {
+                fj = JSON.parse(rawF);
+            } catch (e2) {
+                throw new Error('Resposta invalida ao finalizar (timeout?). Recarregue a pagina; se o URL ainda tiver ?job=..., o navegador pode tentar de novo.');
+            }
+            if (!fj.ok) {
+                throw new Error(fj.error || 'Falha ao finalizar.');
+            }
+            if (overlay) overlay.classList.remove('is-open');
+            renderRepasseAsyncSummary(fj.result);
+        } catch (e) {
+            if (overlay) overlay.classList.remove('is-open');
+            showRepasseAsyncError(e.message || e);
+        }
+    }
+
     var form = document.getElementById('repasse-mp-upload-form');
     var btn = document.getElementById('repasse-mp-submit-btn');
     var overlay = document.getElementById('mp-processing-overlay');
@@ -397,16 +512,19 @@ $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
     var lookupValueBlock = document.getElementById('mp-lookup-value-block');
     var salesLookupMode = document.getElementById('mp-sales-lookup-mode');
     var salesLookupValueBlock = document.getElementById('mp-sales-lookup-value-block');
-    if (!form || !btn || !overlay) return;
 
     var processing = false;
-    form.addEventListener('submit', function () {
+    if (form && btn && overlay) form.addEventListener('submit', function () {
         if (processing) return;
         processing = true;
         btn.disabled = true;
         btn.textContent = 'Processando...';
         overlay.classList.add('is-open');
     });
+
+    if (asyncJobId && asyncBaseUrl) {
+        runRepasseAsyncJob();
+    }
 
     window.addEventListener('beforeunload', function () {
         // Ao sair/F5 durante o POST, o navegador encerra a conexao.

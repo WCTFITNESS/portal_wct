@@ -12,6 +12,31 @@ if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
 }
 
+if ($page === 'repasse-mp' && isset($_GET['repasse_action']) && $_GET['repasse_action'] !== '') {
+    header('Content-Type: application/json; charset=utf-8');
+    $jobId = trim((string) ($_POST['job'] ?? $_GET['job'] ?? ''));
+    $action = (string) $_GET['repasse_action'];
+
+    try {
+        if ($action === 'chunk' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            echo json_encode($app['repasseMpService']->processJobChunk($jobId), JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+        if ($action === 'finalize' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            echo json_encode($app['repasseMpService']->finalizeJob($jobId), JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+        http_response_code(405);
+        echo json_encode(['ok' => false, 'error' => 'Metodo ou acao invalidos.'], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $menuSections = [
     'Mercado Livre' => [
         ['id' => 'dashboard', 'label' => 'Dashboard'],
@@ -33,7 +58,11 @@ $menuSections = [
 ];
 
 if ($page === 'repasse-mp' && isset($_GET['download']) && $_GET['download'] !== '') {
-    $filePath = $app['repasseMpService']->getExportFilePath((string) $_GET['download']);
+    $jobId = isset($_GET['job']) ? trim((string) $_GET['job']) : '';
+    $filePath = $app['repasseMpService']->getExportFilePathForDownload(
+        (string) $_GET['download'],
+        $jobId !== '' ? $jobId : null
+    );
     if (!$filePath) {
         http_response_code(404);
         echo 'Arquivo não encontrado.';
