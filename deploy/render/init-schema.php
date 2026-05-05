@@ -2,9 +2,6 @@
 
 declare(strict_types=1);
 
-use PDO;
-use PDOException;
-
 require __DIR__ . '/mysql_env.php';
 
 $enabledRaw = getenv('PORTAL_AUTO_MIGRATE');
@@ -42,13 +39,13 @@ if (!is_file($schemaFile)) {
 if ($driver === 'mysql') {
     try {
         $adminDsn = sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $host, $port);
-        $adminPdo = new PDO($adminDsn, $user, $pass, [
+        $adminPdo = new \PDO($adminDsn, $user, $pass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
         $adminPdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-    } catch (PDOException $e) {
+    } catch (\PDOException $e) {
         fwrite(STDERR, "[init-schema] Falha ao criar/verificar database: {$e->getMessage()}\n");
-        exit(1);
+        exit(0);
     }
 }
 
@@ -56,12 +53,12 @@ try {
     $dsn = $driver === 'pgsql'
         ? sprintf('pgsql:host=%s;port=%d;dbname=%s', $host, $port, $name)
         : sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, $port, $name);
-    $pdo = new PDO($dsn, $user, $pass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    $pdo = new \PDO($dsn, $user, $pass, [
+        \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
     ]);
-} catch (PDOException $e) {
+} catch (\PDOException $e) {
     fwrite(STDERR, "[init-schema] Falha ao conectar no database {$name}: {$e->getMessage()}\n");
-    exit(1);
+    exit(0);
 }
 
 $sql = (string) file_get_contents($schemaFile);
