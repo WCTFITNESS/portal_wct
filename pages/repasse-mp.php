@@ -395,6 +395,26 @@ if (isset($_GET['job'])) {
         return d.innerHTML;
     }
 
+    /** Dispara download sem sair da pagina (servidor envia Content-Disposition: attachment). */
+    function triggerRepasseMpAutoDownload(url) {
+        if (!url) return;
+        window.setTimeout(function () {
+            try {
+                var ifr = document.createElement('iframe');
+                ifr.setAttribute('aria-hidden', 'true');
+                ifr.title = '';
+                ifr.style.cssText = 'position:absolute;width:1px;height:1px;left:-100px;top:-100px;border:0;visibility:hidden';
+                ifr.src = url;
+                document.body.appendChild(ifr);
+                window.setTimeout(function () {
+                    try {
+                        document.body.removeChild(ifr);
+                    } catch (e2) {}
+                }, 180000);
+            } catch (e) {}
+        }, 150);
+    }
+
     function showRepasseAsyncError(msg) {
         var block = document.getElementById('repasse-mp-summary-block');
         if (!block) return;
@@ -407,8 +427,9 @@ if (isset($_GET['job'])) {
         if (!block || !result) return;
         var fn = result.file_name || '';
         var q = 'page=repasse-mp&download=' + encodeURIComponent(fn) + '&job=' + encodeURIComponent(asyncJobId);
+        var downloadUrl = asyncBaseUrl + '/index.php?' + q;
         block.style.display = 'block';
-        block.innerHTML = '<p class="msg ok">Arquivo processado com sucesso. Baixe a planilha com a coluna order.</p>'
+        block.innerHTML = '<p class="msg ok">Arquivo gerado. O download deve comecar em instantes. Se o navegador bloquear, use o link abaixo.</p>'
             + '<p>Processadas: <strong>' + escHtml(String(result.processed)) + '</strong> | '
             + 'Operacoes unicas (coluna D): <strong>' + escHtml(String(result.unique_operations)) + '</strong> | '
             + 'Coluna detectada: <strong>' + escHtml(String((parseInt(result.operation_column_index, 10) || 0) + 1)) + '</strong> | '
@@ -417,7 +438,9 @@ if (isset($_GET['job'])) {
             + 'Nao encontradas: <strong>' + escHtml(String(result.not_found)) + '</strong> | '
             + 'Erros: <strong>' + escHtml(String(result.errors)) + '</strong> | '
             + 'Chamadas API: <strong>' + escHtml(String(result.api_calls)) + '</strong></p>'
-            + '<p><a href="' + escHtml(asyncBaseUrl + '/index.php?' + q) + '">Baixar planilha com coluna order</a></p>';
+            + '<p><a href="' + escHtml(downloadUrl) + '" download>Baixar novamente</a></p>';
+
+        triggerRepasseMpAutoDownload(downloadUrl);
 
         var prevCard = document.getElementById('repasse-mp-preview-card');
         var tbody = document.getElementById('repasse-mp-preview-tbody');
