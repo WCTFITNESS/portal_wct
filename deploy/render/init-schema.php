@@ -21,9 +21,10 @@ $pass = (string) $db['pass'];
 
 fwrite(STDOUT, "[init-schema] driver={$driver} host={$host} port={$port} db={$name} user={$user}\n");
 
-if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
-    fwrite(STDERR, "[init-schema] Nome de banco invalido para criacao automatica.\n");
-    exit(1);
+// Nao use exit(1): com set -e no entrypoint o Apache nao sobe -> 502 em todo o site.
+if (!preg_match('/^[a-zA-Z0-9_.-]+$/', $name)) {
+    fwrite(STDERR, "[init-schema] Nome de banco com caracteres inesperados; pulando migracao automatica.\n");
+    exit(0);
 }
 
 $schemaFileRaw = getenv('PORTAL_SCHEMA_FILE');
@@ -34,8 +35,8 @@ $schemaFile = is_string($schemaFileRaw) && trim($schemaFileRaw) !== ''
         : '/var/www/html/portal_wct/database.sql');
 
 if (!is_file($schemaFile)) {
-    fwrite(STDERR, "[init-schema] Arquivo de schema nao encontrado: {$schemaFile}\n");
-    exit(1);
+    fwrite(STDERR, "[init-schema] Arquivo de schema nao encontrado (pulando): {$schemaFile}\n");
+    exit(0);
 }
 
 if ($driver === 'mysql') {
@@ -43,6 +44,8 @@ if ($driver === 'mysql') {
         $adminDsn = sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $host, $port);
         $adminPdo = new \PDO($adminDsn, $user, $pass, [
             \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_TIMEOUT => 15,
+            \PDO::MYSQL_ATTR_CONNECT_TIMEOUT => 10,
         ]);
         $adminPdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
     } catch (\PDOException $e) {
@@ -57,6 +60,7 @@ try {
         : sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, $port, $name);
     $pdo = new \PDO($dsn, $user, $pass, [
         \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+        \PDO::ATTR_TIMEOUT => 15,
     ]);
 } catch (\PDOException $e) {
     fwrite(STDERR, "[init-schema] Falha ao conectar no database {$name}: {$e->getMessage()}\n");
@@ -73,14 +77,22 @@ if ($driver === 'mysql') {
 
 $statements = preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: [];
 $executed = 0;
+$skipped = 0;
 
 foreach ($statements as $statement) {
     $stmt = trim($statement);
     if ($stmt === '' || str_starts_with($stmt, '--')) {
         continue;
     }
-    $pdo->exec($stmt);
-    $executed++;
+    try {
+        $pdo->exec($stmt);
+        $executed++;
+    } catch (\PDOException $e) {
+        $skipped++;
+        $code = $e->getCode();
+        $msg = $e->getMessage();
+        fwrite(STDERR, "[init-schema] Stmt ignorado ({$code}): " . str_replace(["\r", "\n"], ' ', substr($msg, 0, 200)) . "\n");
+    }
 }
 
-fwrite(STDOUT, "[init-schema] Schema aplicado com sucesso ({$executed} comandos).\n");
+fwrite(STDOUT, "[init-schema] Concluido: {$executed} OK, {$skipped} ignorados/erro.\n");

@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+# Sem set -e: falhas pontuais no init nao devem impedir apache2-foreground (evita portal inteiro em 502).
 # Render envia PORT (ex.: 10000); VirtualHost deve usar a mesma porta que Listen.
 
 LISTEN_PORT="${PORT:-80}"
@@ -17,7 +17,8 @@ if [ -f "$SITE" ]; then
 fi
 
 # Grava DB a partir das env vars do Docker (CLI vê sempre; evita PDO com host=mysql por mod_php).
-php /var/www/html/portal_wct/deploy/render/bake-db-runtime.php
-php /var/www/html/portal_wct/deploy/render/init-schema.php
+php /var/www/html/portal_wct/deploy/render/bake-db-runtime.php || echo "[docker-entrypoint] bake-db-runtime avisou falha (ver logs)." >&2
+# Nunca impedir Apache: falha aqui antes gerava 502 em todo o site (set -e + exit!=0 / excecao PHP).
+php /var/www/html/portal_wct/deploy/render/init-schema.php || echo "[docker-entrypoint] init-schema encerrou com erro (Apache sobe igual)." >&2
 
 exec apache2-foreground

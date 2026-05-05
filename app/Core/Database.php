@@ -16,10 +16,16 @@ class Database
         $this->driver = strtolower((string) ($dbConfig['driver'] ?? 'mysql'));
         $dsn = $this->buildDsn($dbConfig);
 
-        $this->pdo = new PDO($dsn, $dbConfig['user'], $dbConfig['pass'], [
+        $options = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]);
+            PDO::ATTR_TIMEOUT => 20,
+        ];
+        if ($this->driver === 'mysql' && extension_loaded('pdo_mysql')) {
+            $options[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 15;
+        }
+
+        $this->pdo = new PDO($dsn, $dbConfig['user'], $dbConfig['pass'], $options);
     }
 
     private function buildDsn(array $dbConfig): string

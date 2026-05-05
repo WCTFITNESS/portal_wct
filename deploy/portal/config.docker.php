@@ -19,6 +19,10 @@ $db = is_readable($dbFile)
 
 $baseRaw = getenv('PORTAL_BASE_URL');
 $baseUrl = $baseRaw === false ? '/portal_wct' : rtrim((string) $baseRaw, '/');
+// PORTAL_BASE_URL=/ vira '' apos rtrim; manter '/' evita layouts estranhos.
+if ($baseUrl === '') {
+    $baseUrl = '/';
+}
 
 $trackingRaw = getenv('TRACKING_PUBLIC_URL');
 $trackingUrl = $trackingRaw !== false && $trackingRaw !== ''
