@@ -19,6 +19,8 @@ $name = (string) $db['name'];
 $user = (string) $db['user'];
 $pass = (string) $db['pass'];
 
+fwrite(STDOUT, "[init-schema] driver={$driver} host={$host} port={$port} db={$name} user={$user}\n");
+
 if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
     fwrite(STDERR, "[init-schema] Nome de banco invalido para criacao automatica.\n");
     exit(1);
