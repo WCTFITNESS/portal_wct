@@ -34,6 +34,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $feedback = 'Refresh token executado com sucesso.';
         }
 
+        if (($_POST['form_type'] ?? '') === 'mp_token') {
+            $app['mercadopagoSettingsRepository']->saveAccessToken(trim((string) ($_POST['mp_access_token'] ?? '')));
+            $feedback = 'Access token do Mercado Pago salvo.';
+        }
+
         if (($_POST['form_type'] ?? '') === 'check-seller-id') {
             $accessToken = $app['tokenService']->getValidAccessToken();
             $result = $app['mercadoLivreClient']->get('/users/me', $accessToken);
@@ -68,10 +73,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $apiConfig = $app['settingsRepository']->getApiConfig();
 $token = $app['tokenRepository']->getLatestToken();
+$mpRow = $app['mercadopagoSettingsRepository']->getSettings();
 $requestLogs = $app['requestLogRepository']->listRecent(10);
 ?>
 <section class="card">
-    <h1>Configuração da API Mercado Livre</h1>
+    <h1>Configuração Repasse</h1>
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>
@@ -130,6 +136,17 @@ $requestLogs = $app['requestLogRepository']->listRecent(10);
     <?php if ($detectedSellerId): ?>
         <p>ID detectado no token atual: <strong><?= htmlspecialchars($detectedSellerId) ?></strong></p>
     <?php endif; ?>
+</section>
+
+<section class="card">
+    <h1>Token Mercado Pago (Repasse MP)</h1>
+    <p>Token usado nas rotinas da tela <strong>Repasse MP</strong>.</p>
+    <form method="post">
+        <input type="hidden" name="form_type" value="mp_token">
+        <label>Access Token (Mercado Pago)</label>
+        <textarea name="mp_access_token" rows="3" placeholder="APP_USR-..."><?= htmlspecialchars((string) ($mpRow['access_token'] ?? '')) ?></textarea>
+        <button type="submit">Salvar token MP</button>
+    </form>
 </section>
 
 <section class="card">

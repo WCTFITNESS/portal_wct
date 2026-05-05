@@ -15,7 +15,7 @@ if (!in_array($page, $allowedPages, true)) {
 $menuSections = [
     'Mercado Livre' => [
         ['id' => 'dashboard', 'label' => 'Dashboard'],
-        ['id' => 'api-config', 'label' => 'Configurar API'],
+        ['id' => 'api-config', 'label' => 'Configuração Repasse'],
         ['id' => 'orders', 'label' => 'Pedidos'],
         ['id' => 'message-template', 'label' => 'Mensageria ML'],
     ],

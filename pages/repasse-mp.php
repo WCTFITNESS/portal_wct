@@ -24,11 +24,6 @@ $salesLookupPage = max(1, (int) ($_POST['sales_lookup_page'] ?? 1));
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        if (($_POST['form_type'] ?? '') === 'mp_token') {
-            $mpSettingsRepo->saveAccessToken(trim((string) ($_POST['mp_access_token'] ?? '')));
-            $feedback = 'Access token do Mercado Pago salvo.';
-        }
-
         if (($_POST['form_type'] ?? '') === 'mp_upload') {
             $result = $repasseMpService->processUploadedFile($_FILES['repasse_mp_file'] ?? []);
             $summary = $result;
@@ -72,14 +67,10 @@ $tokenPreview = $mpRow && trim((string) ($mpRow['access_token'] ?? '')) !== ''
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>
 
-    <p style="margin-top:8px;font-size:.9rem;color:#555;"><?= htmlspecialchars($tokenPreview) ?></p>
-
-    <form method="post" style="margin-top:16px;">
-        <input type="hidden" name="form_type" value="mp_token">
-        <label>Access token (Mercado Pago)</label>
-        <textarea name="mp_access_token" rows="3" placeholder="APP_USR-..."><?= htmlspecialchars((string) ($mpRow['access_token'] ?? '')) ?></textarea>
-        <button type="submit">Salvar token</button>
-    </form>
+    <p style="margin-top:8px;font-size:.9rem;color:#555;">
+        <?= htmlspecialchars($tokenPreview) ?>
+        Configure/edite em <strong>Configuração Repasse</strong>.
+    </p>
 </section>
 
 <section class="card">
