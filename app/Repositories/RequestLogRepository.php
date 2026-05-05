@@ -57,8 +57,18 @@ class RequestLogRepository
             return;
         }
 
-        $this->pdo->exec(
-            'CREATE TABLE IF NOT EXISTS request_logs (
+        $sql = $this->isPgsql()
+            ? 'CREATE TABLE IF NOT EXISTS request_logs (
+                id BIGSERIAL PRIMARY KEY,
+                method VARCHAR(10) NOT NULL,
+                path VARCHAR(255) NOT NULL,
+                http_status INT DEFAULT NULL,
+                request_payload TEXT DEFAULT NULL,
+                response_body TEXT DEFAULT NULL,
+                error_message TEXT DEFAULT NULL,
+                created_at TIMESTAMP NOT NULL
+            )'
+            : 'CREATE TABLE IF NOT EXISTS request_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 method VARCHAR(10) NOT NULL,
                 path VARCHAR(255) NOT NULL,
@@ -67,9 +77,14 @@ class RequestLogRepository
                 response_body TEXT DEFAULT NULL,
                 error_message TEXT DEFAULT NULL,
                 created_at DATETIME NOT NULL
-            )'
-        );
+            )';
+        $this->pdo->exec($sql);
 
         $this->tableChecked = true;
+    }
+
+    private function isPgsql(): bool
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
     }
 }

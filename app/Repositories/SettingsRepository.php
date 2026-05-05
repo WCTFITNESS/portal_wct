@@ -69,7 +69,11 @@ class SettingsRepository
             return;
         }
 
-        $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN oauth_code VARCHAR(255) DEFAULT NULL AFTER seller_id');
+        if ($this->isPgsql()) {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN oauth_code VARCHAR(255) DEFAULT NULL');
+        } else {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN oauth_code VARCHAR(255) DEFAULT NULL AFTER seller_id');
+        }
         $this->hasOauthCodeColumn = true;
     }
 
@@ -79,15 +83,29 @@ class SettingsRepository
             return $this->hasOauthCodeColumn;
         }
 
-        $stmt = $this->pdo->query(
-            "SELECT COUNT(*) FROM information_schema.columns
-             WHERE table_schema = DATABASE()
-               AND table_name = 'api_settings'
-               AND column_name = 'oauth_code'"
-        );
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'oauth_code'"
+            );
+        } else {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'oauth_code'"
+            );
+        }
 
         $this->hasOauthCodeColumn = ((int) $stmt->fetchColumn()) > 0;
 
         return $this->hasOauthCodeColumn;
+    }
+
+    private function isPgsql(): bool
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
     }
 }

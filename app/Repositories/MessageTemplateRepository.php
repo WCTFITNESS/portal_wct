@@ -14,7 +14,8 @@ class MessageTemplateRepository
 
     public function getActiveTemplate(): ?array
     {
-        $stmt = $this->pdo->query('SELECT * FROM message_templates WHERE is_active = 1 ORDER BY id DESC LIMIT 1');
+        $condition = $this->isPgsql() ? 'is_active = TRUE' : 'is_active = 1';
+        $stmt = $this->pdo->query("SELECT * FROM message_templates WHERE {$condition} ORDER BY id DESC LIMIT 1");
         $template = $stmt->fetch();
 
         return $template ?: null;
@@ -22,15 +23,22 @@ class MessageTemplateRepository
 
     public function saveTemplate(string $title, string $body): void
     {
-        $this->pdo->exec('UPDATE message_templates SET is_active = 0');
+        $inactiveValue = $this->isPgsql() ? 'FALSE' : '0';
+        $activeValue = $this->isPgsql() ? 'TRUE' : '1';
+        $this->pdo->exec("UPDATE message_templates SET is_active = {$inactiveValue}");
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO message_templates (title, body, is_active, created_at, updated_at)
-             VALUES (:title, :body, 1, NOW(), NOW())'
+             VALUES (:title, :body, ' . $activeValue . ', NOW(), NOW())'
         );
         $stmt->execute([
             ':title' => $title,
             ':body' => $body,
         ]);
+    }
+
+    private function isPgsql(): bool
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
     }
 }

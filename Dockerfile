@@ -4,7 +4,7 @@
 
 FROM php:8.2-apache
 
-RUN docker-php-ext-install pdo_mysql mysqli \
+RUN docker-php-ext-install pdo_mysql mysqli pdo_pgsql pgsql \
     && a2enmod rewrite headers env
 
 COPY . /var/www/html/portal_wct/

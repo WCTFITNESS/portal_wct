@@ -62,15 +62,26 @@ class MercadoPagoSettingsRepository
             return;
         }
 
-        $this->pdo->exec(
-            'CREATE TABLE IF NOT EXISTS mercadopago_settings (
+        $sql = $this->isPgsql()
+            ? 'CREATE TABLE IF NOT EXISTS mercadopago_settings (
+                id BIGSERIAL PRIMARY KEY,
+                access_token TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )'
+            : 'CREATE TABLE IF NOT EXISTS mercadopago_settings (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 access_token TEXT NOT NULL,
                 created_at DATETIME NOT NULL,
                 updated_at DATETIME NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
-        );
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+        $this->pdo->exec($sql);
 
         $this->tableReady = true;
+    }
+
+    private function isPgsql(): bool
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
     }
 }

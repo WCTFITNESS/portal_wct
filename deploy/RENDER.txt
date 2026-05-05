@@ -16,19 +16,19 @@
    PORTAL_BASE_URL=/
    PORTAL_TZ=America/Sao_Paulo
 
-   MySQL (OBRIGATORIO no Render — sem isso o host cai no padrao "mysql" do Docker
-   local e da erro: getaddrinfo for mysql failed / Name or service not known):
+   Banco (PostgreSQL recomendado no Render):
 
-   Opcao A — variaveis separadas:
-   PORTAL_DB_HOST=<hostname real ex. xxx.railway.app ou AWS RDS>
-   PORTAL_DB_PORT=3306
+   Opcao A — URL unica (recomendado):
+   PORTAL_DATABASE_URL=postgresql://usuario:senha@HOST:5432/nome_do_banco
+   (tambem aceita mysql://... para ambientes legados)
+
+   Opcao B — variaveis separadas:
+   PORTAL_DB_DRIVER=pgsql
+   PORTAL_DB_HOST=<hostname real do postgres>
+   PORTAL_DB_PORT=5432
    PORTAL_DB_NAME=<nome do banco>
    PORTAL_DB_USER=<usuario>
    PORTAL_DB_PASS=<senha>
-
-   Opcao B — uma URL so (substitui host/porta/nome/usuario/senha):
-   PORTAL_DATABASE_URL=mysql://usuario:senha@HOST:3306/nome_do_banco
-   (use rawurlencode na senha se tiver caracteres especiais, ou defina PORTAL_DB_*.)
 
    TRACKING_PUBLIC_URL=https://SEU-TRACKING.onrender.com/admin/dashboard
 
@@ -36,12 +36,13 @@
    (só mudar Listen sem o VirtualHost costuma dar 403 Forbidden no Render).
 
    Se aparecer erro "getaddrinfo for mysql failed": o Portal ainda esta usando host
-   padrao "mysql". Defina PORTAL_DB_HOST ou PORTAL_DATABASE_URL no painel; o
+   padrao "mysql". Defina PORTAL_DATABASE_URL (ou PORTAL_DB_* + PORTAL_DB_DRIVER); o
    docker-entrypoint gera config/db-runtime.php pelo PHP CLI (que sempre le as vars).
 
-6) MySQL: o Portal usa PDO MySQL. O Postgres "de graca" do Render nao substitui.
-   Opcoes: PlanetScale, Railway MySQL, Aiven, AWS RDS, ou MySQL em outro VPS.
-   Importe database.sql nesse MySQL (estrutura + dados iniciais).
+6) Schema automatico:
+   - Para PostgreSQL, o startup aplica database.pgsql.sql automaticamente.
+   - Para MySQL, o startup aplica database.sql automaticamente.
+   Controle por PORTAL_AUTO_MIGRATE=1 (padrao) e PORTAL_SCHEMA_FILE (opcional).
 
 7) Health Check Path sugerido: /index.php?page=dashboard
 

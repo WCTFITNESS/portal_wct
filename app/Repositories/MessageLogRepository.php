@@ -102,8 +102,18 @@ class MessageLogRepository
             return;
         }
 
-        $this->pdo->exec(
-            'CREATE TABLE IF NOT EXISTS manual_message_logs (
+        $sql = $this->isPgsql()
+            ? 'CREATE TABLE IF NOT EXISTS manual_message_logs (
+                id BIGSERIAL PRIMARY KEY,
+                order_id VARCHAR(80) NOT NULL,
+                sender_id VARCHAR(80) NOT NULL,
+                message_body TEXT NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                api_response TEXT DEFAULT NULL,
+                sent_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL
+            )'
+            : 'CREATE TABLE IF NOT EXISTS manual_message_logs (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 order_id VARCHAR(80) NOT NULL,
                 sender_id VARCHAR(80) NOT NULL,
@@ -112,9 +122,14 @@ class MessageLogRepository
                 api_response TEXT DEFAULT NULL,
                 sent_at DATETIME NOT NULL,
                 created_at DATETIME NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
-        );
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+        $this->pdo->exec($sql);
 
         $this->manualTableChecked = true;
+    }
+
+    private function isPgsql(): bool
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
     }
 }

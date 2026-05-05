@@ -1,8 +1,8 @@
 # Blueprint Render — ajuste o nome do servico e crie o Web Service a partir do repositorio.
 # Documentacao: https://render.com/docs/blueprint-spec
 #
-# MySQL: o Portal usa MySQL (nao Postgres). Crie um banco MySQL externo (PlanetScale, Railway,
-# Aiven, etc.) e preencha PORTAL_DB_* no painel ou abaixo.
+# Banco recomendado: PostgreSQL (nativo do Render/Neon/Supabase).
+# Tambem aceita MySQL via PORTAL_DATABASE_URL com schema mysql://...
 
 services:
   - type: web
@@ -17,10 +17,13 @@ services:
         value: /
       - key: PORTAL_TZ
         value: America/Sao_Paulo
+      - key: PORTAL_DB_DRIVER
+        value: pgsql
+        sync: false
       - key: PORTAL_DB_HOST
         sync: false
       - key: PORTAL_DB_PORT
-        value: "3306"
+        value: "5432"
         sync: false
       - key: PORTAL_DB_NAME
         sync: false
@@ -28,7 +31,7 @@ services:
         sync: false
       - key: PORTAL_DB_PASS
         sync: false
-      # Alternativa: uma URL mysql://user:pass@host:3306/db (defina no painel se preferir)
+      # Alternativa recomendada: URL unica (postgresql://user:pass@host:5432/db)
       - key: PORTAL_DATABASE_URL
         sync: false
       - key: TRACKING_PUBLIC_URL
