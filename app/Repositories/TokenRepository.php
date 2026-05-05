@@ -8,6 +8,8 @@ use PDO;
 
 class TokenRepository
 {
+    private ?bool $scopeColumnIsWide = null;
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -22,6 +24,7 @@ class TokenRepository
 
     public function saveToken(array $data): void
     {
+        $this->ensureScopeColumnIsWide();
         $existing = $this->getLatestToken();
 
         if ($existing) {
@@ -62,5 +65,43 @@ class TokenRepository
             ':token_type' => $data['token_type'] ?? 'Bearer',
             ':scope' => $data['scope'] ?? null,
         ]);
+    }
+
+    private function ensureScopeColumnIsWide(): void
+    {
+        if ($this->scopeColumnIsWide === true) {
+            return;
+        }
+
+        $driver = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'pgsql') {
+            $stmt = $this->pdo->query(
+                "SELECT data_type
+                 FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'oauth_tokens'
+                   AND column_name = 'scope'
+                 LIMIT 1"
+            );
+            $dataType = strtolower((string) $stmt->fetchColumn());
+            if ($dataType !== '' && $dataType !== 'text') {
+                $this->pdo->exec('ALTER TABLE oauth_tokens ALTER COLUMN scope TYPE TEXT');
+            }
+        } else {
+            $stmt = $this->pdo->query(
+                "SELECT data_type
+                 FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'oauth_tokens'
+                   AND column_name = 'scope'
+                 LIMIT 1"
+            );
+            $dataType = strtolower((string) $stmt->fetchColumn());
+            if ($dataType !== '' && $dataType !== 'text') {
+                $this->pdo->exec('ALTER TABLE oauth_tokens MODIFY scope TEXT NULL');
+            }
+        }
+
+        $this->scopeColumnIsWide = true;
     }
 }

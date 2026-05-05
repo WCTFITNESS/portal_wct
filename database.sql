@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
     access_token TEXT NOT NULL,
     refresh_token TEXT NOT NULL,
     token_type VARCHAR(30) DEFAULT 'Bearer',
-    scope VARCHAR(255) DEFAULT NULL,
+    scope TEXT DEFAULT NULL,
     expires_in INT NOT NULL,
     expires_at DATETIME NOT NULL,
     created_at DATETIME NOT NULL,
