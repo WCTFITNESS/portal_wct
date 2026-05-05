@@ -77,7 +77,7 @@ $mpRow = $app['mercadopagoSettingsRepository']->getSettings();
 $requestLogs = $app['requestLogRepository']->listRecent(10);
 ?>
 <section class="card">
-    <h1>Configuração Repasse</h1>
+    <h1>Configuração API</h1>
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>

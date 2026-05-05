@@ -73,7 +73,7 @@ if (isset($_GET['job'])) {
 
     <p style="margin-top:8px;font-size:.9rem;color:#555;">
         <?= htmlspecialchars($tokenPreview) ?>
-        Configure/edite em <strong>Configuração Repasse</strong>.
+        Configure/edite em <strong>Configuração API</strong>.
     </p>
 </section>
 

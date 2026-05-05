@@ -40,7 +40,7 @@ if ($page === 'repasse-mp' && isset($_GET['repasse_action']) && $_GET['repasse_a
 $menuSections = [
     'Mercado Livre' => [
         ['id' => 'dashboard', 'label' => 'Dashboard'],
-        ['id' => 'api-config', 'label' => 'Configuração Repasse'],
+        ['id' => 'api-config', 'label' => 'Configuração API'],
         ['id' => 'orders', 'label' => 'Pedidos'],
         ['id' => 'message-template', 'label' => 'Mensageria ML'],
     ],
