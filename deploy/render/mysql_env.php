@@ -54,7 +54,8 @@ function portal_wct_db_from_environment(): array
     $fromPortal = $portalUrl !== '' ? portal_wct_parse_database_url($portalUrl) : null;
     $fromData = $dataUrl !== '' ? portal_wct_parse_database_url($dataUrl) : null;
 
-    if ($onRender && $fromPortal !== null && $fromData !== null
+    // Migracao comum: PORTAL_DATABASE_URL antiga (mysql) + DATABASE_URL do Postgres no Render.
+    if ($fromPortal !== null && $fromData !== null
         && $fromPortal['driver'] === 'mysql' && $fromData['driver'] === 'pgsql') {
         return $fromData;
     }

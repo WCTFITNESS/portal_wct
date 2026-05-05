@@ -25,9 +25,9 @@
    No Render, ao vincular um Postgres ao Web Service, o painel pode injetar
    DATABASE_URL=postgresql://... — o Portal le essa variavel automaticamente.
 
-   Se ainda existir PORTAL_DATABASE_URL antiga em mysql:// e voce criou Postgres
-   nativo no Render, deixe as duas apenas temporariamente: o app prefere Postgres
-   nesse caso; ou apague a URL mysql manualmente para evitar confusao.
+   Se ainda existir PORTAL_DATABASE_URL antiga em mysql:// e o servico tiver
+   DATABASE_URL do Postgres (Render injeta ao vincular o banco), o app prefere
+   Postgres. O ideal e apagar URL mysql e credenciais Railway do ambiente.
 
    Opcao B — variaveis separadas:
    PORTAL_DB_DRIVER=pgsql
