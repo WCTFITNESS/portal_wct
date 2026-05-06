@@ -381,13 +381,16 @@ class RepasseMpService
         }
 
         foreach ($rows as $index => $row) {
-            if (!is_array($row) || $index === 0) {
-                if (is_array($row) && $index === 0) {
-                    $header = $row;
-                    $headerOut = $header;
-                    $headerOut[] = 'order';
-                    $outRows[] = $headerOut;
-                }
+            if (!is_array($row)) {
+                continue;
+            }
+            // Alguns parsers podem retornar linhas com indice inicial != 0.
+            // Usa a primeira linha array valida como cabecalho.
+            if ($header === null) {
+                $header = $row;
+                $headerOut = $header;
+                $headerOut[] = 'order';
+                $outRows[] = $headerOut;
                 continue;
             }
             $lineNumber = $index + 1;
