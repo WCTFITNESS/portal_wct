@@ -34,6 +34,39 @@ try {
 } catch (Throwable $e) {
     $lexosError = $e->getMessage();
 }
+
+$channelsChartLabels = [];
+$channelsChartValues = [];
+foreach ($channels as $row) {
+    $channelsChartLabels[] = (string) ($row[0] ?? '');
+    $channelsChartValues[] = (float) ($row[1] ?? 0);
+}
+
+$topProducts = array_slice($products, 0, 10);
+$productsChartLabels = [];
+$productsChartValues = [];
+foreach ($topProducts as $p) {
+    $productsChartLabels[] = (string) ($p['Sku'] ?? '');
+    $productsChartValues[] = (float) ($p['TotalVendidoItem'] ?? 0);
+}
+
+$skuDailyMap = [];
+if (is_array($skuData) && is_array($skuData['sales']['result'] ?? null)) {
+    foreach ($skuData['sales']['result'] as $sale) {
+        if (!is_array($sale)) {
+            continue;
+        }
+        $dateRaw = (string) ($sale['DataAprovacao'] ?? '');
+        $dateKey = $dateRaw !== '' ? substr($dateRaw, 0, 10) : '';
+        if ($dateKey === '') {
+            continue;
+        }
+        $skuDailyMap[$dateKey] = ($skuDailyMap[$dateKey] ?? 0) + (float) ($sale['Valor'] ?? 0);
+    }
+    ksort($skuDailyMap);
+}
+$skuChartLabels = array_keys($skuDailyMap);
+$skuChartValues = array_values($skuDailyMap);
 ?>
 <style>
     .lexos-tabs { display:flex; gap:6px; border-bottom:1px solid #e5e7eb; margin-bottom:14px; }
@@ -48,6 +81,8 @@ try {
     .lexos-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:10px 0 14px 0; }
     .lexos-metric { border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#f8fafc; }
     .lexos-metric strong { display:block; font-size:1.05rem; margin-top:4px; }
+    .lexos-chart-wrap { margin-top:12px; border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#fff; }
+    .lexos-chart-wrap canvas { width:100%; max-height:320px; }
 </style>
 
 <section class="card">
@@ -103,6 +138,11 @@ try {
             <?php endforeach; ?>
             </tbody>
         </table>
+        <?php if ($channelsChartLabels): ?>
+            <div class="lexos-chart-wrap">
+                <canvas id="lexos-channel-chart"></canvas>
+            </div>
+        <?php endif; ?>
     </div>
 
     <div class="lexos-tab-content<?= $activeTab === 'comparison' ? ' active' : '' ?>" data-content="comparison">
@@ -143,6 +183,11 @@ try {
             <?php endforeach; ?>
             </tbody>
         </table>
+        <?php if ($productsChartLabels): ?>
+            <div class="lexos-chart-wrap">
+                <canvas id="lexos-products-chart"></canvas>
+            </div>
+        <?php endif; ?>
     </div>
 
     <div class="lexos-tab-content<?= $activeTab === 'sku-analysis' ? ' active' : '' ?>" data-content="sku-analysis">
@@ -161,43 +206,18 @@ try {
             <p>SKU consultado: <strong><?= htmlspecialchars($sku) ?></strong></p>
             <p>Registros de venda: <strong><?= htmlspecialchars((string) count($skuData['sales'] ?? [])) ?></strong></p>
             <p>Registros de estoque: <strong><?= htmlspecialchars((string) count($skuData['stock'] ?? [])) ?></strong></p>
+            <?php if ($skuChartLabels): ?>
+                <div class="lexos-chart-wrap">
+                    <canvas id="lexos-sku-chart"></canvas>
+                </div>
+            <?php endif; ?>
         <?php else: ?>
             <p>Informe um SKU para visualizar os dados.</p>
         <?php endif; ?>
     </div>
 </section>
 
-<section class="card">
-    <h1>Últimos envios</h1>
-    <table>
-        <thead>
-        <tr>
-            <th>Pedido</th>
-            <th>Cliente</th>
-            <th>Status</th>
-            <th>Data</th>
-        </tr>
-        </thead>
-        <tbody>
-        <?php if (!$logs): ?>
-            <tr><td colspan="4">Nenhum envio registrado ainda.</td></tr>
-        <?php endif; ?>
-        <?php foreach ($logs as $log): ?>
-            <tr>
-                <td><?= htmlspecialchars((string) $log['order_id']) ?></td>
-                <td><?= htmlspecialchars((string) $log['receiver_id']) ?></td>
-                <td>
-                    <span class="badge <?= $log['status'] === 'sent' ? 'sent' : 'error' ?>">
-                        <?= htmlspecialchars((string) $log['status']) ?>
-                    </span>
-                </td>
-                <td><?= htmlspecialchars((string) $log['sent_at']) ?></td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
-</section>
-
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 (function () {
     var tabs = document.querySelectorAll('#lexos-tabs .lexos-tab-btn');
@@ -214,5 +234,40 @@ try {
             history.replaceState({}, '', url.toString());
         });
     });
+
+    if (typeof Chart !== 'undefined') {
+        var channelLabels = <?= json_encode($channelsChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var channelValues = <?= json_encode($channelsChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var chCanvas = document.getElementById('lexos-channel-chart');
+        if (chCanvas && channelLabels.length) {
+            new Chart(chCanvas.getContext('2d'), {
+                type: 'doughnut',
+                data: { labels: channelLabels, datasets: [{ data: channelValues }] },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        var prodLabels = <?= json_encode($productsChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var prodValues = <?= json_encode($productsChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var pCanvas = document.getElementById('lexos-products-chart');
+        if (pCanvas && prodLabels.length) {
+            new Chart(pCanvas.getContext('2d'), {
+                type: 'bar',
+                data: { labels: prodLabels, datasets: [{ label: 'Faturamento', data: prodValues, backgroundColor: 'rgba(37,99,235,.55)' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
+
+        var skuLabels = <?= json_encode($skuChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var skuValues = <?= json_encode($skuChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var sCanvas = document.getElementById('lexos-sku-chart');
+        if (sCanvas && skuLabels.length) {
+            new Chart(sCanvas.getContext('2d'), {
+                type: 'line',
+                data: { labels: skuLabels, datasets: [{ label: 'Faturamento diário', data: skuValues, borderColor: '#059669', backgroundColor: 'rgba(5,150,105,.15)', fill: true, tension: .3 }] },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+    }
 })();
 </script>
