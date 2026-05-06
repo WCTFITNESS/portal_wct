@@ -184,8 +184,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
     .lexos-chart-wrap { margin-top:12px; border:1px solid #e5e7eb; border-radius:8px; padding:18px 16px 20px; background:#fff; }
     .lexos-donut-center { display:flex; flex-direction:column; align-items:center; }
     .lexos-donut-visual { position:relative; width:min(400px, 94vw); height:min(400px, 94vw); margin:0 auto; flex-shrink:0; }
-    .lexos-donut-visual svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
-    .lexos-donut-visual canvas { position:absolute; inset:0; display:block; width:100% !important; height:100% !important; max-height:none !important; }
+    .lexos-donut-visual canvas { display:block; width:100% !important; height:100% !important; max-height:none !important; }
     .lexos-pie-list { width:100%; max-width:520px; margin:16px 0 0 0; padding:0; list-style:none; }
     .lexos-pie-list li { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:.8rem; color:#334155; margin:4px 0; }
     .lexos-dot { width:10px; height:10px; border-radius:999px; display:inline-block; margin-right:6px; vertical-align:middle; }
@@ -265,44 +264,10 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
             <?php
                 $svgPalette = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0891b2', '#ca8a04', '#4f46e5'];
                 $channelsTotalValue = array_sum($channelsChartValues);
-                $pieR = 74.0;
-                $pieCx = 105.0;
-                $pieCy = 105.0;
-                $pieCirc = 2 * pi() * $pieR;
-                $pieOffset = 0.0;
             ?>
             <div class="lexos-chart-wrap">
                 <div class="lexos-donut-center">
                     <div class="lexos-donut-visual">
-                        <svg width="210" height="210" viewBox="0 0 210 210" role="img" aria-hidden="true">
-                            <circle cx="<?= $pieCx ?>" cy="<?= $pieCy ?>" r="<?= $pieR ?>" stroke="#e2e8f0" stroke-width="28" fill="none"></circle>
-                            <?php foreach ($channels as $i => $row): ?>
-                                <?php
-                                    $val = (float) ($row[1] ?? 0);
-                                    $ratio = $channelsTotalValue > 0 ? $val / $channelsTotalValue : 0.0;
-                                    $dash = $ratio * $pieCirc;
-                                    $fill = $svgPalette[$i % count($svgPalette)];
-                                ?>
-                                <?php if ($dash > 0): ?>
-                                    <circle
-                                        cx="<?= $pieCx ?>"
-                                        cy="<?= $pieCy ?>"
-                                        r="<?= $pieR ?>"
-                                        stroke="<?= htmlspecialchars($fill, ENT_QUOTES, 'UTF-8') ?>"
-                                        stroke-width="28"
-                                        fill="none"
-                                        stroke-linecap="butt"
-                                        stroke-dasharray="<?= $dash ?> <?= $pieCirc ?>"
-                                        stroke-dashoffset="<?= -$pieOffset ?>"
-                                        transform="rotate(-90 <?= $pieCx ?> <?= $pieCy ?>)"
-                                    ></circle>
-                                    <?php $pieOffset += $dash; ?>
-                                <?php endif; ?>
-                            <?php endforeach; ?>
-                            <circle cx="<?= $pieCx ?>" cy="<?= $pieCy ?>" r="45" fill="#ffffff"></circle>
-                            <text x="<?= $pieCx ?>" y="<?= $pieCy - 2 ?>" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#475569">Total</text>
-                            <text x="<?= $pieCx ?>" y="<?= $pieCy + 16 ?>" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#0f172a">R$ <?= htmlspecialchars(number_format((float) $channelsTotalValue, 2, ',', '.'), ENT_QUOTES, 'UTF-8') ?></text>
-                        </svg>
                         <canvas id="lexos-channel-chart" aria-label="Faturamento por canal"></canvas>
                     </div>
                     <ul class="lexos-pie-list">
@@ -526,13 +491,26 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
                     datasets: [{
                         data: channelValues,
                         backgroundColor: ['#2563eb','#7c3aed','#db2777','#ea580c','#16a34a','#0891b2','#ca8a04','#4f46e5','#0d9488','#be123c'],
-                        borderWidth: 1
+                        borderWidth: 1,
+                        hoverOffset: 4
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { position: 'bottom' } }
+                    cutout: '58%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) {
+                                    var total = ctx.dataset.data.reduce(function (a, b) { return a + b; }, 0);
+                                    var pct = total > 0 ? (100 * ctx.raw / total).toFixed(1).replace('.', ',') : '0';
+                                    return ctx.label + ': ' + pct + '%';
+                                }
+                            }
+                        }
+                    }
                 }
             });
         }
