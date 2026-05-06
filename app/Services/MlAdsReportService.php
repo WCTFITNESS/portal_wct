@@ -84,13 +84,13 @@ class MlAdsReportService
             }
 
             $matchedRows++;
-            $dimensions = $this->parseDimensions($item['dimensions'] ?? null);
+            $dimensions = $this->extractDimensions($item, $shipping);
             $rows[] = [
                 (string) ($item['id'] ?? ''),
                 (string) ($item['title'] ?? ''),
                 (string) ($item['original_price'] ?? ''),
                 (string) ($item['price'] ?? ''),
-                (string) ($item['currency_id'] ?? ''),
+                (string) ($shipping['mode'] ?? ''),
                 ((string) ($shipping['logistic_type'] ?? '') === 'fulfillment') ? 'SIM' : 'NAO',
                 (string) ($item['status'] ?? ''),
                 $sku,
@@ -320,17 +320,73 @@ class MlAdsReportService
     }
 
     /**
-     * @param mixed $raw
+     * @param array<string,mixed> $item
+     * @param array<string,mixed> $shipping
      * @return array{peso:string,altura:string,largura:string,comprimento:string}
      */
-    private function parseDimensions(mixed $raw): array
+    private function extractDimensions(array $item, array $shipping): array
     {
         $result = ['peso' => '', 'altura' => '', 'largura' => '', 'comprimento' => ''];
-        $str = is_string($raw) ? $raw : '';
+
+        // 1) Formato mais comum da API: shipping.dimensions => "16x11x28,500"
+        $shippingDims = is_string($shipping['dimensions'] ?? null) ? (string) $shipping['dimensions'] : '';
+        $parsed = $this->parseDimensionsString($shippingDims);
+        if ($this->hasAnyDimension($parsed)) {
+            return $parsed;
+        }
+
+        // 2) Alguns anúncios trazem em item.dimensions
+        $itemDims = is_string($item['dimensions'] ?? null) ? (string) $item['dimensions'] : '';
+        $parsed = $this->parseDimensionsString($itemDims);
+        if ($this->hasAnyDimension($parsed)) {
+            return $parsed;
+        }
+
+        // 3) Fallback por atributos do item
+        $attrs = $item['attributes'] ?? [];
+        if (!is_array($attrs)) {
+            return $result;
+        }
+        foreach ($attrs as $attr) {
+            if (!is_array($attr)) {
+                continue;
+            }
+            $id = strtoupper((string) ($attr['id'] ?? ''));
+            $value = trim((string) ($attr['value_name'] ?? $attr['value_id'] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+            $num = preg_replace('/[^0-9.,]/', '', $value) ?? '';
+            $num = str_replace(',', '.', $num);
+            if ($num === '') {
+                continue;
+            }
+
+            if ($id === 'PACKAGE_HEIGHT') {
+                $result['altura'] = $num;
+            } elseif ($id === 'PACKAGE_WIDTH') {
+                $result['largura'] = $num;
+            } elseif ($id === 'PACKAGE_LENGTH') {
+                $result['comprimento'] = $num;
+            } elseif ($id === 'PACKAGE_WEIGHT') {
+                $result['peso'] = $num;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array{peso:string,altura:string,largura:string,comprimento:string}
+     */
+    private function parseDimensionsString(string $raw): array
+    {
+        $result = ['peso' => '', 'altura' => '', 'largura' => '', 'comprimento' => ''];
+        $str = trim(mb_strtolower($raw));
         if ($str === '') {
             return $result;
         }
-        $parts = array_map('trim', explode('x', str_replace(',', '.', mb_strtolower($str))));
+        $parts = array_map('trim', explode('x', str_replace(',', '.', $str)));
         if (count($parts) < 4) {
             return $result;
         }
@@ -340,6 +396,14 @@ class MlAdsReportService
         $result['peso'] = preg_replace('/[^0-9.]/', '', $parts[3]) ?? '';
 
         return $result;
+    }
+
+    /**
+     * @param array{peso:string,altura:string,largura:string,comprimento:string} $dims
+     */
+    private function hasAnyDimension(array $dims): bool
+    {
+        return $dims['peso'] !== '' || $dims['altura'] !== '' || $dims['largura'] !== '' || $dims['comprimento'] !== '';
     }
 }
 
