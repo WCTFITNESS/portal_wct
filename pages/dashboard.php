@@ -131,11 +131,6 @@ foreach ($selectedYears as $idx => $year) {
     $growth[$currYear] = $prevTotal > 0 ? (($currTotal - $prevTotal) / $prevTotal) * 100 : 0.0;
 }
 
-$channelsMaxBar = $channelsChartValues !== [] ? max($channelsChartValues) : 1.0;
-if ($channelsMaxBar <= 0.0) {
-    $channelsMaxBar = 1.0;
-}
-
 /** Evita </script> e UTF-8 inválido quebrarem o JS embutido. */
 $lexosJsonEmbed = static function (mixed $data): string {
     $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_INVALID_UTF8_SUBSTITUTE;
@@ -157,15 +152,14 @@ $lexosJsonEmbed = static function (mixed $data): string {
     .lexos-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:10px 0 14px 0; }
     .lexos-metric { border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#f8fafc; }
     .lexos-metric strong { display:block; font-size:1.05rem; margin-top:4px; }
-    .lexos-chart-wrap { margin-top:12px; border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#fff; }
-    .lexos-donut-center { display:flex; flex-direction:column; align-items:center; margin-bottom:14px; }
-    .lexos-donut-visual { position:relative; width:min(240px, 90vw); height:min(240px, 90vw); margin:0 auto; flex-shrink:0; }
+    .lexos-chart-wrap { margin-top:12px; border:1px solid #e5e7eb; border-radius:8px; padding:18px 16px 20px; background:#fff; }
+    .lexos-donut-center { display:flex; flex-direction:column; align-items:center; }
+    .lexos-donut-visual { position:relative; width:min(400px, 94vw); height:min(400px, 94vw); margin:0 auto; flex-shrink:0; }
     .lexos-donut-visual svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
     .lexos-donut-visual canvas { position:absolute; inset:0; display:block; width:100% !important; height:100% !important; max-height:none !important; }
-    .lexos-pie-list { width:100%; max-width:420px; margin:12px 0 0 0; padding:0; list-style:none; }
+    .lexos-pie-list { width:100%; max-width:520px; margin:16px 0 0 0; padding:0; list-style:none; }
     .lexos-pie-list li { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:.8rem; color:#334155; margin:4px 0; }
     .lexos-dot { width:10px; height:10px; border-radius:999px; display:inline-block; margin-right:6px; vertical-align:middle; }
-    .lexos-svg-fallback { display:block; width:100%; height:auto; max-height:min(480px, 55vh); margin-top:12px; }
     .lexos-growth-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
     .lexos-growth-card { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#f8fafc; }
     .lexos-pagination { display:flex; gap:8px; justify-content:center; margin-top:10px; }
@@ -227,9 +221,6 @@ $lexosJsonEmbed = static function (mixed $data): string {
         <?php if ($channels): ?>
             <?php
                 $svgPalette = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0891b2', '#ca8a04', '#4f46e5'];
-                $svgW = 1180;
-                $barTrackW = 640.0;
-                $svgH = max(140, 28 + count($channels) * 28);
                 $channelsTotalValue = array_sum($channelsChartValues);
                 $pieR = 74.0;
                 $pieCx = 105.0;
@@ -286,28 +277,6 @@ $lexosJsonEmbed = static function (mixed $data): string {
                         <?php endforeach; ?>
                     </ul>
                 </div>
-                <svg class="lexos-svg-fallback" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 <?= $svgW ?> <?= $svgH ?>" preserveAspectRatio="xMidYMin meet" role="img" aria-label="Barras de faturamento por canal">
-                    <rect width="<?= $svgW ?>" height="<?= $svgH ?>" fill="#ffffff"/>
-                    <?php foreach ($channels as $i => $row): ?>
-                        <?php
-                            $label = (string) ($row[0] ?? '');
-                            $val = (float) ($row[1] ?? 0);
-                            $barW = $channelsMaxBar > 0 ? ($val / $channelsMaxBar) * $barTrackW : 0.0;
-                            $y = 12 + $i * 28;
-                            $fill = $svgPalette[$i % count($svgPalette)];
-                        ?>
-                        <?php
-                            $svgLabel = $label;
-                            if (function_exists('mb_strlen') && function_exists('mb_substr') && mb_strlen($label) > 42) {
-                                $svgLabel = mb_substr($label, 0, 39) . '…';
-                            }
-                        ?>
-                        <text x="8" y="<?= $y + 16 ?>" font-family="Arial, sans-serif" font-size="13" fill="#334155"><?= htmlspecialchars($svgLabel, ENT_QUOTES, 'UTF-8') ?></text>
-                        <rect x="300" y="<?= $y ?>" width="<?= (int) $barTrackW ?>" height="20" fill="#e2e8f0" rx="6"/>
-                        <rect x="300" y="<?= $y ?>" width="<?= $barW < 1.0 && $val > 0 ? 3 : (int) round($barW) ?>" height="20" fill="<?= htmlspecialchars($fill, ENT_QUOTES, 'UTF-8') ?>" rx="6"/>
-                        <text x="1160" y="<?= $y + 15 ?>" font-family="Arial, sans-serif" font-size="12" fill="#475569" text-anchor="end">R$ <?= htmlspecialchars(number_format($val, 2, ',', '.'), ENT_QUOTES, 'UTF-8') ?></text>
-                    <?php endforeach; ?>
-                </svg>
             </div>
         <?php endif; ?>
     </div>
