@@ -138,10 +138,35 @@ $lexosJsonEmbed = static function (mixed $data): string {
 
     return $out === false ? '[]' : $out;
 };
+
+/** Troca de aba por link real (GET) — não depende de JS nem de URLSearchParams. */
+$lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $search, $sku, $selectedYears, $productsPerPage, $productsPage): string {
+    $query = [
+        'page' => 'dashboard',
+        'lexos_tab' => $tabId,
+        'lexos_start' => $dStart,
+        'lexos_end' => $dEnd,
+        'lexos_search' => $search,
+        'lexos_sku' => $sku,
+    ];
+    if ($tabId === 'products') {
+        $query['lexos_products_take'] = (string) $productsPerPage;
+        $query['lexos_products_page'] = (string) $productsPage;
+    }
+    $qs = http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+    if ($tabId === 'comparison') {
+        foreach (array_values($selectedYears) as $y) {
+            $qs .= '&lexos_years[]=' . rawurlencode((string) $y);
+        }
+    }
+
+    return portal_wct_public_path($baseUrl, 'index.php?' . $qs);
+};
 ?>
 <style>
-    .lexos-tabs { display:flex; gap:6px; border-bottom:1px solid #e5e7eb; margin-bottom:14px; }
-    .lexos-tab-btn { margin:0; background:#f8fafc; color:#334155; border:1px solid #e2e8f0; border-bottom:none; border-radius:8px 8px 0 0; padding:10px 14px; text-transform:none; letter-spacing:0; font-size:.9rem; }
+    .lexos-tabs { display:flex; gap:6px; border-bottom:1px solid #e5e7eb; margin-bottom:14px; flex-wrap:wrap; }
+    .lexos-tab-btn { margin:0; background:#f8fafc; color:#334155; border:1px solid #e2e8f0; border-bottom:none; border-radius:8px 8px 0 0; padding:10px 14px; text-transform:none; letter-spacing:0; font-size:.9rem; cursor:pointer; }
+    a.lexos-tab-btn { text-decoration:none; display:inline-block; box-sizing:border-box; }
     .lexos-tab-btn.active { background:#fff; color:#2563eb; border-color:#cbd5e1; font-weight:700; }
     .lexos-tab-content { display:none; }
     .lexos-tab-content.active { display:block; }
@@ -173,10 +198,10 @@ $lexosJsonEmbed = static function (mixed $data): string {
     <?php endif; ?>
 
     <nav class="lexos-tabs" id="lexos-tabs">
-        <button type="button" class="lexos-tab-btn<?= $activeTab === 'dashboard' ? ' active' : '' ?>" data-tab="dashboard">Dashboard Atual</button>
-        <button type="button" class="lexos-tab-btn<?= $activeTab === 'comparison' ? ' active' : '' ?>" data-tab="comparison">Comparação Anual</button>
-        <button type="button" class="lexos-tab-btn<?= $activeTab === 'products' ? ' active' : '' ?>" data-tab="products">Produtos</button>
-        <button type="button" class="lexos-tab-btn<?= $activeTab === 'sku-analysis' ? ' active' : '' ?>" data-tab="sku-analysis">Análise de SKU</button>
+        <a class="lexos-tab-btn<?= $activeTab === 'dashboard' ? ' active' : '' ?>" href="<?= htmlspecialchars($lexosTabUrl('dashboard'), ENT_QUOTES, 'UTF-8') ?>">Dashboard Atual</a>
+        <a class="lexos-tab-btn<?= $activeTab === 'comparison' ? ' active' : '' ?>" href="<?= htmlspecialchars($lexosTabUrl('comparison'), ENT_QUOTES, 'UTF-8') ?>">Comparação Anual</a>
+        <a class="lexos-tab-btn<?= $activeTab === 'products' ? ' active' : '' ?>" href="<?= htmlspecialchars($lexosTabUrl('products'), ENT_QUOTES, 'UTF-8') ?>">Produtos</a>
+        <a class="lexos-tab-btn<?= $activeTab === 'sku-analysis' ? ' active' : '' ?>" href="<?= htmlspecialchars($lexosTabUrl('sku-analysis'), ENT_QUOTES, 'UTF-8') ?>">Análise de SKU</a>
     </nav>
 
     <div class="lexos-tab-content<?= $activeTab === 'dashboard' ? ' active' : '' ?>" data-content="dashboard">
@@ -447,19 +472,6 @@ $lexosJsonEmbed = static function (mixed $data): string {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
 <script>
 (function () {
-    var tabs = document.querySelectorAll('#lexos-tabs .lexos-tab-btn');
-    var contents = document.querySelectorAll('.lexos-tab-content');
-    if (!tabs.length) return;
-    tabs.forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            var target = btn.getAttribute('data-tab') || '';
-            var url = new URL(window.location.href);
-            url.searchParams.set('page', 'dashboard');
-            url.searchParams.set('lexos_tab', target);
-            window.location.href = url.toString();
-        });
-    });
-
     if (typeof Chart !== 'undefined') {
         var channelLabels = <?= $lexosJsonEmbed($channelsChartLabels) ?>;
         var channelValues = <?= $lexosJsonEmbed($channelsChartValues) ?>;
