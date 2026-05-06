@@ -24,6 +24,26 @@ if (!in_array($activeTab, ['dashboard', 'comparison', 'products', 'sku-analysis'
     $activeTab = 'dashboard';
 }
 
+/**
+ * Metabase pode devolver linhas como lista [canal, valor] ou com chaves nomeadas.
+ *
+ * @return array{0: string, 1: float}|null
+ */
+$normalizeChannelRow = static function (mixed $row): ?array {
+    if (!is_array($row)) {
+        return null;
+    }
+    if ($row !== [] && array_keys($row) === range(0, count($row) - 1) && count($row) >= 2) {
+        return [(string) $row[0], (float) $row[1]];
+    }
+    $vals = array_values($row);
+    if (count($vals) >= 2) {
+        return [(string) $vals[0], (float) $vals[1]];
+    }
+
+    return null;
+};
+
 if ($activeTab === 'comparison') {
     $selectedYears = $_GET['lexos_years'] ?? ['2023', '2024', '2025', '2026'];
     if (!is_array($selectedYears) || $selectedYears === []) {
@@ -41,7 +61,14 @@ try {
     if (($apiConfig['lexos_token'] ?? '') !== '') {
         if ($activeTab === 'dashboard') {
             $metrics = $lexos->getDashboardMetrics($dStart, $dEnd);
-            $channels = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
+            $channelsRaw = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
+            $channels = [];
+            foreach ($channelsRaw as $r) {
+                $pair = $normalizeChannelRow($r);
+                if ($pair !== null) {
+                    $channels[] = $pair;
+                }
+            }
         } elseif ($activeTab === 'products') {
             $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
             $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
@@ -60,7 +87,8 @@ $channelsChartLabels = [];
 $channelsChartValues = [];
 foreach ($channels as $row) {
     $channelsChartLabels[] = (string) ($row[0] ?? '');
-    $channelsChartValues[] = (float) ($row[1] ?? 0);
+    $v = (float) ($row[1] ?? 0);
+    $channelsChartValues[] = $v;
 }
 
 $topProducts = array_slice($products, 0, 10);
@@ -102,6 +130,19 @@ foreach ($selectedYears as $idx => $year) {
     $currTotal = array_sum($comparisonSeries[$currYear] ?? []);
     $growth[$currYear] = $prevTotal > 0 ? (($currTotal - $prevTotal) / $prevTotal) * 100 : 0.0;
 }
+
+$channelsMaxBar = $channelsChartValues !== [] ? max($channelsChartValues) : 1.0;
+if ($channelsMaxBar <= 0.0) {
+    $channelsMaxBar = 1.0;
+}
+
+/** Evita </script> e UTF-8 inválido quebrarem o JS embutido. */
+$lexosJsonEmbed = static function (mixed $data): string {
+    $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_INVALID_UTF8_SUBSTITUTE;
+    $out = json_encode($data, $flags);
+
+    return $out === false ? '[]' : $out;
+};
 ?>
 <style>
     .lexos-tabs { display:flex; gap:6px; border-bottom:1px solid #e5e7eb; margin-bottom:14px; }
@@ -117,7 +158,9 @@ foreach ($selectedYears as $idx => $year) {
     .lexos-metric { border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#f8fafc; }
     .lexos-metric strong { display:block; font-size:1.05rem; margin-top:4px; }
     .lexos-chart-wrap { margin-top:12px; border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#fff; }
-    .lexos-chart-wrap canvas { width:100%; max-height:320px; }
+    .lexos-chart-canvas-host { position:relative; width:100%; height:min(360px, 70vh); margin-bottom:10px; }
+    .lexos-chart-wrap canvas { display:block; width:100% !important; height:100% !important; max-height:none; }
+    .lexos-svg-fallback { display:block; width:100%; height:auto; max-height:min(480px, 55vh); }
     .lexos-growth-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
     .lexos-growth-card { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#f8fafc; }
     .lexos-pagination { display:flex; gap:8px; justify-content:center; margin-top:10px; }
@@ -176,9 +219,42 @@ foreach ($selectedYears as $idx => $year) {
             <?php endforeach; ?>
             </tbody>
         </table>
-        <?php if ($channelsChartLabels): ?>
+        <?php if ($channels): ?>
+            <?php
+                $svgPalette = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0891b2', '#ca8a04', '#4f46e5'];
+                $svgW = 1180;
+                $barTrackW = 640.0;
+                $svgH = max(140, 28 + count($channels) * 28);
+            ?>
             <div class="lexos-chart-wrap">
-                <canvas id="lexos-channel-chart"></canvas>
+                <p class="lexos-chart-caption" style="margin:0 0 10px 0; font-size:.88rem; color:#64748b;">
+                    Faturamento por canal (visual SVG — funciona mesmo com JavaScript bloqueado ou CDN indisponível).
+                </p>
+                <div class="lexos-chart-canvas-host">
+                    <canvas id="lexos-channel-chart" aria-label="Gráfico de canais"></canvas>
+                </div>
+                <svg class="lexos-svg-fallback" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 <?= $svgW ?> <?= $svgH ?>" preserveAspectRatio="xMidYMin meet" role="img" aria-label="Barras de faturamento por canal">
+                    <rect width="<?= $svgW ?>" height="<?= $svgH ?>" fill="#ffffff"/>
+                    <?php foreach ($channels as $i => $row): ?>
+                        <?php
+                            $label = (string) ($row[0] ?? '');
+                            $val = (float) ($row[1] ?? 0);
+                            $barW = $channelsMaxBar > 0 ? ($val / $channelsMaxBar) * $barTrackW : 0.0;
+                            $y = 12 + $i * 28;
+                            $fill = $svgPalette[$i % count($svgPalette)];
+                        ?>
+                        <?php
+                            $svgLabel = $label;
+                            if (function_exists('mb_strlen') && function_exists('mb_substr') && mb_strlen($label) > 42) {
+                                $svgLabel = mb_substr($label, 0, 39) . '…';
+                            }
+                        ?>
+                        <text x="8" y="<?= $y + 16 ?>" font-family="Arial, sans-serif" font-size="13" fill="#334155"><?= htmlspecialchars($svgLabel, ENT_QUOTES, 'UTF-8') ?></text>
+                        <rect x="300" y="<?= $y ?>" width="<?= (int) $barTrackW ?>" height="20" fill="#e2e8f0" rx="6"/>
+                        <rect x="300" y="<?= $y ?>" width="<?= $barW < 1.0 && $val > 0 ? 3 : (int) round($barW) ?>" height="20" fill="<?= htmlspecialchars($fill, ENT_QUOTES, 'UTF-8') ?>" rx="6"/>
+                        <text x="1160" y="<?= $y + 15 ?>" font-family="Arial, sans-serif" font-size="12" fill="#475569" text-anchor="end">R$ <?= htmlspecialchars(number_format($val, 2, ',', '.'), ENT_QUOTES, 'UTF-8') ?></text>
+                    <?php endforeach; ?>
+                </svg>
             </div>
         <?php endif; ?>
     </div>
@@ -346,7 +422,7 @@ foreach ($selectedYears as $idx => $year) {
     </div>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
 <script>
 (function () {
     var tabs = document.querySelectorAll('#lexos-tabs .lexos-tab-btn');
@@ -363,19 +439,30 @@ foreach ($selectedYears as $idx => $year) {
     });
 
     if (typeof Chart !== 'undefined') {
-        var channelLabels = <?= json_encode($channelsChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
-        var channelValues = <?= json_encode($channelsChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var channelLabels = <?= $lexosJsonEmbed($channelsChartLabels) ?>;
+        var channelValues = <?= $lexosJsonEmbed($channelsChartValues) ?>;
         var chCanvas = document.getElementById('lexos-channel-chart');
         if (chCanvas && channelLabels.length) {
             new Chart(chCanvas.getContext('2d'), {
                 type: 'doughnut',
-                data: { labels: channelLabels, datasets: [{ data: channelValues }] },
-                options: { responsive: true, maintainAspectRatio: false }
+                data: {
+                    labels: channelLabels,
+                    datasets: [{
+                        data: channelValues,
+                        backgroundColor: ['#2563eb','#7c3aed','#db2777','#ea580c','#16a34a','#0891b2','#ca8a04','#4f46e5','#0d9488','#be123c'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
             });
         }
 
-        var prodLabels = <?= json_encode($productsChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
-        var prodValues = <?= json_encode($productsChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var prodLabels = <?= $lexosJsonEmbed($productsChartLabels) ?>;
+        var prodValues = <?= $lexosJsonEmbed($productsChartValues) ?>;
         var pCanvas = document.getElementById('lexos-products-chart');
         if (pCanvas && prodLabels.length) {
             new Chart(pCanvas.getContext('2d'), {
@@ -385,8 +472,8 @@ foreach ($selectedYears as $idx => $year) {
             });
         }
 
-        var skuLabels = <?= json_encode($skuChartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
-        var skuValues = <?= json_encode($skuChartValues, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
+        var skuLabels = <?= $lexosJsonEmbed($skuChartLabels) ?>;
+        var skuValues = <?= $lexosJsonEmbed($skuChartValues) ?>;
         var sCanvas = document.getElementById('lexos-sku-chart');
         if (sCanvas && skuLabels.length) {
             new Chart(sCanvas.getContext('2d'), {
@@ -396,8 +483,8 @@ foreach ($selectedYears as $idx => $year) {
             });
         }
 
-        var cmpMonths = <?= json_encode($comparisonMonths, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || [];
-        var cmpSeries = <?= json_encode($comparisonSeries, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || {};
+        var cmpMonths = <?= $lexosJsonEmbed($comparisonMonths) ?>;
+        var cmpSeries = <?= $lexosJsonEmbed($comparisonSeries) ?>;
         var cmpCanvas = document.getElementById('lexos-comparison-chart');
         if (cmpCanvas && cmpMonths.length) {
             var colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
