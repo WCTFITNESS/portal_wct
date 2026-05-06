@@ -15,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'redirect_uri' => trim((string) ($_POST['redirect_uri'] ?? '')),
                 'seller_id' => trim((string) ($_POST['seller_id'] ?? '')),
                 'oauth_code' => trim((string) ($_POST['oauth_code'] ?? '')),
+                'lexos_token' => trim((string) ($_POST['lexos_token'] ?? '')),
             ]);
             $feedback = 'Configurações da API salvas.';
         }
@@ -98,6 +99,9 @@ $requestLogs = $app['requestLogRepository']->listRecent(10);
 
         <label>Code (Authorization Code)</label>
         <input type="text" name="oauth_code" value="<?= htmlspecialchars((string) ($apiConfig['oauth_code'] ?? '')) ?>">
+
+        <label>Token Lexos (Plugin Faturamento)</label>
+        <textarea name="lexos_token" rows="3" placeholder="Cole o access_token do app-hub.lexos.com.br"><?= htmlspecialchars((string) ($apiConfig['lexos_token'] ?? '')) ?></textarea>
 
         <button type="submit">Salvar Configuração</button>
     </form>

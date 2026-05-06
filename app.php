@@ -12,6 +12,7 @@ use App\Repositories\TokenRepository;
 use App\Services\MercadoPagoClient;
 use App\Services\MercadoPagoPaymentService;
 use App\Services\MercadoLivreClient;
+use App\Services\LexosDashboardService;
 use App\Services\MessageService;
 use App\Services\MlAdsReportService;
 use App\Services\OrderService;
@@ -39,6 +40,7 @@ $repasseService = new RepasseService($orderService);
 $mercadopagoPaymentService = new MercadoPagoPaymentService($mercadopagoSettingsRepository, $mercadopagoClient);
 $repasseMpService = new RepasseMpService($mercadopagoPaymentService);
 $mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRepository);
+$lexosDashboardService = new LexosDashboardService($settingsRepository);
 
 return [
     'config' => $config,
@@ -57,4 +59,5 @@ return [
     'mercadopagoSettingsRepository' => $mercadopagoSettingsRepository,
     'mercadopagoClient' => $mercadopagoClient,
     'mercadopagoPaymentService' => $mercadopagoPaymentService,
+    'lexosDashboardService' => $lexosDashboardService,
 ];

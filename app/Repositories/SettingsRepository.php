@@ -9,6 +9,7 @@ use PDO;
 class SettingsRepository
 {
     private ?bool $hasOauthCodeColumn = null;
+    private ?bool $hasLexosTokenColumn = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -25,6 +26,7 @@ class SettingsRepository
     public function saveApiConfig(array $data): void
     {
         $this->ensureOauthCodeColumnExists();
+        $this->ensureLexosTokenColumnExists();
         $existing = $this->getApiConfig();
 
         if ($existing) {
@@ -35,6 +37,7 @@ class SettingsRepository
                      redirect_uri = :redirect_uri,
                      seller_id = :seller_id,
                      oauth_code = :oauth_code,
+                     lexos_token = :lexos_token,
                      updated_at = NOW()
                  WHERE id = :id'
             );
@@ -44,6 +47,7 @@ class SettingsRepository
                 ':redirect_uri' => $data['redirect_uri'],
                 ':seller_id' => $data['seller_id'],
                 ':oauth_code' => $data['oauth_code'] !== '' ? $data['oauth_code'] : null,
+                ':lexos_token' => $data['lexos_token'] !== '' ? $data['lexos_token'] : null,
                 ':id' => $existing['id'],
             ]);
 
@@ -51,8 +55,8 @@ class SettingsRepository
         }
 
         $stmt = $this->pdo->prepare(
-            'INSERT INTO api_settings (app_id, client_secret, redirect_uri, seller_id, oauth_code, created_at, updated_at)
-             VALUES (:app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, NOW(), NOW())'
+            'INSERT INTO api_settings (app_id, client_secret, redirect_uri, seller_id, oauth_code, lexos_token, created_at, updated_at)
+             VALUES (:app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, :lexos_token, NOW(), NOW())'
         );
         $stmt->execute([
             ':app_id' => $data['app_id'],
@@ -60,6 +64,7 @@ class SettingsRepository
             ':redirect_uri' => $data['redirect_uri'],
             ':seller_id' => $data['seller_id'],
             ':oauth_code' => $data['oauth_code'] !== '' ? $data['oauth_code'] : null,
+            ':lexos_token' => $data['lexos_token'] !== '' ? $data['lexos_token'] : null,
         ]);
     }
 
@@ -102,6 +107,47 @@ class SettingsRepository
         $this->hasOauthCodeColumn = ((int) $stmt->fetchColumn()) > 0;
 
         return $this->hasOauthCodeColumn;
+    }
+
+    private function ensureLexosTokenColumnExists(): void
+    {
+        if ($this->hasLexosTokenColumn()) {
+            return;
+        }
+
+        if ($this->isPgsql()) {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN lexos_token TEXT DEFAULT NULL');
+        } else {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN lexos_token TEXT NULL AFTER oauth_code');
+        }
+        $this->hasLexosTokenColumn = true;
+    }
+
+    private function hasLexosTokenColumn(): bool
+    {
+        if ($this->hasLexosTokenColumn !== null) {
+            return $this->hasLexosTokenColumn;
+        }
+
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_token'"
+            );
+        } else {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_token'"
+            );
+        }
+
+        $this->hasLexosTokenColumn = ((int) $stmt->fetchColumn()) > 0;
+
+        return $this->hasLexosTokenColumn;
     }
 
     private function isPgsql(): bool
