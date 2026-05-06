@@ -336,10 +336,6 @@ class RepasseMpService
         $header = null;
         $operationColumnIndex = (int) ($meta['operation_column_index'] ?? 3);
 
-        if ($header === null) {
-            return ['ok' => false, 'error' => 'Cabecalho invalido.'];
-        }
-
         $matchByValue = [];
         $stored = $meta['matches'] ?? [];
         if (is_array($stored)) {
