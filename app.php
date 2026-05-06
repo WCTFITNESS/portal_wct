@@ -13,6 +13,7 @@ use App\Services\MercadoPagoClient;
 use App\Services\MercadoPagoPaymentService;
 use App\Services\MercadoLivreClient;
 use App\Services\MessageService;
+use App\Services\MlAdsReportService;
 use App\Services\OrderService;
 use App\Services\RepasseService;
 use App\Services\RepasseMpService;
@@ -37,6 +38,7 @@ $orderService = new OrderService($tokenService, $client, $settingsRepository, $t
 $repasseService = new RepasseService($orderService);
 $mercadopagoPaymentService = new MercadoPagoPaymentService($mercadopagoSettingsRepository, $mercadopagoClient);
 $repasseMpService = new RepasseMpService($mercadopagoPaymentService);
+$mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRepository);
 
 return [
     'config' => $config,
@@ -51,6 +53,7 @@ return [
     'orderService' => $orderService,
     'repasseService' => $repasseService,
     'repasseMpService' => $repasseMpService,
+    'mlAdsReportService' => $mlAdsReportService,
     'mercadopagoSettingsRepository' => $mercadopagoSettingsRepository,
     'mercadopagoClient' => $mercadopagoClient,
     'mercadopagoPaymentService' => $mercadopagoPaymentService,

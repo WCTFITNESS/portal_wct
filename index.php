@@ -6,7 +6,7 @@ $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
-$allowedPages = ['dashboard', 'api-config', 'orders', 'repasse-mp', 'message-template', 'manual-send'];
+$allowedPages = ['dashboard', 'api-config', 'orders', 'repasse-mp', 'message-template', 'manual-send', 'ml-ads-report'];
 
 if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
@@ -52,6 +52,9 @@ $menuSections = [
     'Mercado Pago' => [
         ['id' => 'repasse-mp', 'label' => 'Repasse MP'],
     ],
+    'Relatórios ML' => [
+        ['id' => 'ml-ads-report', 'label' => 'Relatório de anúncios'],
+    ],
     'Integração' => [
         [
             'id' => 'tracking-wct',
@@ -68,6 +71,22 @@ if ($page === 'repasse-mp' && isset($_GET['download']) && $_GET['download'] !== 
         (string) $_GET['download'],
         $jobId !== '' ? $jobId : null
     );
+    if (!$filePath) {
+        http_response_code(404);
+        echo 'Arquivo não encontrado.';
+        exit;
+    }
+
+    $fileName = basename($filePath);
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $fileName . '"');
+    header('Content-Length: ' . (string) filesize($filePath));
+    readfile($filePath);
+    exit;
+}
+
+if ($page === 'ml-ads-report' && isset($_GET['download']) && $_GET['download'] !== '') {
+    $filePath = $app['mlAdsReportService']->getExportFilePath((string) $_GET['download']);
     if (!$filePath) {
         http_response_code(404);
         echo 'Arquivo não encontrado.';
