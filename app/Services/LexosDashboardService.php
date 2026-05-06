@@ -55,10 +55,11 @@ class LexosDashboardService
 
         $url = "https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceCurvaAbc?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
         $json = $this->httpPostLexosJson($url, $payload);
+        $norm = $this->normalizeAppHubDatasourceResponse($json);
 
         return [
-            'items' => is_array($json['result'] ?? null) ? $json['result'] : [],
-            'count' => (int) ($json['count'] ?? 0),
+            'items' => $norm['result'],
+            'count' => (int) ($json['count'] ?? $norm['count'] ?? count($norm['result'])),
         ];
     }
 
@@ -118,7 +119,7 @@ class LexosDashboardService
             'take' => 5000,
         ];
         $salesUrl = 'https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceLucratividadeItem';
-        $sales = $this->httpPostLexosJson($salesUrl, $salesPayload);
+        $salesRaw = $this->httpPostLexosJson($salesUrl, $salesPayload);
 
         $stockPayload = [
             'requiresCounts' => false,
@@ -141,12 +142,62 @@ class LexosDashboardService
             'take' => 1,
         ];
         $stockUrl = 'https://app-hub-webapi.lexos.com.br/api/Produto/DataSource?lojaId=-1';
-        $stock = $this->httpPostLexosJson($stockUrl, $stockPayload);
+        $stockRaw = $this->httpPostLexosJson($stockUrl, $stockPayload);
 
         return [
-            'sales' => is_array($sales) ? $sales : [],
-            'stock' => is_array($stock) ? $stock : [],
+            'sales' => $this->normalizeAppHubDatasourceResponse($salesRaw),
+            'stock' => $this->normalizeAppHubDatasourceResponse($stockRaw),
         ];
+    }
+
+    /**
+     * A WebAPI por vezes retorna um array JSON direto [...] (como no plugin) e por vezes { "result": [...] }.
+     * O portal sempre trabalha com a forma { "result": rows } para alinhar ao plugin.
+     *
+     * @return array{result: list<array<string, mixed>>, count: int}
+     */
+    private function normalizeAppHubDatasourceResponse(mixed $json): array
+    {
+        if (!is_array($json)) {
+            return ['result' => [], 'count' => 0];
+        }
+        if ($json === []) {
+            return ['result' => [], 'count' => 0];
+        }
+        if ($this->isSequentialList($json)) {
+            /** @var list<array<string, mixed>> $rows */
+            $rows = $json;
+
+            return ['result' => $rows, 'count' => count($rows)];
+        }
+        if (isset($json['result']) && is_array($json['result'])) {
+            $rows = $json['result'];
+            $list = $this->isSequentialList($rows) ? $rows : [];
+
+            return [
+                'result' => $list,
+                'count' => (int) ($json['count'] ?? count($list)),
+            ];
+        }
+        if (isset($json['data']) && is_array($json['data']) && $this->isSequentialList($json['data'])) {
+            $rows = $json['data'];
+
+            return ['result' => $rows, 'count' => count($rows)];
+        }
+
+        return ['result' => [], 'count' => 0];
+    }
+
+    /**
+     * @param array<mixed> $arr
+     */
+    private function isSequentialList(array $arr): bool
+    {
+        if ($arr === []) {
+            return true;
+        }
+
+        return array_keys($arr) === range(0, count($arr) - 1);
     }
 
     private function getLexosToken(): string
