@@ -17,9 +17,16 @@ class MlAdsReportService
     ) {
     }
 
-    public function generateReport(int $maxItems = 200): array
+    /**
+     * @param array{date_from?: ?string, date_to?: ?string, sku?: ?string, tipo?: ?string} $filters
+     */
+    public function generateReport(int $maxItems = 200, array $filters = []): array
     {
         $maxItems = max(1, min(1000, $maxItems));
+        $skuFilter = trim((string) ($filters['sku'] ?? ''));
+        $tipoFilter = $this->normalizeTypeFilter((string) ($filters['tipo'] ?? ''));
+        $dateFrom = $this->normalizeDateInput($filters['date_from'] ?? null, false);
+        $dateTo = $this->normalizeDateInput($filters['date_to'] ?? null, true);
 
         $apiConfig = $this->settingsRepository->getApiConfig();
         $sellerId = trim((string) ($apiConfig['seller_id'] ?? ''));
@@ -36,46 +43,68 @@ class MlAdsReportService
         $items = $this->fetchItemsInBatch($itemIds, $accessToken);
 
         $rows = [[
-            'item_id',
-            'titulo',
-            'status',
-            'condicao',
-            'preco',
-            'preco_original',
-            'moeda',
-            'estoque_disponivel',
-            'vendidos',
-            'tipo_anuncio',
-            'categoria_id',
-            'catalogo',
-            'frete_gratis',
-            'link',
-            'data_criacao',
-            'ultima_atualizacao',
+            'MLB',
+            'Titulo',
+            'Preco De',
+            'Preco Por',
+            'Modo',
+            'Full',
+            'Status',
+            'SKU',
+            'Custo',
+            'Frete',
+            'Frete Gratis',
+            'Estoque',
+            'Vendas',
+            'Visitas',
+            'Peso',
+            'Altura',
+            'Largura',
+            'Comprimento',
+            'tipo',
         ]];
 
+        $matchedRows = 0;
         foreach ($items as $item) {
             if (!is_array($item)) {
                 continue;
             }
             $shipping = is_array($item['shipping'] ?? null) ? $item['shipping'] : [];
+            $sku = $this->extractSku($item);
+            $typeLabel = $this->listingTypeLabel((string) ($item['listing_type_id'] ?? ''));
+
+            if ($skuFilter !== '' && stripos($sku, $skuFilter) === false) {
+                continue;
+            }
+            if (!$this->matchTypeFilter($tipoFilter, $typeLabel)) {
+                continue;
+            }
+            if (!$this->matchDateFilter((string) ($item['date_created'] ?? ''), (string) ($item['last_updated'] ?? ''), $dateFrom, $dateTo)) {
+                continue;
+            }
+
+            $matchedRows++;
+            $dimensions = $this->parseDimensions($item['dimensions'] ?? null);
             $rows[] = [
                 (string) ($item['id'] ?? ''),
                 (string) ($item['title'] ?? ''),
-                (string) ($item['status'] ?? ''),
-                (string) ($item['condition'] ?? ''),
-                (string) ($item['price'] ?? ''),
                 (string) ($item['original_price'] ?? ''),
+                (string) ($item['price'] ?? ''),
                 (string) ($item['currency_id'] ?? ''),
+                ((string) ($shipping['logistic_type'] ?? '') === 'fulfillment') ? 'SIM' : 'NAO',
+                (string) ($item['status'] ?? ''),
+                $sku,
+                '',
+                (string) ($shipping['cost'] ?? ''),
+                !empty($shipping['free_shipping']) ? 'sim' : 'nao',
                 (string) ($item['available_quantity'] ?? ''),
                 (string) ($item['sold_quantity'] ?? ''),
-                (string) ($item['listing_type_id'] ?? ''),
-                (string) ($item['category_id'] ?? ''),
-                !empty($item['catalog_listing']) ? 'sim' : 'nao',
-                !empty($shipping['free_shipping']) ? 'sim' : 'nao',
-                (string) ($item['permalink'] ?? ''),
-                (string) ($item['date_created'] ?? ''),
-                (string) ($item['last_updated'] ?? ''),
+                (string) ($item['initial_quantity'] ?? ''),
+                $dimensions['peso'],
+                $dimensions['altura'],
+                $dimensions['largura'],
+                $dimensions['comprimento'],
+                $typeLabel,
             ];
         }
 
@@ -92,6 +121,7 @@ class MlAdsReportService
             'file_name' => $fileName,
             'total_ids' => count($itemIds),
             'total_rows' => max(0, count($rows) - 1),
+            'matched_rows' => $matchedRows,
         ];
     }
 
@@ -178,6 +208,138 @@ class MlAdsReportService
         }
 
         return $dir;
+    }
+
+    private function normalizeDateInput(?string $value, bool $endOfDay): ?\DateTimeImmutable
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+        $dt = \DateTimeImmutable::createFromFormat('Y-m-d', $value);
+        if (!$dt || $dt->format('Y-m-d') !== $value) {
+            throw new RuntimeException('Data invalida. Use YYYY-MM-DD.');
+        }
+
+        return $endOfDay ? $dt->setTime(23, 59, 59) : $dt->setTime(0, 0, 0);
+    }
+
+    private function matchDateFilter(string $dateCreated, string $lastUpdated, ?\DateTimeImmutable $from, ?\DateTimeImmutable $to): bool
+    {
+        if ($from === null && $to === null) {
+            return true;
+        }
+        $ref = trim($lastUpdated) !== '' ? $lastUpdated : $dateCreated;
+        if (trim($ref) === '') {
+            return false;
+        }
+        try {
+            $dt = new \DateTimeImmutable($ref);
+        } catch (\Throwable) {
+            return false;
+        }
+        if ($from !== null && $dt < $from) {
+            return false;
+        }
+        if ($to !== null && $dt > $to) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function extractSku(array $item): string
+    {
+        $sku = trim((string) ($item['seller_custom_field'] ?? ''));
+        if ($sku !== '') {
+            return $sku;
+        }
+        $attrs = $item['attributes'] ?? [];
+        if (!is_array($attrs)) {
+            return '';
+        }
+        foreach ($attrs as $attr) {
+            if (!is_array($attr)) {
+                continue;
+            }
+            if (strtoupper((string) ($attr['id'] ?? '')) !== 'SELLER_SKU') {
+                continue;
+            }
+            $v = trim((string) ($attr['value_name'] ?? $attr['value_id'] ?? ''));
+            if ($v !== '') {
+                return $v;
+            }
+        }
+
+        return '';
+    }
+
+    private function normalizeTypeFilter(string $tipo): string
+    {
+        $v = mb_strtolower(trim($tipo));
+        if ($v === '' || $v === 'todos') {
+            return 'todos';
+        }
+        if (str_contains($v, 'premium')) {
+            return 'premium';
+        }
+        if (str_contains($v, 'class')) {
+            return 'classico';
+        }
+
+        return 'todos';
+    }
+
+    private function matchTypeFilter(string $filter, string $label): bool
+    {
+        if ($filter === 'todos') {
+            return true;
+        }
+        $v = mb_strtolower($label);
+        if ($filter === 'premium') {
+            return str_contains($v, 'premium');
+        }
+        if ($filter === 'classico') {
+            return str_contains($v, 'classico');
+        }
+
+        return true;
+    }
+
+    private function listingTypeLabel(string $listingTypeId): string
+    {
+        $id = mb_strtolower(trim($listingTypeId));
+        if ($id === '') {
+            return '';
+        }
+        if (str_contains($id, 'gold') || str_contains($id, 'premium')) {
+            return 'Premium';
+        }
+
+        return 'Classico';
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array{peso:string,altura:string,largura:string,comprimento:string}
+     */
+    private function parseDimensions(mixed $raw): array
+    {
+        $result = ['peso' => '', 'altura' => '', 'largura' => '', 'comprimento' => ''];
+        $str = is_string($raw) ? $raw : '';
+        if ($str === '') {
+            return $result;
+        }
+        $parts = array_map('trim', explode('x', str_replace(',', '.', mb_strtolower($str))));
+        if (count($parts) < 4) {
+            return $result;
+        }
+        $result['altura'] = preg_replace('/[^0-9.]/', '', $parts[0]) ?? '';
+        $result['largura'] = preg_replace('/[^0-9.]/', '', $parts[1]) ?? '';
+        $result['comprimento'] = preg_replace('/[^0-9.]/', '', $parts[2]) ?? '';
+        $result['peso'] = preg_replace('/[^0-9.]/', '', $parts[3]) ?? '';
+
+        return $result;
     }
 }
 
