@@ -141,6 +141,12 @@ class MlAdsReportService
 
     private function fetchItemIds(string $sellerId, string $accessToken, int $maxItems): array
     {
+        // Para volumes maiores, a API de search com offset pode retornar 400.
+        // Usa scan/scroll para paginação robusta em listas grandes.
+        if ($maxItems === 0 || $maxItems > 1000) {
+            return $this->fetchItemIdsByScan($sellerId, $accessToken, $maxItems);
+        }
+
         $limit = 50;
         $offset = 0;
         $ids = [];
@@ -165,6 +171,47 @@ class MlAdsReportService
             }
 
             $offset += $limit;
+        }
+
+        return $ids;
+    }
+
+    private function fetchItemIdsByScan(string $sellerId, string $accessToken, int $maxItems): array
+    {
+        $ids = [];
+        $unlimited = $maxItems <= 0;
+
+        $initPath = '/users/' . rawurlencode($sellerId) . '/items/search?search_type=scan';
+        $res = $this->client->get($initPath, $accessToken);
+        if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
+            throw new RuntimeException('Falha ao iniciar scan de anuncios. HTTP: ' . (string) ($res['status'] ?? 0));
+        }
+
+        $scrollId = (string) ($res['body']['scroll_id'] ?? '');
+        if ($scrollId === '') {
+            throw new RuntimeException('Scan de anuncios nao retornou scroll_id.');
+        }
+
+        while ($scrollId !== '' && ($unlimited || count($ids) < $maxItems)) {
+            $path = '/users/' . rawurlencode($sellerId) . '/items/search?search_type=scan&scroll_id=' . rawurlencode($scrollId);
+            $chunkRes = $this->client->get($path, $accessToken);
+            if (($chunkRes['status'] ?? 0) < 200 || ($chunkRes['status'] ?? 0) >= 300) {
+                throw new RuntimeException('Falha ao continuar scan de anuncios. HTTP: ' . (string) ($chunkRes['status'] ?? 0));
+            }
+
+            $resultIds = $chunkRes['body']['results'] ?? [];
+            if (!is_array($resultIds) || $resultIds === []) {
+                break;
+            }
+
+            foreach ($resultIds as $id) {
+                $ids[] = (string) $id;
+                if (!$unlimited && count($ids) >= $maxItems) {
+                    break 2;
+                }
+            }
+
+            $scrollId = (string) ($chunkRes['body']['scroll_id'] ?? '');
         }
 
         return $ids;
