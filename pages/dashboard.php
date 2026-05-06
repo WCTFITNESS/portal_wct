@@ -39,13 +39,16 @@ $comparison = ['months' => [], 'series' => []];
 
 try {
     if (($apiConfig['lexos_token'] ?? '') !== '') {
-        $metrics = $lexos->getDashboardMetrics($dStart, $dEnd);
-        $channels = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
-        $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
-        $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
-        $productsTotal = (int) ($productsResp['count'] ?? count($products));
-        $comparison = $lexos->getComparisonData($selectedYears);
-        if ($sku !== '') {
+        if ($activeTab === 'dashboard') {
+            $metrics = $lexos->getDashboardMetrics($dStart, $dEnd);
+            $channels = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
+        } elseif ($activeTab === 'products') {
+            $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
+            $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
+            $productsTotal = (int) ($productsResp['count'] ?? count($products));
+        } elseif ($activeTab === 'comparison') {
+            $comparison = $lexos->getComparisonData($selectedYears);
+        } elseif ($activeTab === 'sku-analysis' && $sku !== '') {
             $skuData = $lexos->getSkuAnalysis($sku, $dStart, $dEnd);
         }
     }
@@ -352,12 +355,10 @@ foreach ($selectedYears as $idx => $year) {
     tabs.forEach(function (btn) {
         btn.addEventListener('click', function () {
             var target = btn.getAttribute('data-tab') || '';
-            tabs.forEach(function (b) { b.classList.toggle('active', b === btn); });
-            contents.forEach(function (c) { c.classList.toggle('active', c.getAttribute('data-content') === target); });
             var url = new URL(window.location.href);
             url.searchParams.set('page', 'dashboard');
             url.searchParams.set('lexos_tab', target);
-            history.replaceState({}, '', url.toString());
+            window.location.href = url.toString();
         });
     });
 
