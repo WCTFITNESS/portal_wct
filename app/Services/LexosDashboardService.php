@@ -181,6 +181,87 @@ class LexosDashboardService
     }
 
     /**
+     * Várias requisições GET em paralelo (comparação anual — meses do ano atual no Metabase).
+     *
+     * @param list<string> $urls
+     * @return list<array<string, mixed>>
+     */
+    private function httpGetJsonParallel(array $urls): array
+    {
+        if ($urls === []) {
+            return [];
+        }
+        if (!function_exists('curl_multi_init')) {
+            $out = [];
+            foreach ($urls as $u) {
+                $out[] = $this->httpGetJson($u);
+            }
+
+            return $out;
+        }
+
+        $mh = curl_multi_init();
+        if ($mh === false) {
+            $out = [];
+            foreach ($urls as $u) {
+                $out[] = $this->httpGetJson($u);
+            }
+
+            return $out;
+        }
+
+        $handles = [];
+        foreach ($urls as $i => $url) {
+            $ch = curl_init($url);
+            if ($ch === false) {
+                foreach ($handles as $h) {
+                    curl_multi_remove_handle($mh, $h);
+                    curl_close($h);
+                }
+                curl_multi_close($mh);
+                throw new RuntimeException('Falha ao iniciar requisição Metabase.');
+            }
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => ['Accept: application/json'],
+                CURLOPT_TIMEOUT => 25,
+            ]);
+            curl_multi_add_handle($mh, $ch);
+            $handles[$i] = $ch;
+        }
+
+        $running = 0;
+        do {
+            curl_multi_exec($mh, $running);
+            if ($running > 0) {
+                curl_multi_select($mh, 1.0);
+            }
+        } while ($running > 0);
+
+        $decodedList = array_fill(0, count($urls), []);
+        try {
+            foreach ($handles as $i => $ch) {
+                $raw = curl_multi_getcontent($ch);
+                $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $err = curl_error($ch);
+                if ($raw === false || $status < 200 || $status >= 300) {
+                    throw new RuntimeException('Falha consulta Lexos/Metabase. HTTP: ' . $status . ($err !== '' ? ' ' . $err : ''));
+                }
+                $decoded = json_decode((string) $raw, true);
+                $decodedList[$i] = is_array($decoded) ? $decoded : [];
+            }
+        } finally {
+            foreach ($handles as $ch) {
+                curl_multi_remove_handle($mh, $ch);
+                curl_close($ch);
+            }
+            curl_multi_close($mh);
+        }
+
+        return $decodedList;
+    }
+
+    /**
      * @return list<float>
      */
     private function fetchYearRevenueFromMetabase(int $year): array
@@ -188,12 +269,18 @@ class LexosDashboardService
         $values = array_fill(0, 12, 0.0);
         $current = new \DateTimeImmutable('now');
         $maxMonth = $year === (int) $current->format('Y') ? (int) $current->format('n') : 12;
+
+        $urls = [];
         for ($m = 1; $m <= $maxMonth; $m++) {
             $start = new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $m));
             $end = $start->modify('last day of this month');
             $range = $start->format('Y-m-d') . '~' . $end->format('Y-m-d');
-            $url = "https://lexos.metabaseapp.com/api/embed/dashboard/eyJhbGciOiJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzA0L3htbGRzaWctbW9yZSNobWFjLXNoYTI1NiIsInR5cCI6IkpXVCJ9.eyJyZXNvdXJjZSI6eyJkYXNoYm9hcmQiOjMzMX0sInBhcmFtcyI6eyJ0ZW5hbnRpZCI6ODU2Nn19.KzSD6VAtepVnwJvcthpCtHpSGwj5rSC4G30fQjFBn6E/dashcard/875/card/779?parameters=%7B%22filtro_de_data%22%3A%22{$range}%22%2C%22integra%25C3%25A7%25C3%25A3o%22%3Anull%7D";
-            $json = $this->httpGetJson($url);
+            $urls[] = "https://lexos.metabaseapp.com/api/embed/dashboard/eyJhbGciOiJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzA0L3htbGRzaWctbW9yZSNobWFjLXNoYTI1NiIsInR5cCI6IkpXVCJ9.eyJyZXNvdXJjZSI6eyJkYXNoYm9hcmQiOjMzMX0sInBhcmFtcyI6eyJ0ZW5hbnRpZCI6ODU2Nn19.KzSD6VAtepVnwJvcthpCtHpSGwj5rSC4G30fQjFBn6E/dashcard/875/card/779?parameters=%7B%22filtro_de_data%22%3A%22{$range}%22%2C%22integra%25C3%25A7%25C3%25A3o%22%3Anull%7D";
+        }
+
+        $responses = $this->httpGetJsonParallel($urls);
+        for ($m = 1; $m <= $maxMonth; $m++) {
+            $json = $responses[$m - 1] ?? [];
             $values[$m - 1] = (float) ($json['data']['rows'][0][0] ?? 0);
         }
 

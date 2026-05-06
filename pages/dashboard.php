@@ -44,17 +44,11 @@ $normalizeChannelRow = static function (mixed $row): ?array {
     return null;
 };
 
-if ($activeTab === 'comparison') {
-    $selectedYears = $_GET['lexos_years'] ?? ['2023', '2024', '2025', '2026'];
-    if (!is_array($selectedYears) || $selectedYears === []) {
-        $selectedYears = ['2023', '2024', '2025', '2026'];
-    }
-} else {
-    $selectedYears = $_GET['lexos_years'] ?? ['2023', '2024', '2025', '2026'];
-    if (!is_array($selectedYears) || $selectedYears === []) {
-        $selectedYears = ['2023', '2024', '2025', '2026'];
-    }
+$selectedYears = $_GET['lexos_years'] ?? ['2023', '2024', '2025', '2026'];
+if (!is_array($selectedYears) || $selectedYears === []) {
+    $selectedYears = ['2023', '2024', '2025', '2026'];
 }
+$selectedYears = array_values(array_map(static fn (mixed $y): string => (string) $y, $selectedYears));
 $comparison = ['months' => [], 'series' => []];
 
 try {
@@ -326,7 +320,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
         <div class="lexos-growth-grid">
             <?php foreach ($growth as $year => $val): ?>
                 <div class="lexos-growth-card">
-                    Crescimento <?= htmlspecialchars($year) ?><strong><?= ($val >= 0 ? '+' : '') . htmlspecialchars(number_format($val, 1, ',', '.')) ?>%</strong>
+                    Crescimento <?= htmlspecialchars((string) $year, ENT_QUOTES, 'UTF-8') ?><strong><?= ($val >= 0 ? '+' : '') . htmlspecialchars(number_format((float) $val, 1, ',', '.'), ENT_QUOTES, 'UTF-8') ?>%</strong>
                 </div>
             <?php endforeach; ?>
         </div>
