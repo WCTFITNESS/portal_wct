@@ -119,6 +119,13 @@ if (isset($_GET['job'])) {
             background: #d50000;
             transition: width .25s ease;
         }
+        .mp-timer {
+            margin-top: 10px;
+            font-family: Consolas, monospace;
+            font-size: 13px;
+            color: #374151;
+            font-weight: 600;
+        }
     </style>
     <div id="repasse-mp-config" data-path-prefix="<?= htmlspecialchars(trim($baseUrl, '/')) ?>" data-job="<?= htmlspecialchars($repasseJobId) ?>" hidden></div>
 
@@ -135,6 +142,7 @@ if (isset($_GET['job'])) {
                 <div id="mp-progress-bar" class="mp-progress-bar-inner"></div>
             </div>
             <small id="mp-processing-detail">Preparando...</small>
+            <div id="mp-processing-timer" class="mp-timer">Tempo: 00:00:00</div>
         </div>
     </div>
 
@@ -472,6 +480,25 @@ if (isset($_GET['job'])) {
         var titleEl = document.getElementById('mp-processing-title');
         var detailEl = document.getElementById('mp-processing-detail');
         var bar = document.getElementById('mp-progress-bar');
+        var timerEl = document.getElementById('mp-processing-timer');
+        var startedAt = Date.now();
+        var phaseStartedAt = Date.now();
+        var phaseName = 'Consultando Mercado Pago';
+        function fmtHms(sec) {
+            var h = Math.floor(sec / 3600);
+            var m = Math.floor((sec % 3600) / 60);
+            var s = sec % 60;
+            var hh = h < 10 ? '0' + h : String(h);
+            var mm = m < 10 ? '0' + m : String(m);
+            var ss = s < 10 ? '0' + s : String(s);
+            return hh + ':' + mm + ':' + ss;
+        }
+        var timerId = window.setInterval(function () {
+            if (!timerEl) return;
+            var totalSec = Math.floor((Date.now() - startedAt) / 1000);
+            var phaseSec = Math.floor((Date.now() - phaseStartedAt) / 1000);
+            timerEl.textContent = 'Tempo total: ' + fmtHms(totalSec) + ' | Fase (' + phaseName + '): ' + fmtHms(phaseSec);
+        }, 1000);
         if (overlay) overlay.classList.add('is-open');
         if (titleEl) titleEl.textContent = 'Consultando Mercado Pago...';
         var chunkUrl = portalIndexUrl('index.php?page=repasse-mp&repasse_action=chunk');
@@ -556,6 +583,8 @@ if (isset($_GET['job'])) {
                 }
             }
             if (titleEl) titleEl.textContent = 'Gerando planilha final...';
+            phaseName = 'Gerando planilha final';
+            phaseStartedAt = Date.now();
             if (detailEl) detailEl.textContent = 'Montando a coluna order e gravando o XLSX (pode levar alguns minutos em arquivos muito grandes).';
             if (bar) bar.style.width = '100%';
             var fr = await fetch(finalizeUrl, {
@@ -574,6 +603,7 @@ if (isset($_GET['job'])) {
                 var recovered = await waitForFinalizeCompletion();
                 if (recovered) {
                     if (overlay) overlay.classList.remove('is-open');
+                    window.clearInterval(timerId);
                     renderRepasseAsyncSummary(recovered);
                     return;
                 }
@@ -583,9 +613,11 @@ if (isset($_GET['job'])) {
                 throw new Error(fj.error || 'Falha ao finalizar.');
             }
             if (overlay) overlay.classList.remove('is-open');
+            window.clearInterval(timerId);
             renderRepasseAsyncSummary(fj.result);
         } catch (e) {
             if (overlay) overlay.classList.remove('is-open');
+            window.clearInterval(timerId);
             showRepasseAsyncError(e.message || e);
         }
     }

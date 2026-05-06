@@ -333,31 +333,8 @@ class RepasseMpService
         }
 
         $rows = $this->readRows($sourcePath, $ext);
-        $valueByLine = [];
-        $linesByValue = [];
         $header = null;
         $operationColumnIndex = (int) ($meta['operation_column_index'] ?? 3);
-
-        foreach ($rows as $index => $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            if ($index === 0) {
-                $header = $row;
-                continue;
-            }
-            $lineNumber = $index + 1;
-            $raw = $this->getCellValueAt($row, $operationColumnIndex);
-            $op = $this->normalizeOperationValue($raw);
-            $valueByLine[$lineNumber] = $op;
-            if ($op === '') {
-                continue;
-            }
-            if (!isset($linesByValue[$op])) {
-                $linesByValue[$op] = [];
-            }
-            $linesByValue[$op][] = $lineNumber;
-        }
 
         if ($header === null) {
             return ['ok' => false, 'error' => 'Cabecalho invalido.'];
@@ -376,8 +353,12 @@ class RepasseMpService
         $found = 0;
         $notFound = 0;
         $errors = 0;
+        $uniqueOps = $meta['unique_ops'] ?? [];
+        if (!is_array($uniqueOps)) {
+            $uniqueOps = [];
+        }
 
-        foreach (array_keys($linesByValue) as $operationValue) {
+        foreach ($uniqueOps as $operationValue) {
             $key = (string) $operationValue;
             if (!isset($matchByValue[$key])) {
                 $matchByValue[$key] = ['order_id' => '', 'payment_id' => '', 'status' => 'Nao encontrado'];
@@ -392,18 +373,26 @@ class RepasseMpService
         }
 
         $outRows = [];
-        $headerOut = $header;
-        $headerOut[] = 'order';
-        $outRows[] = $headerOut;
         $preview = [];
         $processed = 0;
+        $linesByOp = $meta['lines_by_op'] ?? [];
+        if (!is_array($linesByOp)) {
+            $linesByOp = [];
+        }
 
         foreach ($rows as $index => $row) {
             if (!is_array($row) || $index === 0) {
+                if (is_array($row) && $index === 0) {
+                    $header = $row;
+                    $headerOut = $header;
+                    $headerOut[] = 'order';
+                    $outRows[] = $headerOut;
+                }
                 continue;
             }
             $lineNumber = $index + 1;
-            $op = $valueByLine[$lineNumber] ?? '';
+            $raw = $this->getCellValueAt($row, $operationColumnIndex);
+            $op = $this->normalizeOperationValue($raw);
             $match = $op !== '' ? ($matchByValue[(string) $op] ?? ['order_id' => '', 'payment_id' => '', 'status' => 'Nao encontrado']) : ['order_id' => '', 'payment_id' => '', 'status' => 'Ignorada (coluna D vazia)'];
             $row[] = (string) ($match['order_id'] ?? '');
             $outRows[] = $row;
@@ -416,9 +405,13 @@ class RepasseMpService
                     'order' => (string) ($match['order_id'] ?? ''),
                     'payment_id' => (string) ($match['payment_id'] ?? ''),
                     'status_consulta' => (string) ($match['status'] ?? ''),
-                    'duplicadas' => $op !== '' ? count($linesByValue[$op] ?? []) : 0,
+                    'duplicadas' => $op !== '' ? (int) ($linesByOp[$op] ?? 0) : 0,
                 ];
             }
+        }
+
+        if ($header === null) {
+            return ['ok' => false, 'error' => 'Cabecalho invalido.'];
         }
 
         $exportName = 'repasse_mp_' . bin2hex(random_bytes(8)) . '.xlsx';
@@ -429,8 +422,7 @@ class RepasseMpService
             return ['ok' => false, 'error' => 'Nao foi possivel gravar o arquivo de saida.'];
         }
 
-        $linesByOp = $meta['lines_by_op'] ?? [];
-        $uniqueCount = is_array($linesByOp) ? count($linesByOp) : 0;
+        $uniqueCount = count($linesByOp);
 
         $result = [
             'file_name' => $exportName,
