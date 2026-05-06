@@ -6,7 +6,14 @@ $feedback = null;
 $feedbackClass = 'ok';
 $summary = null;
 $downloadFile = null;
-$limit = max(1, min(1000, (int) ($_POST['limit'] ?? 200)));
+$limitRaw = trim((string) ($_POST['limit'] ?? '200'));
+$limit = (int) $limitRaw;
+if ($limit < 0) {
+    $limit = 0;
+}
+if ($limit > 5000) {
+    $limit = 5000;
+}
 $dateFrom = trim((string) ($_POST['date_from'] ?? ''));
 $dateTo = trim((string) ($_POST['date_to'] ?? ''));
 $sku = trim((string) ($_POST['sku'] ?? ''));
@@ -38,8 +45,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
 
     <form method="post">
         <input type="hidden" name="form_type" value="ml_ads_report">
-        <label>Quantidade maxima de anuncios (1 a 1000)</label>
-        <input type="number" name="limit" min="1" max="1000" value="<?= htmlspecialchars((string) $limit) ?>">
+        <label>Quantidade maxima de anuncios (0 = todos, ou 1 a 5000)</label>
+        <input type="number" name="limit" min="0" max="5000" value="<?= htmlspecialchars((string) $limit) ?>">
         <label>Data inicial (last_updated/date_created)</label>
         <input type="date" name="date_from" value="<?= htmlspecialchars($dateFrom) ?>">
         <label>Data final (last_updated/date_created)</label>
@@ -57,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
 
     <?php if ($downloadFile !== '' && is_array($summary)): ?>
         <p style="margin-top:12px;">
+            Limite solicitado: <strong><?= $limit === 0 ? 'Todos' : htmlspecialchars((string) $limit) ?></strong> |
             IDs consultados: <strong><?= htmlspecialchars((string) ($summary['total_ids'] ?? 0)) ?></strong> |
             Linhas exportadas: <strong><?= htmlspecialchars((string) ($summary['total_rows'] ?? 0)) ?></strong> |
             Linhas apos filtros: <strong><?= htmlspecialchars((string) ($summary['matched_rows'] ?? 0)) ?></strong>

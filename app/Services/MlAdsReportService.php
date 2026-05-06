@@ -22,7 +22,7 @@ class MlAdsReportService
      */
     public function generateReport(int $maxItems = 200, array $filters = []): array
     {
-        $maxItems = max(1, min(1000, $maxItems));
+        $maxItems = $maxItems <= 0 ? 0 : max(1, min(5000, $maxItems));
         $skuFilter = trim((string) ($filters['sku'] ?? ''));
         $tipoFilter = $this->normalizeTypeFilter((string) ($filters['tipo'] ?? ''));
         $dateFrom = $this->normalizeDateInput($filters['date_from'] ?? null, false);
@@ -144,8 +144,9 @@ class MlAdsReportService
         $limit = 50;
         $offset = 0;
         $ids = [];
+        $unlimited = $maxItems <= 0;
 
-        while (count($ids) < $maxItems) {
+        while ($unlimited || count($ids) < $maxItems) {
             $path = '/users/' . rawurlencode($sellerId) . '/items/search?limit=' . $limit . '&offset=' . $offset;
             $res = $this->client->get($path, $accessToken);
             if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
@@ -158,7 +159,7 @@ class MlAdsReportService
 
             foreach ($resultIds as $id) {
                 $ids[] = (string) $id;
-                if (count($ids) >= $maxItems) {
+                if (!$unlimited && count($ids) >= $maxItems) {
                     break 2;
                 }
             }
