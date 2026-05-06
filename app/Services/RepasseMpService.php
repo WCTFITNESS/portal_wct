@@ -168,6 +168,9 @@ class RepasseMpService
         if (function_exists('set_time_limit')) {
             @set_time_limit(300);
         }
+        if (function_exists('ignore_user_abort')) {
+            @ignore_user_abort(true);
+        }
 
         if (!$this->isValidJobId($jobId)) {
             return ['ok' => false, 'error' => 'Job invalido.'];
@@ -271,7 +274,7 @@ class RepasseMpService
             @set_time_limit(600);
         }
         if (function_exists('ignore_user_abort')) {
-            @ignore_user_abort(false);
+            @ignore_user_abort(true);
         }
 
         if (!$this->isValidJobId($jobId)) {
@@ -318,6 +321,9 @@ class RepasseMpService
         if (($meta['status'] ?? '') !== 'matching_done') {
             return ['ok' => false, 'error' => 'Processamento da API ainda nao terminou.'];
         }
+        $meta['status'] = 'finalizing';
+        $meta['finalize_started_at'] = time();
+        $this->saveJobMeta($jobId, $meta);
 
         $ext = (string) ($meta['ext'] ?? 'xlsx');
         $jobDir = $this->jobDirectory($jobId);
@@ -372,7 +378,6 @@ class RepasseMpService
         $errors = 0;
 
         foreach (array_keys($linesByValue) as $operationValue) {
-            $this->assertClientConnected();
             $key = (string) $operationValue;
             if (!isset($matchByValue[$key])) {
                 $matchByValue[$key] = ['order_id' => '', 'payment_id' => '', 'status' => 'Nao encontrado'];
@@ -394,7 +399,6 @@ class RepasseMpService
         $processed = 0;
 
         foreach ($rows as $index => $row) {
-            $this->assertClientConnected();
             if (!is_array($row) || $index === 0) {
                 continue;
             }
@@ -448,6 +452,56 @@ class RepasseMpService
         $this->saveJobMeta($jobId, $meta);
 
         return ['ok' => true, 'result' => $result];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getJobStatus(string $jobId): array
+    {
+        if (!$this->isValidJobId($jobId)) {
+            return ['ok' => false, 'error' => 'Job invalido.'];
+        }
+
+        $meta = $this->loadJobMeta($jobId);
+        if ($meta === null) {
+            return ['ok' => false, 'error' => 'Job nao encontrado.'];
+        }
+
+        $status = (string) ($meta['status'] ?? 'unknown');
+        if ($status === 'error') {
+            return ['ok' => false, 'error' => (string) ($meta['error_message'] ?? 'Erro no job.')];
+        }
+
+        $uniqueOps = $meta['unique_ops'] ?? [];
+        $total = is_array($uniqueOps) ? count($uniqueOps) : 0;
+        $cursor = (int) ($meta['cursor'] ?? 0);
+        $progress = $total > 0 ? round(min(100.0, ($cursor / $total) * 100.0), 1) : 100.0;
+
+        $payload = [
+            'ok' => true,
+            'status' => $status,
+            'cursor' => $cursor,
+            'total' => $total,
+            'progress' => $progress,
+            'api_calls_total' => (int) ($meta['api_calls_total'] ?? 0),
+        ];
+
+        if ($status === 'complete') {
+            $snapshot = $meta['result_snapshot'] ?? null;
+            if (is_string($snapshot) && $snapshot !== '') {
+                try {
+                    $decoded = json_decode($snapshot, true, 512, JSON_THROW_ON_ERROR);
+                    if (is_array($decoded)) {
+                        $payload['result'] = $decoded;
+                    }
+                } catch (JsonException) {
+                    // sem snapshot valido, retorna apenas status.
+                }
+            }
+        }
+
+        return $payload;
     }
 
     private function newJobId(): string

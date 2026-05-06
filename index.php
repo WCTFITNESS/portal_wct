@@ -28,6 +28,11 @@ if ($page === 'repasse-mp' && isset($_GET['repasse_action']) && $_GET['repasse_a
 
             exit;
         }
+        if ($action === 'status') {
+            echo json_encode($app['repasseMpService']->getJobStatus($jobId), JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
         http_response_code(405);
         echo json_encode(['ok' => false, 'error' => 'Metodo ou acao invalidos.'], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {

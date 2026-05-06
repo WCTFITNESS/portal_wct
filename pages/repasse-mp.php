@@ -476,6 +476,55 @@ if (isset($_GET['job'])) {
         if (titleEl) titleEl.textContent = 'Consultando Mercado Pago...';
         var chunkUrl = portalIndexUrl('index.php?page=repasse-mp&repasse_action=chunk');
         var finalizeUrl = portalIndexUrl('index.php?page=repasse-mp&repasse_action=finalize');
+        var statusUrl = portalIndexUrl('index.php?page=repasse-mp&repasse_action=status&job=' + encodeURIComponent(asyncJobId));
+
+        async function sleepMs(ms) {
+            return new Promise(function (resolve) { setTimeout(resolve, ms); });
+        }
+
+        async function waitForFinalizeCompletion() {
+            for (var i = 0; i < 180; i++) {
+                await sleepMs(5000);
+                var stRes = await fetch(statusUrl + '&_=' + Date.now(), { method: 'GET' });
+                var stRaw = await stRes.text();
+                var st;
+                try {
+                    st = JSON.parse(stRaw);
+                } catch (e) {
+                    continue;
+                }
+                if (!st.ok) {
+                    throw new Error(st.error || 'Falha ao acompanhar finalizacao.');
+                }
+                if (detailEl) {
+                    if (st.status === 'finalizing') {
+                        detailEl.textContent = 'Finalizando arquivo no servidor... aguarde.';
+                    } else if (st.status === 'matching_done') {
+                        detailEl.textContent = 'Aguardando inicio/retentativa da finalizacao...';
+                    }
+                }
+                if (st.status === 'complete' && st.result) {
+                    return st.result;
+                }
+                if (st.status === 'matching_done' && i % 8 === 0) {
+                    try {
+                        var retry = await fetch(finalizeUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'job=' + encodeURIComponent(asyncJobId)
+                        });
+                        var retryRaw = await retry.text();
+                        var retryJson = JSON.parse(retryRaw);
+                        if (retryJson.ok && retryJson.result) {
+                            return retryJson.result;
+                        }
+                    } catch (e2) {
+                        // continua no polling
+                    }
+                }
+            }
+            return null;
+        }
         try {
             while (true) {
                 var res = await fetch(chunkUrl, {
@@ -519,7 +568,16 @@ if (isset($_GET['job'])) {
             try {
                 fj = JSON.parse(rawF);
             } catch (e2) {
-                throw new Error('Resposta invalida ao finalizar (timeout?). Recarregue a pagina; se o URL ainda tiver ?job=..., o navegador pode tentar de novo.');
+                if (detailEl) {
+                    detailEl.textContent = 'Resposta de finalize expirou; verificando status no servidor...';
+                }
+                var recovered = await waitForFinalizeCompletion();
+                if (recovered) {
+                    if (overlay) overlay.classList.remove('is-open');
+                    renderRepasseAsyncSummary(recovered);
+                    return;
+                }
+                throw new Error('Finalize levou tempo demais para responder. O servidor pode continuar processando; recarregue em alguns minutos com o mesmo ?job= na URL.');
             }
             if (!fj.ok) {
                 throw new Error(fj.error || 'Falha ao finalizar.');
