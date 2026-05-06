@@ -23,6 +23,8 @@ class RequestLogRepository
         ?string $errorMessage = null
     ): void {
         $this->ensureTableExists();
+        $safeMethod = $this->truncate($method, 10);
+        $safePath = $this->truncate($path, 255);
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO request_logs
@@ -31,8 +33,8 @@ class RequestLogRepository
         );
 
         $stmt->execute([
-            ':method' => strtoupper($method),
-            ':path' => $path,
+            ':method' => strtoupper($safeMethod),
+            ':path' => $safePath,
             ':http_status' => $httpStatus,
             ':request_payload' => $requestPayload,
             ':response_body' => $responseBody,
@@ -86,5 +88,20 @@ class RequestLogRepository
     private function isPgsql(): bool
     {
         return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
+    }
+
+    private function truncate(string $value, int $max): string
+    {
+        if ($max < 1) {
+            return '';
+        }
+        if (mb_strlen($value) <= $max) {
+            return $value;
+        }
+        if ($max <= 3) {
+            return mb_substr($value, 0, $max);
+        }
+
+        return mb_substr($value, 0, $max - 3) . '...';
     }
 }
