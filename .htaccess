@@ -1,0 +1,5 @@
+# Favicon: navegadores pedem /favicon.ico; servir o SVG evita 404 sem arquivo .ico binario.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^favicon\.ico$ favicon.svg [L]
+</IfModule>

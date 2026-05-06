@@ -126,6 +126,9 @@ if (
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Portal WCT</title>
+    <?php $faviconHref = portal_wct_public_path($baseUrl, 'favicon.svg'); ?>
+    <link rel="icon" type="image/svg+xml" href="<?= htmlspecialchars($faviconHref, ENT_QUOTES, 'UTF-8') ?>">
+    <link rel="shortcut icon" href="<?= htmlspecialchars($faviconHref, ENT_QUOTES, 'UTF-8') ?>">
     <style>
         :root {
             --wct-bg: #f4f5f7;
