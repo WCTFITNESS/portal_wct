@@ -93,7 +93,8 @@ foreach ($topProducts as $p) {
     $productsChartValues[] = (float) ($p['TotalVendidoItem'] ?? 0);
 }
 
-$skuDailyMap = [];
+$skuDailyRevenue = [];
+$skuDailyQty = [];
 if (is_array($skuData) && is_array($skuData['sales']['result'] ?? null)) {
     foreach ($skuData['sales']['result'] as $sale) {
         if (!is_array($sale)) {
@@ -104,12 +105,21 @@ if (is_array($skuData) && is_array($skuData['sales']['result'] ?? null)) {
         if ($dateKey === '') {
             continue;
         }
-        $skuDailyMap[$dateKey] = ($skuDailyMap[$dateKey] ?? 0) + (float) ($sale['Valor'] ?? 0);
+        $skuDailyRevenue[$dateKey] = ($skuDailyRevenue[$dateKey] ?? 0) + (float) ($sale['Valor'] ?? 0);
+        $skuDailyQty[$dateKey] = ($skuDailyQty[$dateKey] ?? 0) + (float) ($sale['Qtde'] ?? 0);
     }
-    ksort($skuDailyMap);
+    ksort($skuDailyRevenue);
+    ksort($skuDailyQty);
 }
-$skuChartLabels = array_keys($skuDailyMap);
-$skuChartValues = array_values($skuDailyMap);
+$skuDateKeys = array_unique(array_merge(array_keys($skuDailyRevenue), array_keys($skuDailyQty)));
+sort($skuDateKeys);
+$skuChartLabels = $skuDateKeys;
+$skuChartValues = [];
+$skuChartQtyValues = [];
+foreach ($skuDateKeys as $d) {
+    $skuChartValues[] = (float) ($skuDailyRevenue[$d] ?? 0);
+    $skuChartQtyValues[] = (float) ($skuDailyQty[$d] ?? 0);
+}
 $comparisonMonths = is_array($comparison['months'] ?? null) ? $comparison['months'] : [];
 $comparisonSeries = is_array($comparison['series'] ?? null) ? $comparison['series'] : [];
 $growth = [];
@@ -182,6 +192,20 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
     .lexos-growth-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
     .lexos-growth-card { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#f8fafc; }
     .lexos-pagination { display:flex; gap:8px; justify-content:center; margin-top:10px; }
+    .lexos-sku-toolbar { margin-bottom:16px; }
+    .lexos-sku-filter-row { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 18px; }
+    .lexos-sku-filter-item { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .lexos-sku-filter-row .lexos-sku-filter-item label { margin-top:0; font-size:.82rem; }
+    .lexos-sku-filter-row input[type="date"],
+    .lexos-sku-filter-row input[type="text"] { width:auto; min-width:140px; max-width:100%; margin-top:0; }
+    .lexos-sku-filter-row button { margin-top:0; }
+    .lexos-sku-product-bar {
+        margin:14px 0 16px 0; padding:12px 14px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px;
+        font-size:.95rem; font-weight:700; letter-spacing:.02em; color:#0f172a;
+    }
+    .lexos-sku-chart-block h2 { margin:0 0 10px 0; font-size:1.1rem; color:#1e293b; }
+    .lexos-sku-chart-host { position:relative; width:100%; height:min(380px, 70vh); margin-top:6px; }
+    .lexos-metric-alert { color:#dc2626; font-weight:800; }
 </style>
 
 <section class="card">
@@ -419,18 +443,29 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
 
     <div class="lexos-tab-content<?= $activeTab === 'sku-analysis' ? ' active' : '' ?>" data-content="sku-analysis">
         <h1>Análise de SKU</h1>
-        <form method="get" style="margin-bottom:10px;">
-            <input type="hidden" name="page" value="dashboard">
-            <input type="hidden" name="lexos_tab" value="sku-analysis">
-            <input type="hidden" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
-            <input type="hidden" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
-            <input type="hidden" name="lexos_search" value="<?= htmlspecialchars($search) ?>">
-            <label>SKU</label>
-            <input type="text" name="lexos_sku" value="<?= htmlspecialchars($sku) ?>" placeholder="Digite o SKU">
-            <button type="submit">Buscar</button>
-        </form>
+        <div class="lexos-sku-toolbar">
+            <form method="get" class="lexos-sku-filters" action="">
+                <input type="hidden" name="page" value="dashboard">
+                <input type="hidden" name="lexos_tab" value="sku-analysis">
+                <input type="hidden" name="lexos_search" value="<?= htmlspecialchars($search) ?>">
+                <div class="lexos-sku-filter-row">
+                    <div class="lexos-sku-filter-item">
+                        <label for="lexos-sku-input">SKU</label>
+                        <input id="lexos-sku-input" type="text" name="lexos_sku" value="<?= htmlspecialchars($sku) ?>" placeholder="Digite o SKU" autocomplete="off">
+                    </div>
+                    <div class="lexos-sku-filter-item">
+                        <label for="lexos-sku-start">Data inicial</label>
+                        <input id="lexos-sku-start" type="date" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
+                    </div>
+                    <div class="lexos-sku-filter-item">
+                        <label for="lexos-sku-end">Data final</label>
+                        <input id="lexos-sku-end" type="date" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
+                    </div>
+                    <button type="submit">Buscar</button>
+                </div>
+            </form>
+        </div>
         <?php if (is_array($skuData)): ?>
-            <p>SKU consultado: <strong><?= htmlspecialchars($sku) ?></strong></p>
             <?php
                 $salesRows = is_array($skuData['sales']['result'] ?? null) ? $skuData['sales']['result'] : [];
                 $stockRows = is_array($skuData['stock']['result'] ?? null) ? $skuData['stock']['result'] : [];
@@ -445,20 +480,33 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
                 $daysSpan = max(1, (int) ((strtotime($dEnd) - strtotime($dStart)) / 86400) + 1);
                 $mediaDia = $totalQt / $daysSpan;
                 $cobertura = $mediaDia > 0 ? floor($estoqueAtual / $mediaDia) : null;
+                $skuNomeProduto = '';
+                if ($stockRows !== [] && is_array($stockRows[0])) {
+                    $skuNomeProduto = trim((string) ($stockRows[0]['Nome'] ?? $stockRows[0]['nome'] ?? $stockRows[0]['Descricao'] ?? ''));
+                }
+                if ($skuNomeProduto === '' && $salesRows !== [] && is_array($salesRows[0])) {
+                    $skuNomeProduto = trim((string) ($salesRows[0]['Nome'] ?? $salesRows[0]['nome'] ?? $salesRows[0]['Produto'] ?? ''));
+                }
             ?>
+            <?php if ($skuNomeProduto !== ''): ?>
+                <div class="lexos-sku-product-bar"><?= htmlspecialchars($skuNomeProduto, ENT_QUOTES, 'UTF-8') ?></div>
+            <?php endif; ?>
             <div class="lexos-metrics" style="grid-template-columns:repeat(4,minmax(0,1fr));">
                 <div class="lexos-metric">Estoque Atual<strong><?= htmlspecialchars(number_format($estoqueAtual, 0, ',', '.')) ?></strong></div>
                 <div class="lexos-metric">Faturamento no Período<strong>R$ <?= htmlspecialchars(number_format($totalFat, 2, ',', '.')) ?></strong></div>
                 <div class="lexos-metric">Vendas Médias / Dia<strong><?= htmlspecialchars(number_format($mediaDia, 2, ',', '.')) ?> un/dia</strong></div>
-                <div class="lexos-metric">Cobertura de Estoque<strong><?= $cobertura === null ? 'N/A' : htmlspecialchars((string) $cobertura . ' dias') ?></strong></div>
+                <div class="lexos-metric">Cobertura de Estoque<strong><?php if ($cobertura === null): ?>N/A<?php else: ?><span class="lexos-metric-alert"><?= htmlspecialchars((string) $cobertura) ?> dias</span><?php endif; ?></strong></div>
             </div>
-            <?php if ($skuChartLabels): ?>
-                <div class="lexos-chart-wrap">
-                    <canvas id="lexos-sku-chart"></canvas>
+            <?php if ($skuChartLabels !== []): ?>
+                <div class="lexos-chart-wrap lexos-sku-chart-block">
+                    <h2>Vendas diárias</h2>
+                    <div class="lexos-sku-chart-host">
+                        <canvas id="lexos-sku-chart"></canvas>
+                    </div>
                 </div>
             <?php endif; ?>
         <?php else: ?>
-            <p>Informe um SKU para visualizar os dados.</p>
+            <p class="lexos-sku-hint">Informe o SKU e o período, depois clique em <strong>Buscar</strong>.</p>
         <?php endif; ?>
     </div>
 </section>
@@ -501,13 +549,87 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
         }
 
         var skuLabels = <?= $lexosJsonEmbed($skuChartLabels) ?>;
-        var skuValues = <?= $lexosJsonEmbed($skuChartValues) ?>;
+        var skuRev = <?= $lexosJsonEmbed($skuChartValues) ?>;
+        var skuQty = <?= $lexosJsonEmbed($skuChartQtyValues) ?>;
         var sCanvas = document.getElementById('lexos-sku-chart');
         if (sCanvas && skuLabels.length) {
             new Chart(sCanvas.getContext('2d'), {
-                type: 'line',
-                data: { labels: skuLabels, datasets: [{ label: 'Faturamento diário', data: skuValues, borderColor: '#059669', backgroundColor: 'rgba(5,150,105,.15)', fill: true, tension: .3 }] },
-                options: { responsive: true, maintainAspectRatio: false }
+                type: 'bar',
+                data: {
+                    labels: skuLabels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Faturamento (R$)',
+                            data: skuRev,
+                            yAxisID: 'y',
+                            backgroundColor: 'rgba(147, 197, 253, 0.9)',
+                            borderRadius: 4,
+                            order: 1
+                        },
+                        {
+                            type: 'line',
+                            label: 'Quantidade',
+                            data: skuQty,
+                            yAxisID: 'y1',
+                            borderColor: '#22c55e',
+                            backgroundColor: 'rgba(34, 197, 94, 0.08)',
+                            fill: false,
+                            tension: 0.2,
+                            pointRadius: 5,
+                            pointBackgroundColor: '#22c55e',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                            borderWidth: 2.5,
+                            order: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) {
+                                    var v = ctx.parsed.y;
+                                    if (ctx.datasetIndex === 0) {
+                                        return 'Faturamento (R$): ' + (typeof v === 'number' ? v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : v);
+                                    }
+                                    return 'Quantidade: ' + v + ' un';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Data' },
+                            ticks: { maxRotation: 45, minRotation: 0 }
+                        },
+                        y: {
+                            position: 'left',
+                            title: { display: true, text: 'Faturamento (R$)' },
+                            ticks: {
+                                callback: function (val) {
+                                    var v = Number(val);
+                                    if (v >= 1e6) { return 'R$ ' + (v / 1e6).toFixed(1) + 'M'; }
+                                    if (v >= 1e3) { return 'R$ ' + (v / 1e3).toFixed(0) + 'k'; }
+                                    return 'R$ ' + v;
+                                }
+                            }
+                        },
+                        y1: {
+                            position: 'right',
+                            title: { display: true, text: 'Quantidade (un)' },
+                            grid: { drawOnChartArea: false },
+                            ticks: {
+                                callback: function (val) { return val + ' un'; }
+                            }
+                        }
+                    }
+                }
             });
         }
 
