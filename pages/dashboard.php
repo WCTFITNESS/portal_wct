@@ -161,9 +161,18 @@ $lexosJsonEmbed = static function (mixed $data): string {
     .lexos-chart-canvas-host { position:relative; width:100%; height:min(360px, 70vh); margin-bottom:10px; }
     .lexos-chart-wrap canvas { display:block; width:100% !important; height:100% !important; max-height:none; }
     .lexos-svg-fallback { display:block; width:100%; height:auto; max-height:min(480px, 55vh); }
+.lexos-dashboard-charts { display:grid; grid-template-columns: 1.5fr 1fr; gap:12px; align-items:stretch; margin-bottom:10px; }
+.lexos-pie-fallback { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#f8fafc; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.lexos-pie-caption { margin:0 0 8px 0; font-size:.82rem; color:#64748b; }
+.lexos-pie-list { width:100%; margin:10px 0 0 0; padding:0; list-style:none; }
+.lexos-pie-list li { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:.8rem; color:#334155; margin:4px 0; }
+.lexos-dot { width:10px; height:10px; border-radius:999px; display:inline-block; margin-right:6px; vertical-align:middle; }
     .lexos-growth-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
     .lexos-growth-card { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#f8fafc; }
     .lexos-pagination { display:flex; gap:8px; justify-content:center; margin-top:10px; }
+@media (max-width: 980px) {
+    .lexos-dashboard-charts { grid-template-columns: 1fr; }
+}
 </style>
 
 <section class="card">
@@ -225,13 +234,67 @@ $lexosJsonEmbed = static function (mixed $data): string {
                 $svgW = 1180;
                 $barTrackW = 640.0;
                 $svgH = max(140, 28 + count($channels) * 28);
+                $channelsTotalValue = array_sum($channelsChartValues);
+                $pieR = 74.0;
+                $pieCx = 100.0;
+                $pieCy = 100.0;
+                $pieCirc = 2 * pi() * $pieR;
+                $pieOffset = 0.0;
             ?>
             <div class="lexos-chart-wrap">
                 <p class="lexos-chart-caption" style="margin:0 0 10px 0; font-size:.88rem; color:#64748b;">
                     Faturamento por canal (visual SVG — funciona mesmo com JavaScript bloqueado ou CDN indisponível).
                 </p>
-                <div class="lexos-chart-canvas-host">
-                    <canvas id="lexos-channel-chart" aria-label="Gráfico de canais"></canvas>
+                <div class="lexos-dashboard-charts">
+                    <div class="lexos-chart-canvas-host">
+                        <canvas id="lexos-channel-chart" aria-label="Gráfico de canais"></canvas>
+                    </div>
+                    <div class="lexos-pie-fallback">
+                        <p class="lexos-pie-caption">Pizza (fallback servidor)</p>
+                        <svg width="210" height="210" viewBox="0 0 210 210" role="img" aria-label="Gráfico de pizza por canal">
+                            <circle cx="<?= $pieCx ?>" cy="<?= $pieCy ?>" r="<?= $pieR ?>" stroke="#e2e8f0" stroke-width="28" fill="none"></circle>
+                            <?php foreach ($channels as $i => $row): ?>
+                                <?php
+                                    $val = (float) ($row[1] ?? 0);
+                                    $ratio = $channelsTotalValue > 0 ? $val / $channelsTotalValue : 0.0;
+                                    $dash = $ratio * $pieCirc;
+                                    $fill = $svgPalette[$i % count($svgPalette)];
+                                ?>
+                                <?php if ($dash > 0): ?>
+                                    <circle
+                                        cx="<?= $pieCx ?>"
+                                        cy="<?= $pieCy ?>"
+                                        r="<?= $pieR ?>"
+                                        stroke="<?= htmlspecialchars($fill, ENT_QUOTES, 'UTF-8') ?>"
+                                        stroke-width="28"
+                                        fill="none"
+                                        stroke-linecap="butt"
+                                        stroke-dasharray="<?= $dash ?> <?= $pieCirc ?>"
+                                        stroke-dashoffset="<?= -$pieOffset ?>"
+                                        transform="rotate(-90 <?= $pieCx ?> <?= $pieCy ?>)"
+                                    ></circle>
+                                    <?php $pieOffset += $dash; ?>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                            <circle cx="<?= $pieCx ?>" cy="<?= $pieCy ?>" r="45" fill="#ffffff"></circle>
+                            <text x="<?= $pieCx ?>" y="<?= $pieCy - 2 ?>" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#475569">Total</text>
+                            <text x="<?= $pieCx ?>" y="<?= $pieCy + 16 ?>" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#0f172a">R$ <?= htmlspecialchars(number_format((float) $channelsTotalValue, 2, ',', '.'), ENT_QUOTES, 'UTF-8') ?></text>
+                        </svg>
+                        <ul class="lexos-pie-list">
+                            <?php foreach ($channels as $i => $row): ?>
+                                <?php
+                                    $label = (string) ($row[0] ?? '');
+                                    $val = (float) ($row[1] ?? 0);
+                                    $pct = $channelsTotalValue > 0 ? ($val / $channelsTotalValue) * 100.0 : 0.0;
+                                    $fill = $svgPalette[$i % count($svgPalette)];
+                                ?>
+                                <li>
+                                    <span><span class="lexos-dot" style="background:<?= htmlspecialchars($fill, ENT_QUOTES, 'UTF-8') ?>"></span><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></span>
+                                    <strong><?= htmlspecialchars(number_format($pct, 1, ',', '.'), ENT_QUOTES, 'UTF-8') ?>%</strong>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
                 </div>
                 <svg class="lexos-svg-fallback" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 <?= $svgW ?> <?= $svgH ?>" preserveAspectRatio="xMidYMin meet" role="img" aria-label="Barras de faturamento por canal">
                     <rect width="<?= $svgW ?>" height="<?= $svgH ?>" fill="#ffffff"/>
