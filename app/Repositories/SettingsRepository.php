@@ -28,6 +28,9 @@ class SettingsRepository
 
     public function saveApiConfig(array $data): void
     {
+        if (isset($data['lexos_token'])) {
+            $data['lexos_token'] = $this->normalizeBearerToken((string) $data['lexos_token']);
+        }
         $this->ensureOauthCodeColumnExists();
         $this->ensureLexosCodeColumnExists();
         $this->ensureLexosTokenColumnExists();
@@ -294,5 +297,13 @@ class SettingsRepository
     private function isPgsql(): bool
     {
         return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
+    }
+
+    private function normalizeBearerToken(string $token): string
+    {
+        $normalized = trim($token);
+        $normalized = preg_replace('/^\s*Bearer\s+/i', '', $normalized) ?? $normalized;
+
+        return trim($normalized);
     }
 }

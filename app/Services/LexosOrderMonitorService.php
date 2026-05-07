@@ -284,6 +284,7 @@ class LexosOrderMonitorService
     {
         $cfg = $this->settingsRepository->getApiConfig();
         $token = trim((string) ($cfg['lexos_token'] ?? ''));
+        $token = preg_replace('/^\s*Bearer\s+/i', '', $token) ?? $token;
         if ($token === '') {
             throw new RuntimeException('Token Lexos não configurado em Configuração API.');
         }
