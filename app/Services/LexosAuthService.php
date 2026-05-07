@@ -112,15 +112,13 @@ class LexosAuthService
     private function httpPostJson(string $url, array $payload): array
     {
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        $headers = $this->buildAuthHeaders('application/json');
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => 'POST',
             CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => [
-                'Accept: application/json',
-                'Content-Type: application/json',
-            ],
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 45,
         ]);
 
@@ -145,15 +143,13 @@ class LexosAuthService
     private function httpPostFormUrlEncoded(string $url, array $payload): array
     {
         $body = http_build_query($payload, '', '&', PHP_QUERY_RFC3986);
+        $headers = $this->buildAuthHeaders('application/x-www-form-urlencoded');
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => 'POST',
             CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => [
-                'Accept: application/json',
-                'Content-Type: application/x-www-form-urlencoded',
-            ],
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 45,
         ]);
 
@@ -199,7 +195,31 @@ class LexosAuthService
             'lexos_code' => trim($code),
             'lexos_token' => trim($accessToken),
             'lexos_refresh_token' => trim((string) ($refreshToken ?? '')),
+            'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
         ]);
+    }
+
+    /**
+     * A doc da Lexos cita envio da chave segura em header, mas pode variar o nome.
+     * Enviamos em múltiplos nomes comuns para maximizar compatibilidade.
+     */
+    private function buildAuthHeaders(string $contentType): array
+    {
+        $headers = [
+            'Accept: application/json',
+            'Content-Type: ' . $contentType,
+        ];
+
+        $cfg = $this->settingsRepository->getApiConfig() ?? [];
+        $integrationKey = trim((string) ($cfg['lexos_integration_key'] ?? ''));
+        if ($integrationKey !== '') {
+            $headers[] = 'x-api-key: ' . $integrationKey;
+            $headers[] = 'x-integration-key: ' . $integrationKey;
+            $headers[] = 'integration-key: ' . $integrationKey;
+            $headers[] = 'chave-integracao: ' . $integrationKey;
+        }
+
+        return $headers;
     }
 
     private function normalizeCodeInput(string $input): string

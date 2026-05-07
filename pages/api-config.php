@@ -19,6 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
                 'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
                 'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
+                'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
             ]);
             $feedback = 'Configurações da API Mercado Livre salvas.';
         }
@@ -34,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lexos_code' => trim((string) ($_POST['lexos_code'] ?? '')),
                 'lexos_token' => trim((string) ($_POST['lexos_token'] ?? '')),
                 'lexos_refresh_token' => trim((string) ($_POST['lexos_refresh_token'] ?? '')),
+                'lexos_integration_key' => trim((string) ($_POST['lexos_integration_key'] ?? '')),
             ]);
             $feedback = 'Configurações da API Lexos salvas.';
         }
@@ -152,6 +154,9 @@ $requestLogs = $app['requestLogRepository']->listRecent(10);
 
         <label>Refresh token Lexos</label>
         <textarea name="lexos_refresh_token" rows="3" placeholder="Cole o refresh token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_refresh_token'] ?? '')) ?></textarea>
+
+        <label>Chave segura da integração Lexos (Header)</label>
+        <textarea name="lexos_integration_key" rows="2" placeholder="Cole a chave segura da integração"><?= htmlspecialchars((string) ($apiConfig['lexos_integration_key'] ?? '')) ?></textarea>
 
         <button type="submit">Salvar Configuração Lexos</button>
     </form>

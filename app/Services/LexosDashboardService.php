@@ -341,18 +341,26 @@ class LexosDashboardService
     private function httpPostLexosJson(string $url, array $payload): array
     {
         $token = $this->getLexosToken();
+        $integrationKey = $this->getLexosIntegrationKey();
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        $headers = [
+            'Accept: application/json',
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $token,
+        ];
+        if ($integrationKey !== '') {
+            $headers[] = 'x-api-key: ' . $integrationKey;
+            $headers[] = 'x-integration-key: ' . $integrationKey;
+            $headers[] = 'integration-key: ' . $integrationKey;
+            $headers[] = 'chave-integracao: ' . $integrationKey;
+        }
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => 'POST',
             CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => [
-                'Accept: application/json',
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $token,
-            ],
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 60,
         ]);
         $raw = curl_exec($ch);
@@ -366,6 +374,13 @@ class LexosDashboardService
         $decoded = json_decode((string) $raw, true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function getLexosIntegrationKey(): string
+    {
+        $cfg = $this->settingsRepository->getApiConfig();
+
+        return trim((string) ($cfg['lexos_integration_key'] ?? ''));
     }
 }
 
