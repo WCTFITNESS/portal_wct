@@ -8,16 +8,34 @@ $detectedSellerId = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        if (($_POST['form_type'] ?? '') === 'api') {
+        if (($_POST['form_type'] ?? '') === 'ml_api') {
+            $existing = $app['settingsRepository']->getApiConfig() ?? [];
             $app['settingsRepository']->saveApiConfig([
                 'app_id' => trim((string) ($_POST['app_id'] ?? '')),
                 'client_secret' => trim((string) ($_POST['client_secret'] ?? '')),
                 'redirect_uri' => trim((string) ($_POST['redirect_uri'] ?? '')),
                 'seller_id' => trim((string) ($_POST['seller_id'] ?? '')),
                 'oauth_code' => trim((string) ($_POST['oauth_code'] ?? '')),
-                'lexos_token' => trim((string) ($_POST['lexos_token'] ?? '')),
+                'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
+                'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
+                'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
             ]);
-            $feedback = 'Configurações da API salvas.';
+            $feedback = 'Configurações da API Mercado Livre salvas.';
+        }
+
+        if (($_POST['form_type'] ?? '') === 'lexos_api') {
+            $existing = $app['settingsRepository']->getApiConfig() ?? [];
+            $app['settingsRepository']->saveApiConfig([
+                'app_id' => trim((string) ($existing['app_id'] ?? '')),
+                'client_secret' => trim((string) ($existing['client_secret'] ?? '')),
+                'redirect_uri' => trim((string) ($existing['redirect_uri'] ?? '')),
+                'seller_id' => trim((string) ($existing['seller_id'] ?? '')),
+                'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
+                'lexos_code' => trim((string) ($_POST['lexos_code'] ?? '')),
+                'lexos_token' => trim((string) ($_POST['lexos_token'] ?? '')),
+                'lexos_refresh_token' => trim((string) ($_POST['lexos_refresh_token'] ?? '')),
+            ]);
+            $feedback = 'Configurações da API Lexos salvas.';
         }
 
         if (($_POST['form_type'] ?? '') === 'token') {
@@ -78,13 +96,13 @@ $mpRow = $app['mercadopagoSettingsRepository']->getSettings();
 $requestLogs = $app['requestLogRepository']->listRecent(10);
 ?>
 <section class="card">
-    <h1>Configuração API</h1>
+    <h1>Configuração API Mercado Livre</h1>
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>
 
     <form method="post">
-        <input type="hidden" name="form_type" value="api">
+        <input type="hidden" name="form_type" value="ml_api">
         <label>App ID</label>
         <input type="text" name="app_id" value="<?= htmlspecialchars((string) ($apiConfig['app_id'] ?? '')) ?>" required>
 
@@ -100,10 +118,25 @@ $requestLogs = $app['requestLogRepository']->listRecent(10);
         <label>Code (Authorization Code)</label>
         <input type="text" name="oauth_code" value="<?= htmlspecialchars((string) ($apiConfig['oauth_code'] ?? '')) ?>">
 
-        <label>Token Lexos (Plugin Faturamento)</label>
-        <textarea name="lexos_token" rows="3" placeholder="Cole o access_token do app-hub.lexos.com.br"><?= htmlspecialchars((string) ($apiConfig['lexos_token'] ?? '')) ?></textarea>
+        <button type="submit">Salvar Configuração ML</button>
+    </form>
+</section>
 
-        <button type="submit">Salvar Configuração</button>
+<section class="card">
+    <h1>Configuração API Lexos</h1>
+    <form method="post">
+        <input type="hidden" name="form_type" value="lexos_api">
+
+        <label>Lexos Code</label>
+        <textarea name="lexos_code" rows="2" placeholder="Cole o code da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_code'] ?? '')) ?></textarea>
+
+        <label>Token Lexos</label>
+        <textarea name="lexos_token" rows="3" placeholder="Cole o access_token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_token'] ?? '')) ?></textarea>
+
+        <label>Refresh token Lexos</label>
+        <textarea name="lexos_refresh_token" rows="3" placeholder="Cole o refresh token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_refresh_token'] ?? '')) ?></textarea>
+
+        <button type="submit">Salvar Configuração Lexos</button>
     </form>
 </section>
 

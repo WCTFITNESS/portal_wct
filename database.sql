@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS api_settings (
     redirect_uri VARCHAR(255) DEFAULT NULL,
     seller_id VARCHAR(80) NOT NULL,
     oauth_code VARCHAR(255) DEFAULT NULL,
+    lexos_code TEXT DEFAULT NULL,
     lexos_token TEXT DEFAULT NULL,
+    lexos_refresh_token TEXT DEFAULT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
