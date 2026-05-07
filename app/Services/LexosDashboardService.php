@@ -344,22 +344,55 @@ class LexosDashboardService
         $token = $this->getLexosToken();
         $integrationKey = $this->getLexosIntegrationKey();
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
-        $headers = [
+        $baseHeaders = [
             'Accept: application/json',
             'Content-Type: application/json',
-            'Authorization: Bearer ' . $token,
         ];
         if ($integrationKey !== '') {
             $customHeaderName = $this->getLexosIntegrationHeaderName();
             if ($customHeaderName !== '') {
-                $headers[] = $customHeaderName . ': ' . $integrationKey;
+                $baseHeaders[] = $customHeaderName . ': ' . $integrationKey;
             }
-            $headers[] = 'x-api-key: ' . $integrationKey;
-            $headers[] = 'x-integration-key: ' . $integrationKey;
-            $headers[] = 'integration-key: ' . $integrationKey;
-            $headers[] = 'chave-integracao: ' . $integrationKey;
+            $baseHeaders[] = 'x-api-key: ' . $integrationKey;
+            $baseHeaders[] = 'x-integration-key: ' . $integrationKey;
+            $baseHeaders[] = 'integration-key: ' . $integrationKey;
+            $baseHeaders[] = 'chave-integracao: ' . $integrationKey;
         }
 
+        $authVariants = [
+            'Authorization: Bearer ' . $token,
+            'Authorization: ' . $token,
+            'Authorization: Token ' . $token,
+        ];
+
+        $lastError = null;
+        foreach ($authVariants as $authorizationHeader) {
+            [$status, $err, $raw] = $this->executeLexosPost($url, $body, array_merge($baseHeaders, [$authorizationHeader]));
+            if ($raw !== false && $status >= 200 && $status < 300) {
+                $decoded = json_decode((string) $raw, true);
+
+                return is_array($decoded) ? $decoded : [];
+            }
+
+            $lastError = new RuntimeException('Falha consulta Lexos WebAPI. HTTP: ' . $status . ($err !== '' ? ' ' . $err : ''));
+            if ($status !== 401) {
+                throw $lastError;
+            }
+        }
+
+        if ($lastError !== null) {
+            throw $lastError;
+        }
+
+        throw new RuntimeException('Falha consulta Lexos WebAPI. Erro desconhecido.');
+    }
+
+    /**
+     * @param list<string> $headers
+     * @return array{int,string,string|false}
+     */
+    private function executeLexosPost(string $url, string $body, array $headers): array
+    {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -368,17 +401,13 @@ class LexosDashboardService
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 60,
         ]);
+
         $raw = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
         curl_close($ch);
 
-        if ($raw === false || $status < 200 || $status >= 300) {
-            throw new RuntimeException('Falha consulta Lexos WebAPI. HTTP: ' . $status . ($err !== '' ? ' ' . $err : ''));
-        }
-        $decoded = json_decode((string) $raw, true);
-
-        return is_array($decoded) ? $decoded : [];
+        return [$status, $err, $raw];
     }
 
     private function getLexosIntegrationKey(): string
