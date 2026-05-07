@@ -78,3 +78,11 @@ CREATE TABLE IF NOT EXISTS request_logs (
     error_message TEXT DEFAULT NULL,
     created_at DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS repasse_mp_jobs (
+    job_id VARCHAR(32) PRIMARY KEY,
+    status VARCHAR(30) NOT NULL,
+    meta_json LONGTEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);

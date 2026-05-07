@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Repositories\RepasseMpJobRepository;
 use JsonException;
 use Shuchkin\SimpleXLS;
 use Shuchkin\SimpleXLSX;
@@ -16,7 +17,10 @@ class RepasseMpService
     /** Quantidade de operacoes unicas por requisicao (evita timeout do proxy em Render etc.). */
     private const JOB_CHUNK_UNIQUE_OPS = 18;
 
-    public function __construct(private MercadoPagoPaymentService $paymentService)
+    public function __construct(
+        private MercadoPagoPaymentService $paymentService,
+        private RepasseMpJobRepository $jobRepository
+    )
     {
     }
 
@@ -91,18 +95,7 @@ class RepasseMpService
         }
 
         $jobId = $this->newJobId();
-        $jobDir = $this->jobDirectory($jobId);
-        if (!is_dir($jobDir) && !mkdir($jobDir, 0755, true) && !is_dir($jobDir)) {
-            throw new \RuntimeException('Nao foi possivel criar pasta do job.');
-        }
-
-        $destName = 'source.' . $ext;
-        $destPath = $jobDir . DIRECTORY_SEPARATOR . $destName;
-        if (!copy($tmpName, $destPath)) {
-            throw new \RuntimeException('Nao foi possivel gravar copia do arquivo.');
-        }
-
-        $rows = $this->readRows($destPath, $ext);
+        $rows = $this->readRows($tmpName, $ext);
         if ($rows === []) {
             throw new \RuntimeException('Planilha vazia ou ilegível.');
         }
@@ -141,7 +134,7 @@ class RepasseMpService
             'status' => 'matching',
             'created_at' => time(),
             'ext' => $ext,
-            'source_name' => $destName,
+            'rows' => $rows,
             'operation_column_index' => $operationColumnIndex,
             'unique_ops' => $uniqueOps,
             'lines_by_op' => $linesByOp,
@@ -325,14 +318,10 @@ class RepasseMpService
         $meta['finalize_started_at'] = time();
         $this->saveJobMeta($jobId, $meta);
 
-        $ext = (string) ($meta['ext'] ?? 'xlsx');
-        $jobDir = $this->jobDirectory($jobId);
-        $sourcePath = $jobDir . DIRECTORY_SEPARATOR . (string) ($meta['source_name'] ?? ('source.' . $ext));
-        if (!is_file($sourcePath)) {
+        $rows = $meta['rows'] ?? null;
+        if (!is_array($rows) || $rows === []) {
             return ['ok' => false, 'error' => 'Arquivo fonte do job nao encontrado.'];
         }
-
-        $rows = $this->readRows($sourcePath, $ext);
         $header = null;
         $operationColumnIndex = (int) ($meta['operation_column_index'] ?? 3);
 
@@ -439,6 +428,7 @@ class RepasseMpService
         $meta['status'] = 'complete';
         $meta['result_file'] = $exportName;
         $meta['last_processed'] = $processed;
+        $meta['rows'] = null;
         $meta['result_snapshot'] = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $this->saveJobMeta($jobId, $meta);
 
@@ -505,73 +495,16 @@ class RepasseMpService
         return strlen($jobId) === 32 && ctype_xdigit($jobId);
     }
 
-    private function jobsDirectory(): string
-    {
-        $dir = $this->storageRootDirectory() . DIRECTORY_SEPARATOR . 'repasse_mp_jobs';
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
-            throw new \RuntimeException(
-                'Nao foi possivel criar pasta de jobs. Configure armazenamento persistente (ex.: RENDER_DISK_PATH).'
-            );
-        }
-
-        return $dir;
-    }
-
-    private function jobDirectory(string $jobId): string
-    {
-        return $this->jobsDirectory() . DIRECTORY_SEPARATOR . $jobId;
-    }
-
-    private function metaPath(string $jobId): string
-    {
-        return $this->jobDirectory($jobId) . DIRECTORY_SEPARATOR . 'meta.json';
-    }
-
     /** @return array<string, mixed>|null */
     private function loadJobMeta(string $jobId): ?array
     {
-        $path = $this->metaPath($jobId);
-        if (!is_file($path)) {
-            return null;
-        }
-        $raw = file_get_contents($path);
-        if ($raw === false || $raw === '') {
-            return null;
-        }
-        try {
-            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            return null;
-        }
-
-        return is_array($decoded) ? $decoded : null;
+        return $this->jobRepository->getMeta($jobId);
     }
 
     /** @param array<string, mixed> $meta */
     private function saveJobMeta(string $jobId, array $meta): void
     {
-        $path = $this->metaPath($jobId);
-        $dir = dirname($path);
-        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-            throw new \RuntimeException('Nao foi possivel gravar metadados do job.');
-        }
-        $fp = fopen($path, 'c+');
-        if ($fp === false) {
-            throw new \RuntimeException('Nao foi possivel abrir meta do job.');
-        }
-        try {
-            if (!flock($fp, LOCK_EX)) {
-                throw new \RuntimeException('Nao foi possivel bloquear meta do job.');
-            }
-            ftruncate($fp, 0);
-            rewind($fp);
-            $json = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-            fwrite($fp, $json);
-            fflush($fp);
-        } finally {
-            flock($fp, LOCK_UN);
-            fclose($fp);
-        }
+        $this->jobRepository->saveMeta($jobId, $meta);
     }
 
     private function readRows(string $path, string $ext): array

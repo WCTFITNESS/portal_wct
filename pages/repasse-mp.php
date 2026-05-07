@@ -435,7 +435,7 @@ if (isset($_GET['job'])) {
         var text = String(msg || '');
         var extra = '';
         if (text.toLowerCase().indexOf('job nao encontrado') !== -1 || text.toLowerCase().indexOf('job não encontrado') !== -1) {
-            extra = '<p style="margin-top:8px;">O processamento assíncrono perdeu o estado do job. No Render, configure disco persistente e a variável <code>RENDER_DISK_PATH</code> (ou <code>REPASSE_MP_STORAGE_PATH</code>). Depois, envie o arquivo novamente.</p>';
+            extra = '<p style="margin-top:8px;">O estado agora fica salvo no banco para reduzir esse erro. Reenvie o arquivo e, se persistir, verifique conexão com o banco e logs do deploy.</p>';
         }
         block.style.display = 'block';
         block.innerHTML = '<div class="msg err">' + escHtml(text) + extra + '</div>';
