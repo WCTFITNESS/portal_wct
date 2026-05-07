@@ -38,6 +38,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $feedback = 'Configurações da API Lexos salvas.';
         }
 
+        if (($_POST['form_type'] ?? '') === 'lexos_token_from_code') {
+            $code = trim((string) ($_POST['lexos_code'] ?? ''));
+            $result = $app['lexosAuthService']->exchangeCodeForToken($code);
+            $feedback = 'Token Lexos gerado e salvo com sucesso.';
+            if (($result['refresh_token'] ?? '') === '') {
+                $feedback .= ' Atenção: a resposta não retornou refresh token.';
+            }
+        }
+
+        if (($_POST['form_type'] ?? '') === 'lexos_refresh_token') {
+            $refreshToken = trim((string) ($_POST['lexos_refresh_token'] ?? ''));
+            $app['lexosAuthService']->refreshLexosToken($refreshToken);
+            $feedback = 'Refresh token Lexos executado e tokens salvos.';
+        }
+
         if (($_POST['form_type'] ?? '') === 'token') {
             $app['tokenService']->saveInitialToken([
                 'access_token' => trim((string) ($_POST['access_token'] ?? '')),
@@ -137,6 +152,18 @@ $requestLogs = $app['requestLogRepository']->listRecent(10);
         <textarea name="lexos_refresh_token" rows="3" placeholder="Cole o refresh token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_refresh_token'] ?? '')) ?></textarea>
 
         <button type="submit">Salvar Configuração Lexos</button>
+    </form>
+
+    <form method="post">
+        <input type="hidden" name="form_type" value="lexos_token_from_code">
+        <input type="hidden" name="lexos_code" value="<?= htmlspecialchars((string) ($apiConfig['lexos_code'] ?? '')) ?>">
+        <button type="submit">Gerar Token Lexos via Code</button>
+    </form>
+
+    <form method="post">
+        <input type="hidden" name="form_type" value="lexos_refresh_token">
+        <input type="hidden" name="lexos_refresh_token" value="<?= htmlspecialchars((string) ($apiConfig['lexos_refresh_token'] ?? '')) ?>">
+        <button type="submit">Executar Refresh Token Lexos</button>
     </form>
 </section>
 
