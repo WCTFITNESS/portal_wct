@@ -47,13 +47,17 @@ class RepasseService
     /**
      * @return array{
      *     file_name: string,
+     *     processed: int,
      *     found: int,
      *     not_found: int,
      *     errors: int,
+     *     cache_hits: int,
+     *     duration_seconds: float,
+     *     trace_enabled: bool,
      *     preview: list<array{linha: int, operacao_relacionada: string, numero_pedido_ml: string, id_pagamento_payments: string, status_consulta: string}>
      * }
      */
-    public function processUploadedFile(array $file): array
+    public function processUploadedFile(array $file, bool $collectApiTrace = false): array
     {
         if (($file['error'] ?? \UPLOAD_ERR_NO_FILE) !== \UPLOAD_ERR_OK) {
             throw new \InvalidArgumentException('Nenhum arquivo enviado ou erro no upload.');
@@ -79,9 +83,12 @@ class RepasseService
         $notFound = 0;
         $errors = 0;
         $processed = 0;
+        $cacheHits = 0;
         $preview = [];
         $outRows = [];
         $headerDone = false;
+        $lookupCache = [];
+        $startedAt = microtime(true);
 
         foreach ($rows as $index => $row) {
             if (!is_array($row)) {
@@ -125,32 +132,69 @@ class RepasseService
             $status = '';
             $apiTraceB64 = '';
 
-            try {
-                $resolved = $this->orderService->findRepasseMatchByOperationWithTrace($op);
-                $match = $resolved['match'];
-                $trace = $resolved['trace'];
-                $traceJson = json_encode($trace, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
-                if ($traceJson !== false) {
-                    $apiTraceB64 = base64_encode($traceJson);
+            $cacheKey = strtolower($op);
+            if (isset($lookupCache[$cacheKey])) {
+                $cacheHits++;
+                $cached = $lookupCache[$cacheKey];
+                $numeroPedido = $cached['numero_pedido_ml'];
+                $idPagamento = $cached['id_pagamento_payments'];
+                $status = $cached['status_consulta'] . ' (cache)';
+                if ($collectApiTrace) {
+                    $apiTraceB64 = $cached['api_trace_b64'];
+                }
+                if ($cached['result_type'] === 'found') {
+                    $found++;
+                } elseif ($cached['result_type'] === 'not_found') {
+                    $notFound++;
+                } else {
+                    $errors++;
+                }
+            } else {
+                $resultType = 'not_found';
+                try {
+                    $resolved = $collectApiTrace
+                        ? $this->orderService->findRepasseMatchByOperationWithTrace($op)
+                        : ['match' => $this->orderService->findRepasseMatchByOperation($op), 'trace' => []];
+                    $match = $resolved['match'];
+                    $trace = $resolved['trace'];
+                    if ($collectApiTrace) {
+                        $traceJson = json_encode($trace, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+                        if ($traceJson !== false) {
+                            $apiTraceB64 = base64_encode($traceJson);
+                        }
+                    }
+
+                    if ($match !== null) {
+                        $found++;
+                        $resultType = 'found';
+                        $numeroPedido = $match['order_id'];
+                        $idPagamento = $match['payment_id'] ?? '';
+                        $status = $idPagamento !== '' ? 'Encontrado (payments.id)' : 'Encontrado (id do pedido)';
+                    } else {
+                        $notFound++;
+                        $resultType = 'not_found';
+                        $status = 'Não encontrado na API';
+                    }
+                } catch (\Throwable $e) {
+                    $errors++;
+                    $resultType = 'error';
+                    $status = 'Erro na consulta';
+                    if ($collectApiTrace) {
+                        $errPayload = [['erro_execucao' => $e->getMessage()]];
+                        $errJson = json_encode($errPayload, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+                        if ($errJson !== false) {
+                            $apiTraceB64 = base64_encode($errJson);
+                        }
+                    }
                 }
 
-                if ($match !== null) {
-                    $found++;
-                    $numeroPedido = $match['order_id'];
-                    $idPagamento = $match['payment_id'] ?? '';
-                    $status = $idPagamento !== '' ? 'Encontrado (payments.id)' : 'Encontrado (id do pedido)';
-                } else {
-                    $notFound++;
-                    $status = 'Não encontrado na API';
-                }
-            } catch (\Throwable $e) {
-                $errors++;
-                $status = 'Erro na consulta';
-                $errPayload = [['erro_execucao' => $e->getMessage()]];
-                $errJson = json_encode($errPayload, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
-                if ($errJson !== false) {
-                    $apiTraceB64 = base64_encode($errJson);
-                }
+                $lookupCache[$cacheKey] = [
+                    'numero_pedido_ml' => $numeroPedido,
+                    'id_pagamento_payments' => $idPagamento,
+                    'status_consulta' => $status,
+                    'api_trace_b64' => $apiTraceB64,
+                    'result_type' => $resultType,
+                ];
             }
 
             $extended = $row;
@@ -189,6 +233,9 @@ class RepasseService
             'found' => $found,
             'not_found' => $notFound,
             'errors' => $errors,
+            'cache_hits' => $cacheHits,
+            'duration_seconds' => round(max(0, microtime(true) - $startedAt), 2),
+            'trace_enabled' => $collectApiTrace,
             'preview' => $preview,
         ];
     }

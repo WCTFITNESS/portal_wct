@@ -9,7 +9,8 @@ $summary = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        $result = $app['repasseService']->processUploadedFile($_FILES['repasse_file'] ?? []);
+        $traceEnabled = isset($_POST['enable_trace']) && $_POST['enable_trace'] === '1';
+        $result = $app['repasseService']->processUploadedFile($_FILES['repasse_file'] ?? [], $traceEnabled);
         $downloadFile = $result['file_name'] ?? null;
         $summary = $result;
         $feedback = 'Arquivo processado com sucesso. Clique no botão para baixar o resultado.';
@@ -86,6 +87,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <form method="post" enctype="multipart/form-data">
         <label>Arquivo</label>
         <input type="file" name="repasse_file" accept=".xls,.xlsx,.csv,.XLS,.XLSX,.CSV" required>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+            <input type="checkbox" name="enable_trace" value="1">
+            Incluir rastreio detalhado da API (mais lento)
+        </label>
         <button type="submit">Processar Arquivo</button>
     </form>
 
@@ -95,7 +100,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 Processadas: <strong><?= htmlspecialchars((string) ($summary['processed'] ?? 0)) ?></strong> |
                 Encontradas: <strong><?= htmlspecialchars((string) ($summary['found'] ?? 0)) ?></strong> |
                 Não encontradas: <strong><?= htmlspecialchars((string) ($summary['not_found'] ?? 0)) ?></strong> |
-                Erros: <strong><?= htmlspecialchars((string) ($summary['errors'] ?? 0)) ?></strong>
+                Erros: <strong><?= htmlspecialchars((string) ($summary['errors'] ?? 0)) ?></strong> |
+                Cache reaproveitado: <strong><?= htmlspecialchars((string) ($summary['cache_hits'] ?? 0)) ?></strong> |
+                Tempo: <strong><?= htmlspecialchars((string) ($summary['duration_seconds'] ?? 0)) ?>s</strong>
             </p>
         <?php endif; ?>
         <p>
@@ -130,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <td><?= htmlspecialchars((string) ($item['id_pagamento_payments'] ?? '')) ?></td>
                     <td><?= htmlspecialchars((string) ($item['status_consulta'] ?? '')) ?></td>
                     <td>
-                        <?php if ($traceB64 !== ''): ?>
+                        <?php if (($summary['trace_enabled'] ?? false) && $traceB64 !== ''): ?>
                             <button type="button" class="btn-repasse-json" data-trace-b64="<?= htmlspecialchars($traceB64, ENT_QUOTES, 'UTF-8') ?>">Ver JSON</button>
                         <?php else: ?>
                             <span class="repasse-muted">—</span>
