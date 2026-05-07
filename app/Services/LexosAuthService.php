@@ -20,17 +20,26 @@ class LexosAuthService
         if ($codeValue === '') {
             throw new RuntimeException('Lexos Code não informado.');
         }
+        $refreshFromCfg = trim((string) ($cfg['lexos_refresh_token'] ?? ''));
 
         $response = $this->postWithPayloadFallbacks(
             'https://api.lexos.com.br/Autenticacao/token',
             [
                 ['code' => $codeValue],
                 ['Code' => $codeValue],
+                ['authorization_code' => $codeValue],
+                ['authorizationCode' => $codeValue],
+                ['token' => $codeValue],
+                ['refresh_token' => $codeValue],
+                ['refreshToken' => $codeValue],
             ]
         );
 
         $accessToken = $this->extractTokenValue($response, ['access_token', 'accessToken', 'token', 'Token']);
         $refreshToken = $this->extractTokenValue($response, ['refresh_token', 'refreshToken', 'RefreshToken']);
+        if ($accessToken === '' && $refreshFromCfg !== '') {
+            return $this->refreshLexosToken($refreshFromCfg);
+        }
         if ($accessToken === '') {
             throw new RuntimeException('Resposta da Lexos sem access token.');
         }
@@ -89,6 +98,11 @@ class LexosAuthService
             } catch (RuntimeException $exception) {
                 $lastError = $exception->getMessage();
             }
+            try {
+                return $this->httpPostFormUrlEncoded($url, $payload);
+            } catch (RuntimeException $exception) {
+                $lastError = $exception->getMessage();
+            }
         }
 
         throw new RuntimeException($lastError !== '' ? $lastError : 'Falha ao consultar autenticação Lexos.');
@@ -105,6 +119,39 @@ class LexosAuthService
             CURLOPT_HTTPHEADER => [
                 'Accept: application/json',
                 'Content-Type: application/json',
+            ],
+            CURLOPT_TIMEOUT => 45,
+        ]);
+
+        $raw = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($raw === false || $status < 200 || $status >= 300) {
+            $extra = is_string($raw) && $raw !== '' ? ' Resposta: ' . substr($raw, 0, 300) : '';
+            throw new RuntimeException('Falha autenticação Lexos. HTTP: ' . $status . ($error !== '' ? ' ' . $error : '') . $extra);
+        }
+
+        $decoded = json_decode((string) $raw, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Resposta inválida da autenticação Lexos.');
+        }
+
+        return $decoded;
+    }
+
+    private function httpPostFormUrlEncoded(string $url, array $payload): array
+    {
+        $body = http_build_query($payload, '', '&', PHP_QUERY_RFC3986);
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'Content-Type: application/x-www-form-urlencoded',
             ],
             CURLOPT_TIMEOUT => 45,
         ]);
