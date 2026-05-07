@@ -6,7 +6,7 @@ $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
-$allowedPages = ['dashboard', 'api-config', 'orders', 'repasse-mp', 'message-template', 'manual-send', 'ml-ads-report'];
+$allowedPages = ['dashboard', 'api-config', 'orders', 'monitor-pedidos', 'repasse-mp', 'message-template', 'manual-send', 'ml-ads-report'];
 
 if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
@@ -47,6 +47,7 @@ $menuSections = [
         ['id' => 'dashboard', 'label' => 'Dashboard'],
         ['id' => 'api-config', 'label' => 'Configuração API'],
         ['id' => 'orders', 'label' => 'Pedidos'],
+        ['id' => 'monitor-pedidos', 'label' => 'Monitor de Pedidos'],
         ['id' => 'message-template', 'label' => 'Mensageria ML'],
     ],
     'Mercado Pago' => [
