@@ -196,6 +196,7 @@ class LexosAuthService
             'lexos_token' => trim($accessToken),
             'lexos_refresh_token' => trim((string) ($refreshToken ?? '')),
             'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
+            'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
         ]);
     }
 
@@ -213,6 +214,10 @@ class LexosAuthService
         $cfg = $this->settingsRepository->getApiConfig() ?? [];
         $integrationKey = trim((string) ($cfg['lexos_integration_key'] ?? ''));
         if ($integrationKey !== '') {
+            $customHeaderName = trim((string) ($cfg['lexos_integration_header_name'] ?? ''));
+            if ($customHeaderName !== '') {
+                $headers[] = $customHeaderName . ': ' . $integrationKey;
+            }
             $headers[] = 'x-api-key: ' . $integrationKey;
             $headers[] = 'x-integration-key: ' . $integrationKey;
             $headers[] = 'integration-key: ' . $integrationKey;

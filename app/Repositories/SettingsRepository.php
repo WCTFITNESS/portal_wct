@@ -13,6 +13,7 @@ class SettingsRepository
     private ?bool $hasLexosCodeColumn = null;
     private ?bool $hasLexosRefreshTokenColumn = null;
     private ?bool $hasLexosIntegrationKeyColumn = null;
+    private ?bool $hasLexosIntegrationHeaderNameColumn = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -36,6 +37,7 @@ class SettingsRepository
         $this->ensureLexosTokenColumnExists();
         $this->ensureLexosRefreshTokenColumnExists();
         $this->ensureLexosIntegrationKeyColumnExists();
+        $this->ensureLexosIntegrationHeaderNameColumnExists();
         $existing = $this->getApiConfig();
 
         if ($existing) {
@@ -50,6 +52,7 @@ class SettingsRepository
                      lexos_token = :lexos_token,
                      lexos_refresh_token = :lexos_refresh_token,
                      lexos_integration_key = :lexos_integration_key,
+                     lexos_integration_header_name = :lexos_integration_header_name,
                      updated_at = NOW()
                  WHERE id = :id'
             );
@@ -63,6 +66,7 @@ class SettingsRepository
                 ':lexos_token' => (($data['lexos_token'] ?? '') !== '') ? (string) $data['lexos_token'] : null,
                 ':lexos_refresh_token' => (($data['lexos_refresh_token'] ?? '') !== '') ? (string) $data['lexos_refresh_token'] : null,
                 ':lexos_integration_key' => (($data['lexos_integration_key'] ?? '') !== '') ? (string) $data['lexos_integration_key'] : null,
+                ':lexos_integration_header_name' => (($data['lexos_integration_header_name'] ?? '') !== '') ? (string) $data['lexos_integration_header_name'] : null,
                 ':id' => $existing['id'],
             ]);
 
@@ -71,9 +75,9 @@ class SettingsRepository
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO api_settings (
-                app_id, client_secret, redirect_uri, seller_id, oauth_code, lexos_code, lexos_token, lexos_refresh_token, lexos_integration_key, created_at, updated_at
+                app_id, client_secret, redirect_uri, seller_id, oauth_code, lexos_code, lexos_token, lexos_refresh_token, lexos_integration_key, lexos_integration_header_name, created_at, updated_at
              ) VALUES (
-                :app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, :lexos_code, :lexos_token, :lexos_refresh_token, :lexos_integration_key, NOW(), NOW()
+                :app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, :lexos_code, :lexos_token, :lexos_refresh_token, :lexos_integration_key, :lexos_integration_header_name, NOW(), NOW()
              )'
         );
         $stmt->execute([
@@ -86,6 +90,7 @@ class SettingsRepository
             ':lexos_token' => (($data['lexos_token'] ?? '') !== '') ? (string) $data['lexos_token'] : null,
             ':lexos_refresh_token' => (($data['lexos_refresh_token'] ?? '') !== '') ? (string) $data['lexos_refresh_token'] : null,
             ':lexos_integration_key' => (($data['lexos_integration_key'] ?? '') !== '') ? (string) $data['lexos_integration_key'] : null,
+            ':lexos_integration_header_name' => (($data['lexos_integration_header_name'] ?? '') !== '') ? (string) $data['lexos_integration_header_name'] : null,
         ]);
     }
 
@@ -265,6 +270,47 @@ class SettingsRepository
         $this->hasLexosIntegrationKeyColumn = ((int) $stmt->fetchColumn()) > 0;
 
         return $this->hasLexosIntegrationKeyColumn;
+    }
+
+    private function ensureLexosIntegrationHeaderNameColumnExists(): void
+    {
+        if ($this->hasLexosIntegrationHeaderNameColumn()) {
+            return;
+        }
+
+        if ($this->isPgsql()) {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN lexos_integration_header_name VARCHAR(120) DEFAULT NULL');
+        } else {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN lexos_integration_header_name VARCHAR(120) NULL AFTER lexos_integration_key');
+        }
+        $this->hasLexosIntegrationHeaderNameColumn = true;
+    }
+
+    private function hasLexosIntegrationHeaderNameColumn(): bool
+    {
+        if ($this->hasLexosIntegrationHeaderNameColumn !== null) {
+            return $this->hasLexosIntegrationHeaderNameColumn;
+        }
+
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_integration_header_name'"
+            );
+        } else {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_integration_header_name'"
+            );
+        }
+
+        $this->hasLexosIntegrationHeaderNameColumn = ((int) $stmt->fetchColumn()) > 0;
+
+        return $this->hasLexosIntegrationHeaderNameColumn;
     }
 
     private function hasLexosTokenColumn(): bool

@@ -350,6 +350,10 @@ class LexosDashboardService
             'Authorization: Bearer ' . $token,
         ];
         if ($integrationKey !== '') {
+            $customHeaderName = $this->getLexosIntegrationHeaderName();
+            if ($customHeaderName !== '') {
+                $headers[] = $customHeaderName . ': ' . $integrationKey;
+            }
             $headers[] = 'x-api-key: ' . $integrationKey;
             $headers[] = 'x-integration-key: ' . $integrationKey;
             $headers[] = 'integration-key: ' . $integrationKey;
@@ -382,6 +386,13 @@ class LexosDashboardService
         $cfg = $this->settingsRepository->getApiConfig();
 
         return trim((string) ($cfg['lexos_integration_key'] ?? ''));
+    }
+
+    private function getLexosIntegrationHeaderName(): string
+    {
+        $cfg = $this->settingsRepository->getApiConfig();
+
+        return trim((string) ($cfg['lexos_integration_header_name'] ?? ''));
     }
 }
 

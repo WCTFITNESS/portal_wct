@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS api_settings (
     lexos_token TEXT DEFAULT NULL,
     lexos_refresh_token TEXT DEFAULT NULL,
     lexos_integration_key TEXT DEFAULT NULL,
+    lexos_integration_header_name VARCHAR(120) DEFAULT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
