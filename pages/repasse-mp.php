@@ -432,8 +432,13 @@ if (isset($_GET['job'])) {
     function showRepasseAsyncError(msg) {
         var block = document.getElementById('repasse-mp-summary-block');
         if (!block) return;
+        var text = String(msg || '');
+        var extra = '';
+        if (text.toLowerCase().indexOf('job nao encontrado') !== -1 || text.toLowerCase().indexOf('job não encontrado') !== -1) {
+            extra = '<p style="margin-top:8px;">O processamento assíncrono perdeu o estado do job. No Render, configure disco persistente e a variável <code>RENDER_DISK_PATH</code> (ou <code>REPASSE_MP_STORAGE_PATH</code>). Depois, envie o arquivo novamente.</p>';
+        }
         block.style.display = 'block';
-        block.innerHTML = '<div class="msg err">' + escHtml(String(msg)) + '</div>';
+        block.innerHTML = '<div class="msg err">' + escHtml(text) + extra + '</div>';
     }
 
     function renderRepasseAsyncSummary(result) {

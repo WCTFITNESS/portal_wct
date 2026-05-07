@@ -69,6 +69,80 @@ class LexosOrderMonitorService
         ];
     }
 
+    public function monitorPeriod(string $startDate, string $endDate, int $take = 1000): array
+    {
+        $take = max(1, min(5000, $take));
+        $json = $this->fetchPedidoRowsWithFallback($startDate, $endDate, $take);
+        $rows = $this->normalizeDatasourceRows($json);
+
+        $timelines = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $orderId = $this->extractOrderIdentifier($row);
+            $status = $this->extractStatus($row);
+            $eventDate = $this->extractEventDate($row);
+
+            $timelines[$orderId][] = [
+                'status' => $status,
+                'date' => $eventDate,
+                'action' => $this->recommendedActionForStatus($status),
+                'row' => $row,
+            ];
+        }
+
+        foreach ($timelines as $orderId => $events) {
+            usort($events, static function (array $a, array $b): int {
+                return strcmp((string) ($a['date'] ?? ''), (string) ($b['date'] ?? ''));
+            });
+            $timelines[$orderId] = $events;
+        }
+
+        $summary = [
+            'aberto' => 0,
+            'faturado' => 0,
+            'atraso' => 0,
+            'enviado' => 0,
+            'entregue' => 0,
+            'outros' => 0,
+            'total_pedidos' => count($timelines),
+        ];
+
+        $orders = [];
+        foreach ($timelines as $orderId => $events) {
+            $last = $events[count($events) - 1] ?? null;
+            if (!$last) {
+                continue;
+            }
+
+            $status = (string) ($last['status'] ?? 'Status não identificado');
+            $category = $this->categorizeStatus($status);
+            if (!isset($summary[$category])) {
+                $summary[$category] = 0;
+            }
+            $summary[$category]++;
+
+            $orders[] = [
+                'order_id' => $orderId,
+                'status' => $status,
+                'category' => $category,
+                'date' => (string) ($last['date'] ?? ''),
+                'action' => (string) ($last['action'] ?? ''),
+                'events_count' => count($events),
+            ];
+        }
+
+        return [
+            'rows' => $rows,
+            'timelines' => $timelines,
+            'orders' => $orders,
+            'summary' => $summary,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+        ];
+    }
+
     public function getRecentOrderExample(string $startDate, string $endDate): ?string
     {
         $url = "https://app-hub-webapi.lexos.com.br/api/Pedido/DataSource?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
@@ -156,6 +230,35 @@ class LexosOrderMonitorService
         return 'Status não mapeado; validar manualmente no painel da Lexos.';
     }
 
+    private function categorizeStatus(string $status): string
+    {
+        $s = mb_strtolower($status);
+
+        if (str_contains($s, 'atras')) {
+            return 'atraso';
+        }
+        if (str_contains($s, 'entreg') || str_contains($s, 'conclu')) {
+            return 'entregue';
+        }
+        if (str_contains($s, 'envia') || str_contains($s, 'post') || str_contains($s, 'transit')) {
+            return 'enviado';
+        }
+        if (str_contains($s, 'fatur') || str_contains($s, 'nota')) {
+            return 'faturado';
+        }
+        if (
+            str_contains($s, 'abert')
+            || str_contains($s, 'pend')
+            || str_contains($s, 'aguard')
+            || str_contains($s, 'separ')
+            || str_contains($s, 'aprov')
+        ) {
+            return 'aberto';
+        }
+
+        return 'outros';
+    }
+
     private function normalizeDatasourceRows(mixed $json): array
     {
         if (!is_array($json)) {
@@ -211,10 +314,60 @@ class LexosOrderMonitorService
         curl_close($ch);
 
         if ($raw === false || $status < 200 || $status >= 300) {
-            throw new RuntimeException('Falha consulta Lexos WebAPI. HTTP: ' . $status . ($err !== '' ? ' ' . $err : ''));
+            $extra = '';
+            if (is_string($raw) && $raw !== '') {
+                $extra = ' Resposta: ' . substr($raw, 0, 400);
+            }
+            throw new RuntimeException('Falha consulta Lexos WebAPI. HTTP: ' . $status . ($err !== '' ? ' ' . $err : '') . $extra);
         }
         $decoded = json_decode((string) $raw, true);
 
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function fetchPedidoRowsWithFallback(string $startDate, string $endDate, int $take): array
+    {
+        $attempts = [
+            [
+                'url' => "https://app-hub-webapi.lexos.com.br/api/Pedido/DataSource?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59",
+                'payload' => [
+                    'requiresCounts' => false,
+                    'skip' => 0,
+                    'take' => $take,
+                ],
+            ],
+            [
+                'url' => 'https://app-hub-webapi.lexos.com.br/api/Pedido/DataSource?lojaId=-1',
+                'payload' => [
+                    'requiresCounts' => false,
+                    'skip' => 0,
+                    'take' => $take,
+                    'where' => [[
+                        'isComplex' => true,
+                        'ignoreCase' => false,
+                        'condition' => 'and',
+                        'predicates' => [
+                            ['isComplex' => false, 'field' => 'DataPedido', 'operator' => 'greaterthanorequal', 'value' => "{$startDate}T00:00:00"],
+                            ['isComplex' => false, 'field' => 'DataPedido', 'operator' => 'lessthanorequal', 'value' => "{$endDate}T23:59:59"],
+                        ],
+                    ]],
+                ],
+            ],
+        ];
+
+        $lastError = null;
+        foreach ($attempts as $attempt) {
+            try {
+                return $this->httpPostLexosJson($attempt['url'], $attempt['payload']);
+            } catch (RuntimeException $exception) {
+                $lastError = $exception;
+            }
+        }
+
+        if ($lastError !== null) {
+            throw $lastError;
+        }
+
+        throw new RuntimeException('Falha ao consultar pedidos na Lexos.');
     }
 }

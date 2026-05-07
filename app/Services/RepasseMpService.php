@@ -507,13 +507,11 @@ class RepasseMpService
 
     private function jobsDirectory(): string
     {
-        $root = dirname(__DIR__, 2);
-        $dir = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'repasse_mp_jobs';
+        $dir = $this->storageRootDirectory() . DIRECTORY_SEPARATOR . 'repasse_mp_jobs';
         if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
-            $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'portal_wct-repasse-mp-jobs';
-            if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
-                throw new \RuntimeException('Nao foi possivel criar pasta de jobs.');
-            }
+            throw new \RuntimeException(
+                'Nao foi possivel criar pasta de jobs. Configure armazenamento persistente (ex.: RENDER_DISK_PATH).'
+            );
         }
 
         return $dir;
@@ -641,12 +639,33 @@ class RepasseMpService
 
     private function exportDirectory(): string
     {
-        $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'portal_wct-repasse-mp';
-        if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) {
-            throw new \RuntimeException('Nao foi possivel criar pasta temporaria para exportacao.');
+        $dir = $this->storageRootDirectory() . DIRECTORY_SEPARATOR . 'repasse_mp_exports';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new \RuntimeException(
+                'Nao foi possivel criar pasta de exportacao. Configure armazenamento persistente (ex.: RENDER_DISK_PATH).'
+            );
         }
 
         return $dir;
+    }
+
+    private function storageRootDirectory(): string
+    {
+        $customStorage = trim((string) getenv('REPASSE_MP_STORAGE_PATH'));
+        if ($customStorage !== '') {
+            return rtrim($customStorage, "\\/ \t\n\r\0\x0B");
+        }
+
+        $renderDiskPath = trim((string) getenv('RENDER_DISK_PATH'));
+        if ($renderDiskPath !== '') {
+            $base = rtrim($renderDiskPath, "\\/ \t\n\r\0\x0B") . DIRECTORY_SEPARATOR . 'portal_wct_storage';
+
+            return $base;
+        }
+
+        $root = dirname(__DIR__, 2);
+
+        return $root . DIRECTORY_SEPARATOR . 'storage';
     }
 
     private function assertClientConnected(): void
