@@ -360,21 +360,24 @@ class LexosDashboardService
         }
 
         $authVariants = [
-            'Authorization: Bearer ' . $token,
-            'Authorization: ' . $token,
-            'Authorization: Token ' . $token,
+            ['headers' => ['Authorization: Bearer ' . $token], 'label' => 'authorization_bearer'],
+            ['headers' => ['Authorization: ' . $token], 'label' => 'authorization_raw'],
+            ['headers' => ['Authorization: Token ' . $token], 'label' => 'authorization_token_prefix'],
+            ['headers' => ['token: ' . $token], 'label' => 'token_header'],
+            ['headers' => ['x-access-token: ' . $token], 'label' => 'x_access_token_header'],
+            ['headers' => [], 'label' => 'without_auth_header'],
         ];
 
         $lastError = null;
-        foreach ($authVariants as $authorizationHeader) {
-            [$status, $err, $raw] = $this->executeLexosPost($url, $body, array_merge($baseHeaders, [$authorizationHeader]));
+        foreach ($authVariants as $variant) {
+            [$status, $err, $raw] = $this->executeLexosPost($url, $body, array_merge($baseHeaders, $variant['headers']));
             if ($raw !== false && $status >= 200 && $status < 300) {
                 $decoded = json_decode((string) $raw, true);
 
                 return is_array($decoded) ? $decoded : [];
             }
 
-            $lastError = new RuntimeException('Falha consulta Lexos WebAPI. HTTP: ' . $status . ($err !== '' ? ' ' . $err : ''));
+            $lastError = new RuntimeException('Falha consulta Lexos WebAPI. HTTP: ' . $status . ' Tentativa: ' . $variant['label'] . ($err !== '' ? ' ' . $err : ''));
             if ($status !== 401) {
                 throw $lastError;
             }
