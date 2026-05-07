@@ -45,12 +45,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (($result['refresh_token'] ?? '') === '') {
                 $feedback .= ' Atenção: a resposta não retornou refresh token.';
             }
+            $apiConfig = $app['settingsRepository']->getApiConfig();
         }
 
         if (($_POST['form_type'] ?? '') === 'lexos_refresh_token') {
             $refreshToken = trim((string) ($_POST['lexos_refresh_token'] ?? ''));
             $app['lexosAuthService']->refreshLexosToken($refreshToken);
             $feedback = 'Refresh token Lexos executado e tokens salvos.';
+            $apiConfig = $app['settingsRepository']->getApiConfig();
         }
 
         if (($_POST['form_type'] ?? '') === 'token') {

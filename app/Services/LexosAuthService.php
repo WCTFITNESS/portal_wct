@@ -16,12 +16,13 @@ class LexosAuthService
     public function exchangeCodeForToken(?string $code = null): array
     {
         $cfg = $this->settingsRepository->getApiConfig() ?? [];
-        $codeValue = trim((string) ($code ?? ($cfg['lexos_code'] ?? '')));
+        $codeValue = $this->normalizeCodeInput((string) ($code ?? ($cfg['lexos_code'] ?? '')));
         if ($codeValue === '') {
             throw new RuntimeException('Lexos Code não informado.');
         }
         $refreshFromCfg = trim((string) ($cfg['lexos_refresh_token'] ?? ''));
 
+        // Prioridade: exatamente como a documentação da Lexos descreve.
         $response = $this->postWithPayloadFallbacks(
             'https://api.lexos.com.br/Autenticacao/token',
             [
@@ -199,5 +200,27 @@ class LexosAuthService
             'lexos_token' => trim($accessToken),
             'lexos_refresh_token' => trim((string) ($refreshToken ?? '')),
         ]);
+    }
+
+    private function normalizeCodeInput(string $input): string
+    {
+        $value = trim($input);
+        if ($value === '') {
+            return '';
+        }
+
+        // Se o usuário colar URL completa do callback, extrai o parâmetro code.
+        if (str_contains($value, 'code=')) {
+            $parts = parse_url($value);
+            if (is_array($parts) && isset($parts['query'])) {
+                parse_str((string) $parts['query'], $query);
+                $candidate = trim((string) ($query['code'] ?? ''));
+                if ($candidate !== '') {
+                    return urldecode($candidate);
+                }
+            }
+        }
+
+        return urldecode($value);
     }
 }
