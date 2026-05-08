@@ -33,7 +33,7 @@ class RepasseMpService
             if (!$this->isValidJobId($jobId)) {
                 return null;
             }
-            $meta = $this->loadJobMeta($jobId);
+            $meta = $this->loadJobMeta($jobId, false);
             if ($meta === null || ($meta['status'] ?? '') !== 'complete') {
                 return null;
             }
@@ -168,7 +168,7 @@ class RepasseMpService
             return ['ok' => false, 'error' => 'Job invalido.'];
         }
 
-        $meta = $this->loadJobMeta($jobId);
+        $meta = $this->loadJobMeta($jobId, false);
         if ($meta === null) {
             return ['ok' => false, 'error' => 'Job nao encontrado.'];
         }
@@ -273,7 +273,7 @@ class RepasseMpService
             return ['ok' => false, 'error' => 'Job invalido.'];
         }
 
-        $meta = $this->loadJobMeta($jobId);
+        $meta = $this->loadJobMeta($jobId, true);
         if ($meta === null) {
             return ['ok' => false, 'error' => 'Job nao encontrado.'];
         }
@@ -444,7 +444,7 @@ class RepasseMpService
             return ['ok' => false, 'error' => 'Job invalido.'];
         }
 
-        $meta = $this->loadJobMeta($jobId);
+        $meta = $this->loadJobMeta($jobId, false);
         if ($meta === null) {
             return ['ok' => false, 'error' => 'Job nao encontrado.'];
         }
@@ -496,9 +496,9 @@ class RepasseMpService
     }
 
     /** @return array<string, mixed>|null */
-    private function loadJobMeta(string $jobId): ?array
+    private function loadJobMeta(string $jobId, bool $includeRows = false): ?array
     {
-        return $this->jobRepository->getMeta($jobId);
+        return $this->jobRepository->getMeta($jobId, $includeRows);
     }
 
     /** @param array<string, mixed> $meta */

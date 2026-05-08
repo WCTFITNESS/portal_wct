@@ -23,7 +23,7 @@ class RepasseMpJobRepository
      *
      * @return array<string, mixed>|null
      */
-    public function getMeta(string $jobId): ?array
+    public function getMeta(string $jobId, bool $includeRows = false): ?array
     {
         if (!$this->hasSourceRowsColumn()) {
             return $this->getMetaLegacy($jobId);
@@ -53,18 +53,20 @@ class RepasseMpJobRepository
             return null;
         }
 
-        $sourceRaw = $row['source_rows_json'] ?? null;
-        if (is_string($sourceRaw) && $sourceRaw !== '') {
-            try {
-                $rows = json_decode($sourceRaw, true, 512, JSON_THROW_ON_ERROR);
-                if (is_array($rows)) {
-                    $meta['rows'] = $rows;
+        if ($includeRows) {
+            $sourceRaw = $row['source_rows_json'] ?? null;
+            if (is_string($sourceRaw) && $sourceRaw !== '') {
+                try {
+                    $rows = json_decode($sourceRaw, true, 512, JSON_THROW_ON_ERROR);
+                    if (is_array($rows)) {
+                        $meta['rows'] = $rows;
+                    }
+                } catch (JsonException) {
+                    // mantém meta sem rows
                 }
-            } catch (JsonException) {
-                // mantém meta sem rows
+            } elseif (isset($meta['rows']) && is_array($meta['rows']) && $meta['rows'] !== []) {
+                $this->migrateInlineRowsToDedicatedColumn($jobId, $meta);
             }
-        } elseif (isset($meta['rows']) && is_array($meta['rows']) && $meta['rows'] !== []) {
-            $this->migrateInlineRowsToDedicatedColumn($jobId, $meta);
         }
 
         return $meta;
