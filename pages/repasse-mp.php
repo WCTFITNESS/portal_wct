@@ -515,7 +515,7 @@ if (isset($_GET['job'])) {
         }
 
         async function waitForFinalizeCompletion() {
-            for (var i = 0; i < 180; i++) {
+            for (var i = 0; i < 720; i++) {
                 await sleepMs(5000);
                 var stRes = await fetch(statusUrl + '&_=' + Date.now(), { method: 'GET' });
                 var stRaw = await stRes.text();
@@ -612,7 +612,17 @@ if (isset($_GET['job'])) {
                     renderRepasseAsyncSummary(recovered);
                     return;
                 }
-                throw new Error('Finalize levou tempo demais para responder. O servidor pode continuar processando; recarregue em alguns minutos com o mesmo ?job= na URL.');
+                if (detailEl) {
+                    detailEl.textContent = 'Finalize ainda em andamento no servidor. Continuando a acompanhar automaticamente...';
+                }
+                var recoveredRetry = await waitForFinalizeCompletion();
+                if (recoveredRetry) {
+                    if (overlay) overlay.classList.remove('is-open');
+                    window.clearInterval(timerId);
+                    renderRepasseAsyncSummary(recoveredRetry);
+                    return;
+                }
+                throw new Error('Finalize ainda em andamento. Deixe esta tela aberta para concluir automaticamente ou recarregue depois com o mesmo ?job=.');
             }
             if (!fj.ok) {
                 throw new Error(fj.error || 'Falha ao finalizar.');
@@ -770,3 +780,5 @@ if (isset($_GET['job'])) {
     }
 })();
 </script>
+
+

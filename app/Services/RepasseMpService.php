@@ -14,8 +14,8 @@ class RepasseMpService
 {
     private const PREVIEW_MAX = 30;
 
-    /** Quantidade de operacoes unicas por requisicao (evita timeout do proxy em Render etc.). */
-    private const JOB_CHUNK_UNIQUE_OPS = 18;
+    /** Padrão quando REPASSE_MP_UNIQUE_OPS_PER_CHUNK não está definido. */
+    private const JOB_CHUNK_UNIQUE_OPS_DEFAULT = 36;
 
     public function __construct(
         private MercadoPagoPaymentService $paymentService,
@@ -134,19 +134,18 @@ class RepasseMpService
             'status' => 'matching',
             'created_at' => time(),
             'ext' => $ext,
-            'rows' => $rows,
             'operation_column_index' => $operationColumnIndex,
             'unique_ops' => $uniqueOps,
             'lines_by_op' => $linesByOp,
             'cursor' => 0,
-            'chunk_size' => self::JOB_CHUNK_UNIQUE_OPS,
+            'chunk_size' => $this->jobChunkUniqueOps(),
             'matches' => [],
             'api_calls_total' => 0,
             'error_message' => null,
             'result_file' => null,
         ];
 
-        $this->saveJobMeta($jobId, $meta);
+        $this->jobRepository->insertJob($jobId, $meta, $rows);
 
         return $jobId;
     }
@@ -200,12 +199,12 @@ class RepasseMpService
 
         if ($cursor >= $total) {
             $meta['status'] = 'matching_done';
-            $this->saveJobMeta($jobId, $meta);
+            $this->persistJobProgress($jobId, $meta);
 
             return ['ok' => true, 'phase' => 'matching_done', 'progress' => 100.0, 'cursor' => $total, 'total' => $total];
         }
 
-        $chunkSize = max(1, (int) ($meta['chunk_size'] ?? self::JOB_CHUNK_UNIQUE_OPS));
+        $chunkSize = max(1, (int) ($meta['chunk_size'] ?? $this->jobChunkUniqueOps()));
         $slice = array_slice($uniqueOps, $cursor, $chunkSize);
         $keys = array_map('strval', $slice);
 
@@ -214,7 +213,7 @@ class RepasseMpService
         } catch (\Throwable $e) {
             $meta['status'] = 'error';
             $meta['error_message'] = 'Falha na API: ' . $e->getMessage();
-            $this->saveJobMeta($jobId, $meta);
+            $this->persistJobProgress($jobId, $meta);
 
             return ['ok' => false, 'error' => $meta['error_message']];
         }
@@ -244,7 +243,7 @@ class RepasseMpService
             $meta['status'] = 'matching_done';
         }
 
-        $this->saveJobMeta($jobId, $meta);
+        $this->persistJobProgress($jobId, $meta);
 
         return [
             'ok' => true,
@@ -316,7 +315,7 @@ class RepasseMpService
         }
         $meta['status'] = 'finalizing';
         $meta['finalize_started_at'] = time();
-        $this->saveJobMeta($jobId, $meta);
+        $this->persistJobProgress($jobId, $meta);
 
         $rows = $meta['rows'] ?? null;
         if (!is_array($rows) || $rows === []) {
@@ -430,7 +429,8 @@ class RepasseMpService
         $meta['last_processed'] = $processed;
         $meta['rows'] = null;
         $meta['result_snapshot'] = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-        $this->saveJobMeta($jobId, $meta);
+        $this->persistJobProgress($jobId, $meta);
+        $this->jobRepository->clearSourceRows($jobId);
 
         return ['ok' => true, 'result' => $result];
     }
@@ -502,9 +502,20 @@ class RepasseMpService
     }
 
     /** @param array<string, mixed> $meta */
-    private function saveJobMeta(string $jobId, array $meta): void
+    private function persistJobProgress(string $jobId, array $meta): void
     {
-        $this->jobRepository->saveMeta($jobId, $meta);
+        unset($meta['rows']);
+        $this->jobRepository->updateJobProgress($jobId, $meta);
+    }
+
+    private function jobChunkUniqueOps(): int
+    {
+        $v = (int) getenv('REPASSE_MP_UNIQUE_OPS_PER_CHUNK');
+        if ($v <= 0) {
+            return self::JOB_CHUNK_UNIQUE_OPS_DEFAULT;
+        }
+
+        return max(10, min(80, $v));
     }
 
     private function readRows(string $path, string $ext): array

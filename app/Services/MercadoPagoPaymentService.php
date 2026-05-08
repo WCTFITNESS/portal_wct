@@ -123,7 +123,7 @@ class MercadoPagoPaymentService
         $uniqueValues = array_values($values);
         $matches = [];
         $apiCalls = 0;
-        $chunkSize = 40;
+        $chunkSize = $this->parallelPaymentLookupChunkSize();
 
         $numeric = [];
         $textual = [];
@@ -458,6 +458,16 @@ class MercadoPagoPaymentService
         }
 
         return ['items' => $items, 'api_calls' => $apiCalls, 'message' => 'Busca avulsa concluida.', 'responses' => $responses, 'paging' => $paging];
+    }
+
+    private function parallelPaymentLookupChunkSize(): int
+    {
+        $v = (int) getenv('MERCADOPAGO_PARALLEL_CHUNK');
+        if ($v <= 0) {
+            return 48;
+        }
+
+        return max(10, min(80, $v));
     }
 
     private function requireToken(): string

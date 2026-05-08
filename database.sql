@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS repasse_mp_jobs (
     job_id VARCHAR(32) PRIMARY KEY,
     status VARCHAR(30) NOT NULL,
     meta_json LONGTEXT NOT NULL,
+    source_rows_json LONGTEXT DEFAULT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
