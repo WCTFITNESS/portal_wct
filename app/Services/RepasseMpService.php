@@ -15,7 +15,7 @@ class RepasseMpService
     private const PREVIEW_MAX = 30;
 
     /** Padrão quando REPASSE_MP_UNIQUE_OPS_PER_CHUNK não está definido. */
-    private const JOB_CHUNK_UNIQUE_OPS_DEFAULT = 36;
+    private const JOB_CHUNK_UNIQUE_OPS_DEFAULT = 60;
 
     public function __construct(
         private MercadoPagoPaymentService $paymentService,
@@ -197,24 +197,57 @@ class RepasseMpService
         }
 
         $response = null;
-        $internalChunks = $this->jobInternalChunksPerRequest();
-        for ($step = 0; $step < $internalChunks; $step++) {
-            $response = $this->processSingleMatchingChunk($jobId, $meta);
-            if (($response['ok'] ?? false) !== true) {
-                return $response;
-            }
-
-            if (($response['phase'] ?? '') === 'matching_done' || ($response['phase'] ?? '') === 'complete') {
-                break;
-            }
-
+        $deadline = microtime(true) + $this->jobMatchingBudgetSeconds();
+        while (microtime(true) < $deadline) {
             $meta = $this->loadJobMeta($jobId, false);
             if ($meta === null) {
                 return ['ok' => false, 'error' => 'Job nao encontrado.'];
             }
 
+            if (($meta['status'] ?? '') === 'error') {
+                return ['ok' => false, 'error' => (string) ($meta['error_message'] ?? 'Erro no job.')];
+            }
+
+            if (($meta['status'] ?? '') === 'complete') {
+                return [
+                    'ok' => true,
+                    'phase' => 'complete',
+                    'progress' => 100.0,
+                    'result_file' => (string) ($meta['result_file'] ?? ''),
+                ];
+            }
+
+            if (($meta['status'] ?? '') === 'matching_done') {
+                return ['ok' => true, 'phase' => 'matching_done', 'progress' => 100.0];
+            }
+
             if (($meta['status'] ?? '') !== 'matching') {
                 break;
+            }
+
+            $internalChunks = $this->jobInternalChunksPerRequest();
+            for ($step = 0; $step < $internalChunks; $step++) {
+                if (microtime(true) >= $deadline) {
+                    break 2;
+                }
+
+                $response = $this->processSingleMatchingChunk($jobId, $meta);
+                if (($response['ok'] ?? false) !== true) {
+                    return $response;
+                }
+
+                if (($response['phase'] ?? '') === 'matching_done' || ($response['phase'] ?? '') === 'complete') {
+                    return $response;
+                }
+
+                $meta = $this->loadJobMeta($jobId, false);
+                if ($meta === null) {
+                    return ['ok' => false, 'error' => 'Job nao encontrado.'];
+                }
+
+                if (($meta['status'] ?? '') !== 'matching') {
+                    break 2;
+                }
             }
         }
 
@@ -594,10 +627,20 @@ class RepasseMpService
     {
         $v = (int) getenv('REPASSE_MP_INTERNAL_CHUNKS_PER_REQUEST');
         if ($v <= 0) {
-            return 1;
+            return 5;
         }
 
         return max(1, min(10, $v));
+    }
+
+    private function jobMatchingBudgetSeconds(): int
+    {
+        $v = (int) getenv('REPASSE_MP_MATCHING_BUDGET_SECONDS');
+        if ($v <= 0) {
+            return 55;
+        }
+
+        return max(10, min(180, $v));
     }
 
     private function readRows(string $path, string $ext): array

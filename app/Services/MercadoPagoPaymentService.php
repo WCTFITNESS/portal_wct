@@ -134,7 +134,7 @@ class MercadoPagoPaymentService
 
         $total = count($uniqueValues);
         $estimatedMin = $numeric + $textual;
-        $estimatedMax = ($numeric * 2) + $textual;
+        $estimatedMax = $numeric + $textual + $numeric;
 
         return [
             'unique_total' => $total,
@@ -195,7 +195,16 @@ class MercadoPagoPaymentService
                 $value = (string) $value;
                 $path = '/v1/payments/' . rawurlencode($value);
                 $resp = $responses[$path] ?? null;
-                if (!$resp || ($resp['status'] ?? 0) < 200 || ($resp['status'] ?? 0) >= 300 || !is_array($resp['body'] ?? null)) {
+                $status = (int) ($resp['status'] ?? 0);
+                if ($status === 404) {
+                    $matches[$value] = [
+                        'order_id' => '',
+                        'payment_id' => '',
+                        'status' => 'Nao encontrado (payment.id)',
+                    ];
+                    continue;
+                }
+                if ($status < 200 || $status >= 300 || !is_array($resp['body'] ?? null)) {
                     continue;
                 }
                 $orderId = $this->extractOrderIdFromPaymentBody($resp['body']);
@@ -510,7 +519,7 @@ class MercadoPagoPaymentService
     {
         $v = (int) getenv('MERCADOPAGO_PARALLEL_CHUNK');
         if ($v <= 0) {
-            return 48;
+            return 64;
         }
 
         return max(10, min(80, $v));

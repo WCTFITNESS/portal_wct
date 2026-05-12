@@ -53,6 +53,13 @@
 
 7) Health Check Path sugerido: /index.php?page=dashboard
 
+   Repasse MP (opcional, performance):
+   REPASSE_MP_UNIQUE_OPS_PER_CHUNK=60
+   REPASSE_MP_INTERNAL_CHUNKS_PER_REQUEST=5
+   REPASSE_MP_MATCHING_BUDGET_SECONDS=55
+   MERCADOPAGO_PARALLEL_CHUNK=64
+   MERCADOPAGO_LOG_BULK_REQUESTS=false
+
 8) Opcional: use o arquivo render.yaml na raiz como Blueprint (ajuste nome/regiao).
 
 ================================================================================

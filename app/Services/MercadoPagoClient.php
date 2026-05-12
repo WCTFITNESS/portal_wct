@@ -106,17 +106,24 @@ class MercadoPagoClient
             $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $error = curl_error($ch);
 
-            $logPath = 'MP ' . $path;
-            if (strlen($logPath) > 250) {
-                $logPath = substr($logPath, 0, 247) . '...';
+            if ($this->shouldLogBulkRequests()) {
+                $logPath = 'MP ' . $path;
+                if (strlen($logPath) > 250) {
+                    $logPath = substr($logPath, 0, 247) . '...';
+                }
+
+                if ($error !== '') {
+                    $this->requestLogRepository->register('GET', $logPath, $httpCode > 0 ? $httpCode : null, null, null, $error);
+                } else {
+                    $raw = is_string($response) ? $response : '';
+                    $this->requestLogRepository->register('GET', $logPath, $httpCode, null, $raw);
+                }
             }
 
             if ($error !== '') {
-                $this->requestLogRepository->register('GET', $logPath, $httpCode > 0 ? $httpCode : null, null, null, $error);
                 $results[$path] = ['status' => $httpCode, 'body' => null, 'raw' => ''];
             } else {
                 $raw = is_string($response) ? $response : '';
-                $this->requestLogRepository->register('GET', $logPath, $httpCode, null, $raw);
                 $results[$path] = [
                     'status' => $httpCode,
                     'body' => json_decode($raw, true),
@@ -131,5 +138,15 @@ class MercadoPagoClient
         curl_multi_close($mh);
 
         return $results;
+    }
+
+    private function shouldLogBulkRequests(): bool
+    {
+        $value = getenv('MERCADOPAGO_LOG_BULK_REQUESTS');
+        if ($value === false || $value === '') {
+            return false;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 }
