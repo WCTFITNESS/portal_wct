@@ -39,28 +39,15 @@ class LexosOrderMonitorService
 
         $timelines = [];
         foreach ($rows as $row) {
-            $orderId = $this->extractOrderIdentifier($row);
-            $status = $this->extractStatus($row);
-            $eventDate = $this->extractEventDate($row);
-
-            if (!isset($timelines[$orderId])) {
-                $timelines[$orderId] = [];
+            if (!is_array($row)) {
+                continue;
             }
 
-            $timelines[$orderId][] = [
-                'status' => $status,
-                'date' => $eventDate,
-                'action' => $this->recommendedActionForStatus($status),
-                'row' => $row,
-            ];
+            $orderId = $this->extractOrderIdentifier($row);
+            $timelines[$orderId][] = $this->buildTimelineEvent($row);
         }
 
-        foreach ($timelines as $orderId => $events) {
-            usort($events, static function (array $a, array $b): int {
-                return strcmp((string) ($a['date'] ?? ''), (string) ($b['date'] ?? ''));
-            });
-            $timelines[$orderId] = $events;
-        }
+        $timelines = $this->sortTimelines($timelines);
 
         return [
             'query' => $orderQuery,
@@ -80,24 +67,12 @@ class LexosOrderMonitorService
             if (!is_array($row)) {
                 continue;
             }
+
             $orderId = $this->extractOrderIdentifier($row);
-            $status = $this->extractStatus($row);
-            $eventDate = $this->extractEventDate($row);
-
-            $timelines[$orderId][] = [
-                'status' => $status,
-                'date' => $eventDate,
-                'action' => $this->recommendedActionForStatus($status),
-                'row' => $row,
-            ];
+            $timelines[$orderId][] = $this->buildTimelineEvent($row);
         }
 
-        foreach ($timelines as $orderId => $events) {
-            usort($events, static function (array $a, array $b): int {
-                return strcmp((string) ($a['date'] ?? ''), (string) ($b['date'] ?? ''));
-            });
-            $timelines[$orderId] = $events;
-        }
+        $timelines = $this->sortTimelines($timelines);
 
         $summary = [
             'aberto' => 0,
@@ -163,6 +138,35 @@ class LexosOrderMonitorService
         }
 
         return $this->extractOrderIdentifier((array) $rows[0]);
+    }
+
+    private function buildTimelineEvent(array $row): array
+    {
+        $status = $this->extractStatus($row);
+
+        return [
+            'status' => $status,
+            'date' => $this->extractEventDate($row),
+            'action' => $this->recommendedActionForStatus($status),
+            'category' => $this->categorizeStatus($status),
+            'row' => $row,
+        ];
+    }
+
+    /**
+     * @param array<string, list<array<string, mixed>>> $timelines
+     * @return array<string, list<array<string, mixed>>>
+     */
+    private function sortTimelines(array $timelines): array
+    {
+        foreach ($timelines as $orderId => $events) {
+            usort($events, static function (array $a, array $b): int {
+                return strcmp((string) ($a['date'] ?? ''), (string) ($b['date'] ?? ''));
+            });
+            $timelines[$orderId] = $events;
+        }
+
+        return $timelines;
     }
 
     private function extractOrderIdentifier(array $row): string
