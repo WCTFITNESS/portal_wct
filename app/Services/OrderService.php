@@ -86,6 +86,24 @@ class OrderService
         return $ordersResult['body']['results'] ?? [];
     }
 
+    public function getOrderById(string $orderId): ?array
+    {
+        $orderId = trim($orderId);
+        if ($orderId === '' || !ctype_digit($orderId)) {
+            return null;
+        }
+
+        $accessToken = $this->tokenService->getValidAccessToken();
+        $orderResult = $this->client->get('/orders/' . urlencode($orderId), $accessToken);
+        if ($orderResult['status'] < 200 || $orderResult['status'] >= 300) {
+            return null;
+        }
+
+        $body = $orderResult['body'] ?? null;
+
+        return is_array($body) ? $body : null;
+    }
+
     /**
      * Mesma query string usada em {@see listOrders} para GET /orders/search (sem o prefixo do path).
      */

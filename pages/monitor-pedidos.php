@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Services\LexosOrderTimelineSupport;
+
 $feedback = null;
 $feedbackClass = 'ok';
 $monitor = null;
@@ -52,6 +54,19 @@ try {
     $feedbackClass = 'err';
 }
 
+if ($monitor !== null && $orderQuery !== '') {
+    $monitor = LexosOrderTimelineSupport::filterSnapshot($monitor, $orderQuery);
+    if ((int) ($monitor['summary']['total_pedidos'] ?? 0) === 0) {
+        $directMonitor = $mercadoLivreMonitorService->buildMonitorFromOrderId($orderQuery, $dateStart, $dateEnd);
+        if ($directMonitor !== null) {
+            $monitor = $directMonitor;
+            $monitorSource = 'mercado_livre';
+            $feedback = 'Pedido localizado diretamente na API Mercado Livre.';
+            $feedbackClass = 'ok';
+        }
+    }
+}
+
 if ($orderQuery !== '') {
     try {
         $timelineDetail = $webhookService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(500, $limit));
@@ -71,14 +86,20 @@ if (is_array($timelineDetail['timelines'] ?? null) && $timelineDetail['timelines
     $timelineOrders = $timelineDetail['timelines'];
 } elseif ($monitor && $selectedOrderId !== '' && is_array($monitor['timelines'][$selectedOrderId] ?? null)) {
     $timelineOrders = [$selectedOrderId => $monitor['timelines'][$selectedOrderId]];
+} elseif ($monitor && $orderQuery !== '' && is_array($monitor['timelines'] ?? null)) {
+    foreach ($monitor['timelines'] as $orderId => $events) {
+        if (stripos((string) $orderId, $orderQuery) !== false) {
+            $timelineOrders[$orderId] = $events;
+        }
+    }
 }
 
 $orders = is_array($monitor['orders'] ?? null) ? $monitor['orders'] : [];
-if ($orderQuery !== '' && $orders !== []) {
-    $orders = array_values(array_filter(
-        $orders,
-        static fn (array $item): bool => stripos((string) ($item['order_id'] ?? ''), $orderQuery) !== false
-    ));
+$isOrderFilterActive = $orderQuery !== '';
+
+if ($isOrderFilterActive && $monitor && (int) ($monitor['summary']['total_pedidos'] ?? 0) === 0 && $feedbackClass !== 'err') {
+    $feedback = 'Nenhum pedido encontrado para o filtro informado no período selecionado.';
+    $feedbackClass = 'err';
 }
 
 $monitorUrl = static function (array $extra = []) use ($baseUrl, $dateStart, $dateEnd, $limit, $orderQuery): string {
@@ -111,6 +132,17 @@ $timelineAnchor = static function (string $orderId): string {
     $safe = preg_replace('/[^a-zA-Z0-9_-]+/', '-', $orderId) ?? 'pedido';
 
     return 'timeline-' . trim($safe, '-');
+};
+
+$renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): string {
+    if ($row === []) {
+        return '-';
+    }
+
+    $json = LexosOrderTimelineSupport::encodeRowJson($row);
+
+    return '<details class="json-details"><summary>' . htmlspecialchars($label) . '</summary><pre class="json-details__pre">'
+        . htmlspecialchars($json) . '</pre></details>';
 };
 ?>
 <style>
@@ -245,6 +277,28 @@ $timelineAnchor = static function (string $orderId): string {
     .timeline-link:hover {
         text-decoration: underline;
     }
+    .json-details {
+        margin: 0;
+    }
+    .json-details summary {
+        cursor: pointer;
+        color: var(--wct-primary);
+        font-weight: 700;
+        list-style-position: outside;
+    }
+    .json-details__pre {
+        margin: 8px 0 0 0;
+        max-height: 320px;
+        overflow: auto;
+        background: #111827;
+        color: #f9fafb;
+        padding: 12px;
+        border-radius: 8px;
+        font-size: .82rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
 </style>
 
 <section class="card">
@@ -306,8 +360,11 @@ $timelineAnchor = static function (string $orderId): string {
 <?php if ($monitor && is_array($monitor['summary'] ?? null)): ?>
     <?php $summary = $monitor['summary']; ?>
     <section class="card">
-        <h1>Resumo do período</h1>
+        <h1><?= $isOrderFilterActive ? 'Resumo do pedido filtrado' : 'Resumo do período' ?></h1>
         <p>Fonte atual: <strong><?= htmlspecialchars($monitorSource === 'mercado_livre' ? 'Mercado Livre' : 'Webhook Lexos') ?></strong></p>
+        <?php if ($isOrderFilterActive): ?>
+            <p>Filtro ativo para o pedido <strong><?= htmlspecialchars($orderQuery) ?></strong>. O resumo abaixo reflete somente esse pedido.</p>
+        <?php endif; ?>
         <table>
             <thead>
             <tr>
@@ -346,17 +403,21 @@ $timelineAnchor = static function (string $orderId): string {
                     <th>Última data</th>
                     <th>Eventos</th>
                     <th>Ação recomendada</th>
+                    <th>JSON</th>
                     <th>Timeline</th>
                 </tr>
                 </thead>
                 <tbody>
                 <?php if (!$orders): ?>
-                    <tr><td colspan="7">Nenhum pedido encontrado para o período selecionado.</td></tr>
+                    <tr><td colspan="8">Nenhum pedido encontrado para o período selecionado.</td></tr>
                 <?php endif; ?>
                 <?php foreach ($orders as $item): ?>
                     <?php
                     $orderId = (string) ($item['order_id'] ?? '');
                     $category = (string) ($item['category'] ?? 'outros');
+                    $timelineEvents = is_array($monitor['timelines'][$orderId] ?? null) ? $monitor['timelines'][$orderId] : [];
+                    $lastEvent = $timelineEvents[count($timelineEvents) - 1] ?? null;
+                    $jsonRow = is_array($lastEvent['row'] ?? null) ? $lastEvent['row'] : [];
                     ?>
                     <tr>
                         <td><?= htmlspecialchars($orderId) ?></td>
@@ -365,6 +426,7 @@ $timelineAnchor = static function (string $orderId): string {
                         <td><?= htmlspecialchars((string) ($item['date'] ?? '')) ?></td>
                         <td><?= htmlspecialchars((string) ($item['events_count'] ?? 0)) ?></td>
                         <td><?= htmlspecialchars((string) ($item['action'] ?? '')) ?></td>
+                        <td><?= $renderJsonDetails($jsonRow) ?></td>
                         <td>
                             <a class="timeline-link" href="<?= htmlspecialchars($monitorUrl(['order_id' => $orderId, 'order_query' => ''])) ?>#<?= htmlspecialchars($timelineAnchor($orderId)) ?>">Ver timeline</a>
                         </td>
@@ -424,6 +486,10 @@ $timelineAnchor = static function (string $orderId): string {
                                 <?php endif; ?>
                             </div>
                             <p class="order-timeline__action"><?= htmlspecialchars((string) ($event['action'] ?? '')) ?></p>
+                            <?php $eventRow = is_array($event['row'] ?? null) ? $event['row'] : []; ?>
+                            <?php if ($eventRow !== []): ?>
+                                <div style="margin-top:8px;"><?= $renderJsonDetails($eventRow, 'Ver JSON do evento') ?></div>
+                            <?php endif; ?>
                         </li>
                     <?php endforeach; ?>
                 </ol>
