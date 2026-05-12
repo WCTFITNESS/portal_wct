@@ -215,9 +215,10 @@ class LexosAuthService
         $integrationKey = trim((string) ($cfg['lexos_integration_key'] ?? ''));
         if ($integrationKey !== '') {
             $customHeaderName = trim((string) ($cfg['lexos_integration_header_name'] ?? ''));
-            if ($customHeaderName !== '') {
+            if ($customHeaderName !== '' && strcasecmp($customHeaderName, 'Chave') !== 0) {
                 $headers[] = $customHeaderName . ': ' . $integrationKey;
             }
+            $headers[] = 'Chave: ' . $integrationKey;
             $headers[] = 'x-api-key: ' . $integrationKey;
             $headers[] = 'x-integration-key: ' . $integrationKey;
             $headers[] = 'integration-key: ' . $integrationKey;

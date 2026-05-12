@@ -157,8 +157,8 @@ $requestLogs = $app['requestLogRepository']->listRecent(10);
         <label>Refresh token Lexos</label>
         <textarea name="lexos_refresh_token" rows="3" placeholder="Cole o refresh token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_refresh_token'] ?? '')) ?></textarea>
 
-        <label>Chave segura da integração Lexos (Header)</label>
-        <textarea name="lexos_integration_key" rows="2" placeholder="Cole a chave segura da integração"><?= htmlspecialchars((string) ($apiConfig['lexos_integration_key'] ?? '')) ?></textarea>
+        <label>Chave segura da integração Lexos (header Chave)</label>
+        <textarea name="lexos_integration_key" rows="2" placeholder="Cole a chave segura gerada no Lexos Hub (integração Lexos API)"><?= htmlspecialchars((string) ($apiConfig['lexos_integration_key'] ?? '')) ?></textarea>
 
         <label>Nome do header da chave (se seu tenant exigir nome específico)</label>
         <input type="text" name="lexos_integration_header_name" placeholder="Ex.: x-api-key ou x-tenant-key" value="<?= htmlspecialchars((string) ($apiConfig['lexos_integration_header_name'] ?? '')) ?>">

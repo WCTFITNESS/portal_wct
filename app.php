@@ -15,6 +15,7 @@ use App\Services\MercadoPagoPaymentService;
 use App\Services\MercadoLivreClient;
 use App\Services\LexosDashboardService;
 use App\Services\LexosAuthService;
+use App\Services\LexosHubApiClient;
 use App\Services\LexosOrderMonitorService;
 use App\Services\MessageService;
 use App\Services\MlAdsReportService;
@@ -45,8 +46,9 @@ $mercadopagoPaymentService = new MercadoPagoPaymentService($mercadopagoSettingsR
 $repasseMpService = new RepasseMpService($mercadopagoPaymentService, $repasseMpJobRepository);
 $mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRepository);
 $lexosAuthService = new LexosAuthService($settingsRepository);
-$lexosDashboardService = new LexosDashboardService($settingsRepository, $lexosAuthService);
-$lexosOrderMonitorService = new LexosOrderMonitorService($settingsRepository, $lexosAuthService);
+$lexosHubApiClient = new LexosHubApiClient($settingsRepository, $lexosAuthService);
+$lexosDashboardService = new LexosDashboardService($lexosHubApiClient);
+$lexosOrderMonitorService = new LexosOrderMonitorService($lexosHubApiClient);
 
 return [
     'config' => $config,

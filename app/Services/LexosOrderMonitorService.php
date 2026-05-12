@@ -4,15 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Repositories\SettingsRepository;
 use RuntimeException;
 
 class LexosOrderMonitorService
 {
-    public function __construct(
-        private SettingsRepository $settingsRepository,
-        private LexosAuthService $lexosAuthService,
-    ) {
+    public function __construct(private LexosHubApiClient $lexosHubApiClient)
+    {
     }
 
     public function findOrderTimeline(string $orderQuery, string $startDate, string $endDate, int $take = 100): array
@@ -36,7 +33,7 @@ class LexosOrderMonitorService
             ]],
         ];
 
-        $json = $this->httpPostLexosJson($url, $payload);
+        $json = $this->lexosHubApiClient->postJson($url, $payload);
         $rows = $this->normalizeDatasourceRows($json);
 
         $timelines = [];
@@ -133,7 +130,7 @@ class LexosOrderMonitorService
             ]],
         ];
 
-        $json = $this->httpPostLexosJson($url, $payload);
+        $json = $this->lexosHubApiClient->postJson($url, $payload);
         $rows = $this->normalizeDatasourceRows($json);
         if ($rows === []) {
             return null;
@@ -286,158 +283,6 @@ class LexosOrderMonitorService
         return [];
     }
 
-    private function getLexosToken(): string
-    {
-        $cfg = $this->settingsRepository->getApiConfig();
-        $token = trim((string) ($cfg['lexos_token'] ?? ''));
-        $token = preg_replace('/^\s*Bearer\s+/i', '', $token) ?? $token;
-        if ($token === '') {
-            throw new RuntimeException('Token Lexos não configurado em Configuração API.');
-        }
-
-        return $token;
-    }
-
-    private function httpPostLexosJson(string $url, array $payload): array
-    {
-        try {
-            return $this->executeLexosPostVariants($url, $payload);
-        } catch (RuntimeException $exception) {
-            if (!$this->isLexosUnauthorizedError($exception) || !$this->canRefreshLexosToken()) {
-                throw $this->wrapLexosAuthFailure($exception);
-            }
-
-            try {
-                $this->lexosAuthService->refreshLexosToken();
-            } catch (Throwable $refreshException) {
-                throw $this->wrapLexosAuthFailure($exception, $refreshException);
-            }
-
-            try {
-                return $this->executeLexosPostVariants($url, $payload);
-            } catch (RuntimeException $retryException) {
-                throw $this->wrapLexosAuthFailure($retryException);
-            }
-        }
-    }
-
-    private function executeLexosPostVariants(string $url, array $payload): array
-    {
-        $token = $this->getLexosToken();
-        $integrationKey = $this->getLexosIntegrationKey();
-        $body = json_encode($payload, JSON_THROW_ON_ERROR);
-        $baseHeaders = [
-            'Accept: application/json',
-            'Content-Type: application/json',
-        ];
-        if ($integrationKey !== '') {
-            $customHeaderName = $this->getLexosIntegrationHeaderName();
-            if ($customHeaderName !== '') {
-                $baseHeaders[] = $customHeaderName . ': ' . $integrationKey;
-            }
-            $baseHeaders[] = 'x-api-key: ' . $integrationKey;
-            $baseHeaders[] = 'x-integration-key: ' . $integrationKey;
-            $baseHeaders[] = 'integration-key: ' . $integrationKey;
-            $baseHeaders[] = 'chave-integracao: ' . $integrationKey;
-        }
-
-        $authVariants = [
-            ['headers' => ['Authorization: Bearer ' . $token], 'label' => 'authorization_bearer'],
-            ['headers' => ['Authorization: ' . $token], 'label' => 'authorization_raw'],
-            ['headers' => ['Authorization: Token ' . $token], 'label' => 'authorization_token_prefix'],
-            ['headers' => ['token: ' . $token], 'label' => 'token_header'],
-            ['headers' => ['x-access-token: ' . $token], 'label' => 'x_access_token_header'],
-            ['headers' => [], 'label' => 'without_auth_header'],
-        ];
-
-        $lastError = null;
-        foreach ($authVariants as $variant) {
-            [$status, $err, $raw] = $this->executeLexosPost($url, $body, array_merge($baseHeaders, $variant['headers']));
-            if ($raw !== false && $status >= 200 && $status < 300) {
-                $decoded = json_decode((string) $raw, true);
-
-                return is_array($decoded) ? $decoded : [];
-            }
-
-            $extra = '';
-            if (is_string($raw) && $raw !== '') {
-                $extra = ' Resposta: ' . substr($raw, 0, 400);
-            }
-            $lastError = new RuntimeException('Falha consulta Lexos WebAPI. HTTP: ' . $status . ' Tentativa: ' . $variant['label'] . ($err !== '' ? ' ' . $err : '') . $extra);
-            if ($status !== 401) {
-                throw $lastError;
-            }
-        }
-
-        if ($lastError !== null) {
-            throw $lastError;
-        }
-
-        throw new RuntimeException('Falha consulta Lexos WebAPI. Erro desconhecido.');
-    }
-
-    private function isLexosUnauthorizedError(RuntimeException $exception): bool
-    {
-        return str_contains($exception->getMessage(), 'HTTP: 401');
-    }
-
-    private function canRefreshLexosToken(): bool
-    {
-        $cfg = $this->settingsRepository->getApiConfig() ?? [];
-
-        return trim((string) ($cfg['lexos_refresh_token'] ?? '')) !== '';
-    }
-
-    private function wrapLexosAuthFailure(RuntimeException $exception, ?Throwable $refreshException = null): RuntimeException
-    {
-        $message = $exception->getMessage();
-        if ($this->isLexosUnauthorizedError($exception)) {
-            $message .= ' Verifique em Configuração API o access token Lexos, a chave de integração e use Atualizar token Lexos (refresh).';
-            if ($refreshException !== null) {
-                $message .= ' Falha ao renovar token automaticamente: ' . $refreshException->getMessage();
-            }
-        }
-
-        return new RuntimeException($message, 0, $exception);
-    }
-
-    /**
-     * @param list<string> $headers
-     * @return array{int,string,string|false}
-     */
-    private function executeLexosPost(string $url, string $body, array $headers): array
-    {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CUSTOMREQUEST => 'POST',
-            CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_TIMEOUT => 60,
-        ]);
-
-        $raw = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err = curl_error($ch);
-        curl_close($ch);
-
-        return [$status, $err, $raw];
-    }
-
-    private function getLexosIntegrationKey(): string
-    {
-        $cfg = $this->settingsRepository->getApiConfig();
-
-        return trim((string) ($cfg['lexos_integration_key'] ?? ''));
-    }
-
-    private function getLexosIntegrationHeaderName(): string
-    {
-        $cfg = $this->settingsRepository->getApiConfig();
-
-        return trim((string) ($cfg['lexos_integration_header_name'] ?? ''));
-    }
-
     private function fetchPedidoRowsWithFallback(string $startDate, string $endDate, int $take): array
     {
         $attempts = [
@@ -471,7 +316,7 @@ class LexosOrderMonitorService
         $lastError = null;
         foreach ($attempts as $attempt) {
             try {
-                return $this->httpPostLexosJson($attempt['url'], $attempt['payload']);
+                return $this->lexosHubApiClient->postJson($attempt['url'], $attempt['payload']);
             } catch (RuntimeException $exception) {
                 $lastError = $exception;
             }
