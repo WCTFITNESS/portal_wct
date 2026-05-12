@@ -13,26 +13,24 @@ $dateEnd = trim((string) ($_GET['end_date'] ?? $today->format('Y-m-d')));
 $limit = max(1, min(5000, (int) ($_GET['limit'] ?? 1000)));
 $orderQuery = trim((string) ($_GET['order_query'] ?? ''));
 $selectedOrderId = trim((string) ($_GET['order_id'] ?? ''));
-$usedDashboardExample = (($_GET['use_dashboard_example'] ?? '') === '1');
+$usedRecentExample = (($_GET['use_recent_example'] ?? '') === '1');
+$webhookService = $app['lexosOrderWebhookService'];
+$webhookUrl = portal_wct_public_path($baseUrl, 'webhooks/lexos-pedidos.php');
+$storedEvents = $webhookService->countStoredEvents();
 
-if ($usedDashboardExample && $orderQuery === '') {
-    try {
-        $example = $app['lexosOrderMonitorService']->getRecentOrderExample($dateStart, $dateEnd);
-        if ($example !== null && $example !== '') {
-            $orderQuery = $example;
-            $feedback = 'Exemplo carregado automaticamente a partir dos dados da Lexos.';
-        } else {
-            $feedback = 'Nenhum pedido recente encontrado no período para usar como exemplo.';
-            $feedbackClass = 'err';
-        }
-    } catch (Throwable $exception) {
-        $feedback = 'Erro ao carregar exemplo: ' . $exception->getMessage();
+if ($usedRecentExample && $orderQuery === '') {
+    $example = $webhookService->getRecentOrderExample($dateStart, $dateEnd);
+    if ($example !== null && $example !== '') {
+        $orderQuery = $example;
+        $feedback = 'Exemplo carregado a partir dos eventos recebidos via webhook.';
+    } else {
+        $feedback = 'Nenhum evento de pedido recebido no período para usar como exemplo.';
         $feedbackClass = 'err';
     }
 }
 
 try {
-    $monitor = $app['lexosOrderMonitorService']->monitorPeriod($dateStart, $dateEnd, $limit);
+    $monitor = $webhookService->monitorPeriod($dateStart, $dateEnd, $limit);
 } catch (Throwable $exception) {
     $feedback = 'Erro no monitoramento: ' . $exception->getMessage();
     $feedbackClass = 'err';
@@ -40,7 +38,7 @@ try {
 
 if ($orderQuery !== '') {
     try {
-        $timelineDetail = $app['lexosOrderMonitorService']->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(500, $limit));
+        $timelineDetail = $webhookService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(500, $limit));
     } catch (Throwable $exception) {
         if ($feedback === null) {
             $feedback = 'Erro na timeline do pedido: ' . $exception->getMessage();
@@ -232,7 +230,9 @@ $timelineAnchor = static function (string $orderId): string {
 
 <section class="card">
     <h1>Monitor de Pedidos</h1>
-    <p>Visão gerencial do período e timeline por pedido com base nos status retornados pela API Lexos.</p>
+    <p>Visão gerencial do período e timeline por pedido com base nos eventos recebidos via webhook da Lexos Hub.</p>
+    <p><strong>Webhook Lexos:</strong> <code><?= htmlspecialchars($webhookUrl) ?></code></p>
+    <p>Eventos armazenados: <strong><?= htmlspecialchars((string) $storedEvents) ?></strong>. Cadastre a URL acima na integração Lexos API (configurações avançadas de webhook).</p>
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>
@@ -257,7 +257,7 @@ $timelineAnchor = static function (string $orderId): string {
             </div>
 
             <div>
-                <label for="limit">Limite de linhas da API</label>
+                <label for="limit">Limite de eventos exibidos</label>
                 <input id="limit" type="number" name="limit" min="1" max="5000" value="<?= htmlspecialchars((string) $limit) ?>">
             </div>
 
@@ -268,7 +268,7 @@ $timelineAnchor = static function (string $orderId): string {
         </div>
 
         <div class="monitor-actions">
-            <a class="btn-secondary" href="<?= htmlspecialchars($monitorUrl(['use_dashboard_example' => '1'])) ?>">Usar exemplo do Dashboard</a>
+            <a class="btn-secondary" href="<?= htmlspecialchars($monitorUrl(['use_recent_example' => '1'])) ?>">Usar pedido recente do webhook</a>
             <?php if ($orderQuery !== '' || $selectedOrderId !== ''): ?>
                 <a class="btn-secondary" href="<?= htmlspecialchars($monitorUrl(['order_query' => '', 'order_id' => ''])) ?>">Limpar timeline</a>
             <?php endif; ?>

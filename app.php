@@ -7,6 +7,7 @@ use App\Repositories\MercadoPagoSettingsRepository;
 use App\Repositories\MessageLogRepository;
 use App\Repositories\MessageTemplateRepository;
 use App\Repositories\RequestLogRepository;
+use App\Repositories\LexosOrderWebhookRepository;
 use App\Repositories\RepasseMpJobRepository;
 use App\Repositories\SettingsRepository;
 use App\Repositories\TokenRepository;
@@ -17,6 +18,7 @@ use App\Services\LexosDashboardService;
 use App\Services\LexosAuthService;
 use App\Services\LexosHubApiClient;
 use App\Services\LexosOrderMonitorService;
+use App\Services\LexosOrderWebhookService;
 use App\Services\MessageService;
 use App\Services\MlAdsReportService;
 use App\Services\OrderService;
@@ -48,6 +50,8 @@ $mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRe
 $lexosAuthService = new LexosAuthService($settingsRepository);
 $lexosHubApiClient = new LexosHubApiClient($settingsRepository, $lexosAuthService);
 $lexosDashboardService = new LexosDashboardService($lexosHubApiClient);
+$lexosOrderWebhookRepository = new LexosOrderWebhookRepository($pdo);
+$lexosOrderWebhookService = new LexosOrderWebhookService($lexosOrderWebhookRepository);
 $lexosOrderMonitorService = new LexosOrderMonitorService($lexosHubApiClient);
 
 return [
@@ -69,5 +73,6 @@ return [
     'mercadopagoClient' => $mercadopagoClient,
     'mercadopagoPaymentService' => $mercadopagoPaymentService,
     'lexosDashboardService' => $lexosDashboardService,
+    'lexosOrderWebhookService' => $lexosOrderWebhookService,
     'lexosOrderMonitorService' => $lexosOrderMonitorService,
 ];

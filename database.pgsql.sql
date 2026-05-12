@@ -84,3 +84,15 @@ CREATE TABLE IF NOT EXISTS repasse_mp_jobs (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS lexos_order_webhook_events (
+    id BIGSERIAL PRIMARY KEY,
+    order_id VARCHAR(120) NOT NULL,
+    status VARCHAR(255) NOT NULL,
+    event_type VARCHAR(120) DEFAULT NULL,
+    event_date TIMESTAMP DEFAULT NULL,
+    payload_json TEXT NOT NULL,
+    event_key VARCHAR(64) NOT NULL,
+    received_at TIMESTAMP NOT NULL,
+    CONSTRAINT uq_lexos_order_webhook_event_key UNIQUE (event_key)
+);

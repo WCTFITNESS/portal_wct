@@ -87,3 +87,18 @@ CREATE TABLE IF NOT EXISTS repasse_mp_jobs (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS lexos_order_webhook_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id VARCHAR(120) NOT NULL,
+    status VARCHAR(255) NOT NULL,
+    event_type VARCHAR(120) DEFAULT NULL,
+    event_date DATETIME DEFAULT NULL,
+    payload_json TEXT NOT NULL,
+    event_key VARCHAR(64) NOT NULL,
+    received_at DATETIME NOT NULL,
+    UNIQUE KEY uq_lexos_order_webhook_event_key (event_key),
+    KEY idx_lexos_order_webhook_order (order_id),
+    KEY idx_lexos_order_webhook_event_date (event_date),
+    KEY idx_lexos_order_webhook_received (received_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
