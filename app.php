@@ -45,8 +45,8 @@ $mercadopagoPaymentService = new MercadoPagoPaymentService($mercadopagoSettingsR
 $repasseMpService = new RepasseMpService($mercadopagoPaymentService, $repasseMpJobRepository);
 $mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRepository);
 $lexosAuthService = new LexosAuthService($settingsRepository);
-$lexosDashboardService = new LexosDashboardService($settingsRepository);
-$lexosOrderMonitorService = new LexosOrderMonitorService($settingsRepository);
+$lexosDashboardService = new LexosDashboardService($settingsRepository, $lexosAuthService);
+$lexosOrderMonitorService = new LexosOrderMonitorService($settingsRepository, $lexosAuthService);
 
 return [
     'config' => $config,

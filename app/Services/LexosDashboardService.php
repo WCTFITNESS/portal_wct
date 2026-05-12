@@ -9,8 +9,10 @@ use RuntimeException;
 
 class LexosDashboardService
 {
-    public function __construct(private SettingsRepository $settingsRepository)
-    {
+    public function __construct(
+        private SettingsRepository $settingsRepository,
+        private LexosAuthService $lexosAuthService,
+    ) {
     }
 
     public function getDashboardMetrics(string $startDate, string $endDate): array
@@ -341,6 +343,29 @@ class LexosDashboardService
 
     private function httpPostLexosJson(string $url, array $payload): array
     {
+        try {
+            return $this->executeLexosPostVariants($url, $payload);
+        } catch (RuntimeException $exception) {
+            if (!$this->isLexosUnauthorizedError($exception) || !$this->canRefreshLexosToken()) {
+                throw $this->wrapLexosAuthFailure($exception);
+            }
+
+            try {
+                $this->lexosAuthService->refreshLexosToken();
+            } catch (Throwable $refreshException) {
+                throw $this->wrapLexosAuthFailure($exception, $refreshException);
+            }
+
+            try {
+                return $this->executeLexosPostVariants($url, $payload);
+            } catch (RuntimeException $retryException) {
+                throw $this->wrapLexosAuthFailure($retryException);
+            }
+        }
+    }
+
+    private function executeLexosPostVariants(string $url, array $payload): array
+    {
         $token = $this->getLexosToken();
         $integrationKey = $this->getLexosIntegrationKey();
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
@@ -388,6 +413,31 @@ class LexosDashboardService
         }
 
         throw new RuntimeException('Falha consulta Lexos WebAPI. Erro desconhecido.');
+    }
+
+    private function isLexosUnauthorizedError(RuntimeException $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'HTTP: 401');
+    }
+
+    private function canRefreshLexosToken(): bool
+    {
+        $cfg = $this->settingsRepository->getApiConfig() ?? [];
+
+        return trim((string) ($cfg['lexos_refresh_token'] ?? '')) !== '';
+    }
+
+    private function wrapLexosAuthFailure(RuntimeException $exception, ?Throwable $refreshException = null): RuntimeException
+    {
+        $message = $exception->getMessage();
+        if ($this->isLexosUnauthorizedError($exception)) {
+            $message .= ' Verifique em Configuração API o access token Lexos, a chave de integração e use Atualizar token Lexos (refresh).';
+            if ($refreshException !== null) {
+                $message .= ' Falha ao renovar token automaticamente: ' . $refreshException->getMessage();
+            }
+        }
+
+        return new RuntimeException($message, 0, $exception);
     }
 
     /**
