@@ -1,0 +1,16 @@
+---
+description: Encerrar alterações com branch e pull request no GitHub
+alwaysApply: true
+---
+
+# Pull request ao finalizar alterações
+
+Ao concluir um conjunto de mudanças no repositório:
+
+1. Trabalhe em branch de feature (`feature/...` ou `fix/...`), não faça push direto em `main`.
+2. Faça commit apenas dos arquivos do escopo da tarefa.
+3. Envie a branch para `origin` e abra um pull request para `main`.
+4. Na resposta final ao usuário, inclua o link do PR (ou o link de compare para criar o PR, se a CLI do GitHub não estiver disponível).
+5. Não considere a tarefa encerrada sem o PR aberto ou o link explícito para revisão.
+
+Se o GitHub CLI (`gh`) estiver instalado e autenticado, use `gh pr create`. Caso contrário, use o compare do GitHub com base `main` e informe o link.
