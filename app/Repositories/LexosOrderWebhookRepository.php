@@ -120,6 +120,42 @@ class LexosOrderWebhookRepository
     return (int) $this->pdo->query('SELECT COUNT(*) FROM lexos_order_webhook_events')->fetchColumn();
   }
 
+  public function registerDelivery(string $payloadJson, int $stored, int $duplicates, int $ignored, ?string $errorMessage = null): void
+  {
+    $this->ensureTableExists();
+
+    $stmt = $this->pdo->prepare(
+      'INSERT INTO lexos_webhook_deliveries
+       (payload_json, stored_count, duplicate_count, ignored_count, error_message, received_at)
+       VALUES (:payload_json, :stored_count, :duplicate_count, :ignored_count, :error_message, NOW())'
+    );
+    $stmt->execute([
+      ':payload_json' => $this->truncate($payloadJson, 20000),
+      ':stored_count' => $stored,
+      ':duplicate_count' => $duplicates,
+      ':ignored_count' => $ignored,
+      ':error_message' => $errorMessage !== null ? $this->truncate($errorMessage, 500) : null,
+    ]);
+  }
+
+  /**
+   * @return array{deliveries: int, last_received_at: string|null}
+   */
+  public function getDeliveryStats(): array
+  {
+    $this->ensureTableExists();
+
+    $stmt = $this->pdo->query('SELECT COUNT(*) AS deliveries, MAX(received_at) AS last_received_at FROM lexos_webhook_deliveries');
+    $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+
+    return [
+      'deliveries' => (int) ($row['deliveries'] ?? 0),
+      'last_received_at' => isset($row['last_received_at']) && $row['last_received_at'] !== null
+        ? (string) $row['last_received_at']
+        : null,
+    ];
+  }
+
   private function ensureTableExists(): void
   {
     if ($this->tableChecked) {
@@ -154,6 +190,29 @@ class LexosOrderWebhookRepository
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
 
     $this->pdo->exec($sql);
+
+    $deliverySql = $this->isPgsql()
+      ? 'CREATE TABLE IF NOT EXISTS lexos_webhook_deliveries (
+            id BIGSERIAL PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            stored_count INT NOT NULL DEFAULT 0,
+            duplicate_count INT NOT NULL DEFAULT 0,
+            ignored_count INT NOT NULL DEFAULT 0,
+            error_message VARCHAR(500) DEFAULT NULL,
+            received_at TIMESTAMP NOT NULL
+        )'
+      : 'CREATE TABLE IF NOT EXISTS lexos_webhook_deliveries (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            stored_count INT NOT NULL DEFAULT 0,
+            duplicate_count INT NOT NULL DEFAULT 0,
+            ignored_count INT NOT NULL DEFAULT 0,
+            error_message VARCHAR(500) DEFAULT NULL,
+            received_at DATETIME NOT NULL,
+            KEY idx_lexos_webhook_deliveries_received (received_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+
+    $this->pdo->exec($deliverySql);
     $this->tableChecked = true;
   }
 

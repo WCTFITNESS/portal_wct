@@ -19,7 +19,7 @@ use App\Services\LexosAuthService;
 use App\Services\LexosHubApiClient;
 use App\Services\LexosOrderMonitorService;
 use App\Services\LexosOrderWebhookService;
-use App\Services\MessageService;
+use App\Services\MercadoLivreOrderMonitorService;
 use App\Services\MlAdsReportService;
 use App\Services\OrderService;
 use App\Services\RepasseService;
@@ -52,6 +52,7 @@ $lexosHubApiClient = new LexosHubApiClient($settingsRepository, $lexosAuthServic
 $lexosDashboardService = new LexosDashboardService($lexosHubApiClient);
 $lexosOrderWebhookRepository = new LexosOrderWebhookRepository($pdo);
 $lexosOrderWebhookService = new LexosOrderWebhookService($lexosOrderWebhookRepository);
+$mercadoLivreOrderMonitorService = new MercadoLivreOrderMonitorService($orderService);
 $lexosOrderMonitorService = new LexosOrderMonitorService($lexosHubApiClient);
 
 return [
@@ -74,5 +75,6 @@ return [
     'mercadopagoPaymentService' => $mercadopagoPaymentService,
     'lexosDashboardService' => $lexosDashboardService,
     'lexosOrderWebhookService' => $lexosOrderWebhookService,
+    'mercadoLivreOrderMonitorService' => $mercadoLivreOrderMonitorService,
     'lexosOrderMonitorService' => $lexosOrderMonitorService,
 ];

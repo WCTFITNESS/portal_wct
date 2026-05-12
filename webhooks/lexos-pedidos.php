@@ -16,7 +16,8 @@ if ($method === 'GET') {
         'method' => 'POST',
         'description' => 'Recebe notificações de pedidos da Lexos Hub e grava eventos para o Monitor de Pedidos.',
         'stored_events' => $service->countStoredEvents(),
-        'endpoint' => portal_wct_public_path($baseUrl, 'webhooks/lexos-pedidos.php'),
+        'delivery_stats' => $service->getDeliveryStats(),
+        'endpoint' => portal_wct_absolute_url($baseUrl, 'webhooks/lexos-pedidos.php'),
     ], JSON_UNESCAPED_UNICODE);
 
     exit;

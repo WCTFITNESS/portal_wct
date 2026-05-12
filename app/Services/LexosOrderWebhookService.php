@@ -20,11 +20,13 @@ class LexosOrderWebhookService
     {
         $rawBody = trim($rawBody);
         if ($rawBody === '') {
+            $this->repository->registerDelivery('', 0, 0, 0, 'Payload vazio.');
             throw new RuntimeException('Payload vazio.');
         }
 
         $decoded = json_decode($rawBody, true);
         if (!is_array($decoded)) {
+            $this->repository->registerDelivery($rawBody, 0, 0, 0, 'Payload JSON inválido.');
             throw new RuntimeException('Payload JSON inválido.');
         }
 
@@ -64,6 +66,8 @@ class LexosOrderWebhookService
             }
         }
 
+        $this->repository->registerDelivery($rawBody, $stored, $duplicates, $ignored, null);
+
         return [
             'ok' => true,
             'stored' => $stored,
@@ -73,12 +77,23 @@ class LexosOrderWebhookService
         ];
     }
 
+    /**
+     * @return array{deliveries: int, last_received_at: string|null}
+     */
+    public function getDeliveryStats(): array
+    {
+        return $this->repository->getDeliveryStats();
+    }
+
     public function monitorPeriod(string $startDate, string $endDate, int $limit = 5000): array
     {
         $events = $this->repository->listEvents($startDate, $endDate, null, $limit);
         $timelines = $this->buildTimelinesFromStoredEvents($events);
 
-        return LexosOrderTimelineSupport::buildMonitorSnapshot($timelines, $startDate, $endDate);
+        $snapshot = LexosOrderTimelineSupport::buildMonitorSnapshot($timelines, $startDate, $endDate);
+        $snapshot['source'] = 'webhook';
+
+        return $snapshot;
     }
 
     public function findOrderTimeline(string $orderQuery, string $startDate, string $endDate, int $limit = 500): array

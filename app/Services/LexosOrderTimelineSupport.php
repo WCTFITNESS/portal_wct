@@ -233,6 +233,8 @@ final class LexosOrderTimelineSupport
       || str_contains($s, 'aguard')
       || str_contains($s, 'separ')
       || str_contains($s, 'aprov')
+      || str_contains($s, 'paid')
+      || str_contains($s, 'confirm')
     ) {
       return 'aberto';
     }

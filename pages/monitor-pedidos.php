@@ -15,22 +15,38 @@ $orderQuery = trim((string) ($_GET['order_query'] ?? ''));
 $selectedOrderId = trim((string) ($_GET['order_id'] ?? ''));
 $usedRecentExample = (($_GET['use_recent_example'] ?? '') === '1');
 $webhookService = $app['lexosOrderWebhookService'];
-$webhookUrl = portal_wct_public_path($baseUrl, 'webhooks/lexos-pedidos.php');
+$mercadoLivreMonitorService = $app['mercadoLivreOrderMonitorService'];
+$webhookUrl = portal_wct_absolute_url($baseUrl, 'webhooks/lexos-pedidos.php');
 $storedEvents = $webhookService->countStoredEvents();
+$deliveryStats = $webhookService->getDeliveryStats();
+$monitorSource = 'webhook';
 
 if ($usedRecentExample && $orderQuery === '') {
     $example = $webhookService->getRecentOrderExample($dateStart, $dateEnd);
+    if ($example === null || $example === '') {
+        $example = $mercadoLivreMonitorService->getRecentOrderExample($dateStart, $dateEnd);
+    }
+
     if ($example !== null && $example !== '') {
         $orderQuery = $example;
-        $feedback = 'Exemplo carregado a partir dos eventos recebidos via webhook.';
+        $feedback = 'Exemplo carregado a partir dos pedidos disponíveis no período.';
     } else {
-        $feedback = 'Nenhum evento de pedido recebido no período para usar como exemplo.';
+        $feedback = 'Nenhum pedido encontrado no período para usar como exemplo.';
         $feedbackClass = 'err';
     }
 }
 
 try {
     $monitor = $webhookService->monitorPeriod($dateStart, $dateEnd, $limit);
+    if ((int) ($monitor['summary']['total_pedidos'] ?? 0) === 0) {
+        $mlMonitor = $mercadoLivreMonitorService->monitorPeriod($dateStart, $dateEnd, $limit);
+        if ((int) ($mlMonitor['summary']['total_pedidos'] ?? 0) > 0) {
+            $monitor = $mlMonitor;
+            $monitorSource = 'mercado_livre';
+            $feedback = 'Nenhum evento Lexos gravado ainda. Exibindo pedidos do Mercado Livre no período (até 50 por status).';
+            $feedbackClass = 'ok';
+        }
+    }
 } catch (Throwable $exception) {
     $feedback = 'Erro no monitoramento: ' . $exception->getMessage();
     $feedbackClass = 'err';
@@ -39,6 +55,9 @@ try {
 if ($orderQuery !== '') {
     try {
         $timelineDetail = $webhookService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(500, $limit));
+        if (!is_array($timelineDetail['timelines'] ?? null) || $timelineDetail['timelines'] === []) {
+            $timelineDetail = $mercadoLivreMonitorService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(500, $limit));
+        }
     } catch (Throwable $exception) {
         if ($feedback === null) {
             $feedback = 'Erro na timeline do pedido: ' . $exception->getMessage();
@@ -230,9 +249,17 @@ $timelineAnchor = static function (string $orderId): string {
 
 <section class="card">
     <h1>Monitor de Pedidos</h1>
-    <p>Visão gerencial do período e timeline por pedido com base nos eventos recebidos via webhook da Lexos Hub.</p>
-    <p><strong>Webhook Lexos:</strong> <code><?= htmlspecialchars($webhookUrl) ?></code></p>
-    <p>Eventos armazenados: <strong><?= htmlspecialchars((string) $storedEvents) ?></strong>. Cadastre a URL acima na integração Lexos API (configurações avançadas de webhook).</p>
+    <p>Visão gerencial do período e timeline por pedido. Prioriza eventos Lexos via webhook; sem eventos gravados, usa pedidos do Mercado Livre.</p>
+    <p><strong>Webhook Lexos (URL completa):</strong> <code><?= htmlspecialchars($webhookUrl) ?></code></p>
+    <p>
+        Eventos Lexos armazenados: <strong><?= htmlspecialchars((string) $storedEvents) ?></strong>.
+        Entregas recebidas no webhook: <strong><?= htmlspecialchars((string) ($deliveryStats['deliveries'] ?? 0)) ?></strong>.
+        <?php if (!empty($deliveryStats['last_received_at'])): ?>
+            Última entrega: <strong><?= htmlspecialchars((string) $deliveryStats['last_received_at']) ?></strong>.
+        <?php else: ?>
+            Ainda não recebemos POST da Lexos neste endpoint.
+        <?php endif; ?>
+    </p>
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>
@@ -280,6 +307,7 @@ $timelineAnchor = static function (string $orderId): string {
     <?php $summary = $monitor['summary']; ?>
     <section class="card">
         <h1>Resumo do período</h1>
+        <p>Fonte atual: <strong><?= htmlspecialchars($monitorSource === 'mercado_livre' ? 'Mercado Livre' : 'Webhook Lexos') ?></strong></p>
         <table>
             <thead>
             <tr>
