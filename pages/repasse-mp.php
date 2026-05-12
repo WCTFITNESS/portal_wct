@@ -63,9 +63,9 @@ if (isset($_GET['job'])) {
 ?>
 <section class="card">
     <h1>Repasse MP</h1>
-    <p>Upload de planilha para buscar <code>order.id</code> no Mercado Pago. O sistema usa a <strong>coluna D</strong> como filtro e deduplica os valores para evitar chamadas repetidas na API.</p>
+    <p>Upload de planilha para buscar <code>order.id</code> no Mercado Pago. O sistema usa a <strong>coluna D</strong> como filtro, grava a planilha em JSON no servidor e deduplica os valores da coluna D antes de consultar o Mercado Pago.</p>
     <p>Mesmo com deduplicacao, todas as linhas originais sao mantidas no Excel final; linhas duplicadas recebem o mesmo <code>order</code> encontrado.</p>
-    <p style="font-size:.9rem;color:#555;">Planilhas grandes sao consultadas ao Mercado Pago em <strong>varias etapas</strong> (requisicoes curtas), para evitar timeout do servidor (502) em hospedagens como Render.</p>
+    <p style="font-size:.9rem;color:#555;">A API do Mercado Pago nao aceita varias operacoes em uma unica consulta. O portal consulta cada operacao unica (em paralelo) e monta o resultado localmente. Planilhas grandes sao processadas em <strong>etapas curtas</strong> para evitar timeout do servidor (502) em hospedagens como Render.</p>
 
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
@@ -479,6 +479,38 @@ if (isset($_GET['job'])) {
         }
     }
 
+    function formatLookupEstimate(estimate) {
+        if (!estimate || typeof estimate !== 'object') {
+            return '';
+        }
+        var minCalls = estimate.estimated_api_calls_min;
+        var maxCalls = estimate.estimated_api_calls_max;
+        if (minCalls == null || maxCalls == null) {
+            return '';
+        }
+        if (Number(minCalls) === Number(maxCalls)) {
+            return 'Estimativa MP: ' + minCalls + ' chamada(s).';
+        }
+        return 'Estimativa MP: ' + minCalls + ' a ' + maxCalls + ' chamadas.';
+    }
+
+    function formatRepasseProgressDetail(j) {
+        var cur = j.cursor !== undefined ? j.cursor : '';
+        var tot = j.total !== undefined ? j.total : '';
+        var parts = ['Operacoes unicas consultadas: ' + cur + ' / ' + tot];
+        if (j.duplicate_lines_saved != null && Number(j.duplicate_lines_saved) > 0) {
+            parts.push('Linhas repetidas evitadas na API: ' + j.duplicate_lines_saved);
+        }
+        if (j.api_calls_total != null) {
+            parts.push('Chamadas API acumuladas: ' + j.api_calls_total);
+        }
+        var estimateText = formatLookupEstimate(j.lookup_estimate);
+        if (estimateText !== '') {
+            parts.push(estimateText);
+        }
+        return parts.join(' | ');
+    }
+
     async function runRepasseAsyncJob() {
         if (!asyncJobId || !cfg) return;
         var overlay = document.getElementById('mp-processing-overlay');
@@ -578,10 +610,7 @@ if (isset($_GET['job'])) {
                     bar.style.width = Math.min(100, j.progress) + '%';
                 }
                 if (detailEl) {
-                    var cur = j.cursor !== undefined ? j.cursor : '';
-                    var tot = j.total !== undefined ? j.total : '';
-                    var extras = j.api_calls_total != null ? ' | Chamadas API acumuladas: ' + j.api_calls_total : '';
-                    detailEl.textContent = 'Operacoes unicas consultadas: ' + cur + ' / ' + tot + extras;
+                    detailEl.textContent = formatRepasseProgressDetail(j);
                 }
                 if (j.phase === 'matching_done' || j.phase === 'complete') {
                     break;

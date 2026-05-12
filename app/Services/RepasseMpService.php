@@ -130,6 +130,9 @@ class RepasseMpService
             throw new \RuntimeException('A planilha precisa ter cabeçalho na linha 1.');
         }
 
+        $totalDataLines = array_sum($linesByOp);
+        $lookupEstimate = $this->paymentService->estimateLookupApiCalls($uniqueOps);
+
         $meta = [
             'status' => 'matching',
             'created_at' => time(),
@@ -137,6 +140,9 @@ class RepasseMpService
             'operation_column_index' => $operationColumnIndex,
             'unique_ops' => $uniqueOps,
             'lines_by_op' => $linesByOp,
+            'source_data_lines' => $totalDataLines,
+            'duplicate_lines_saved' => max(0, $totalDataLines - count($uniqueOps)),
+            'lookup_estimate' => $lookupEstimate,
             'cursor' => 0,
             'chunk_size' => $this->jobChunkUniqueOps(),
             'matches' => [],
@@ -190,6 +196,37 @@ class RepasseMpService
             return ['ok' => true, 'phase' => 'matching_done', 'progress' => 100.0];
         }
 
+        $response = null;
+        $internalChunks = $this->jobInternalChunksPerRequest();
+        for ($step = 0; $step < $internalChunks; $step++) {
+            $response = $this->processSingleMatchingChunk($jobId, $meta);
+            if (($response['ok'] ?? false) !== true) {
+                return $response;
+            }
+
+            if (($response['phase'] ?? '') === 'matching_done' || ($response['phase'] ?? '') === 'complete') {
+                break;
+            }
+
+            $meta = $this->loadJobMeta($jobId, false);
+            if ($meta === null) {
+                return ['ok' => false, 'error' => 'Job nao encontrado.'];
+            }
+
+            if (($meta['status'] ?? '') !== 'matching') {
+                break;
+            }
+        }
+
+        return $response ?? ['ok' => false, 'error' => 'Falha ao processar lote.'];
+    }
+
+    /**
+     * @param array<string, mixed> $meta
+     * @return array{ok: bool, phase?: string, progress?: float, cursor?: int, total?: int, error?: string, api_calls_total?: int, lookup_estimate?: array<string, int>}
+     */
+    private function processSingleMatchingChunk(string $jobId, array $meta): array
+    {
         $uniqueOps = $meta['unique_ops'] ?? [];
         if (!is_array($uniqueOps)) {
             $uniqueOps = [];
@@ -201,7 +238,7 @@ class RepasseMpService
             $meta['status'] = 'matching_done';
             $this->persistJobProgress($jobId, $meta);
 
-            return ['ok' => true, 'phase' => 'matching_done', 'progress' => 100.0, 'cursor' => $total, 'total' => $total];
+            return $this->buildMatchingChunkResponse($meta, $total, $total, 'matching_done');
         }
 
         $chunkSize = max(1, (int) ($meta['chunk_size'] ?? $this->jobChunkUniqueOps()));
@@ -237,22 +274,46 @@ class RepasseMpService
         $meta['cursor'] = $cursor + count($slice);
 
         $newCursor = (int) $meta['cursor'];
-        $progress = $total > 0 ? round(min(100.0, ($newCursor / $total) * 100.0), 1) : 100.0;
-
         if ($newCursor >= $total) {
             $meta['status'] = 'matching_done';
         }
 
         $this->persistJobProgress($jobId, $meta);
 
-        return [
+        $phase = ($meta['status'] ?? '') === 'matching_done' ? 'matching_done' : 'matching';
+
+        return $this->buildMatchingChunkResponse($meta, $newCursor, $total, $phase);
+    }
+
+    /**
+     * @param array<string, mixed> $meta
+     * @return array{ok: true, phase: string, progress: float, cursor: int, total: int, api_calls_total: int, lookup_estimate?: array<string, int>, source_data_lines?: int, duplicate_lines_saved?: int}
+     */
+    private function buildMatchingChunkResponse(array $meta, int $cursor, int $total, string $phase): array
+    {
+        $progress = $total > 0 ? round(min(100.0, ($cursor / $total) * 100.0), 1) : 100.0;
+        $payload = [
             'ok' => true,
-            'phase' => ($meta['status'] ?? '') === 'matching_done' ? 'matching_done' : 'matching',
+            'phase' => $phase,
             'progress' => $progress,
-            'cursor' => $newCursor,
+            'cursor' => $cursor,
             'total' => $total,
             'api_calls_total' => (int) ($meta['api_calls_total'] ?? 0),
         ];
+
+        $estimate = $meta['lookup_estimate'] ?? null;
+        if (is_array($estimate)) {
+            $payload['lookup_estimate'] = $estimate;
+        }
+
+        if (isset($meta['source_data_lines'])) {
+            $payload['source_data_lines'] = (int) $meta['source_data_lines'];
+        }
+        if (isset($meta['duplicate_lines_saved'])) {
+            $payload['duplicate_lines_saved'] = (int) $meta['duplicate_lines_saved'];
+        }
+
+        return $payload;
     }
 
     /**
@@ -468,6 +529,17 @@ class RepasseMpService
             'api_calls_total' => (int) ($meta['api_calls_total'] ?? 0),
         ];
 
+        $estimate = $meta['lookup_estimate'] ?? null;
+        if (is_array($estimate)) {
+            $payload['lookup_estimate'] = $estimate;
+        }
+        if (isset($meta['source_data_lines'])) {
+            $payload['source_data_lines'] = (int) $meta['source_data_lines'];
+        }
+        if (isset($meta['duplicate_lines_saved'])) {
+            $payload['duplicate_lines_saved'] = (int) $meta['duplicate_lines_saved'];
+        }
+
         if ($status === 'complete') {
             $snapshot = $meta['result_snapshot'] ?? null;
             if (is_string($snapshot) && $snapshot !== '') {
@@ -516,6 +588,16 @@ class RepasseMpService
         }
 
         return max(10, min(80, $v));
+    }
+
+    private function jobInternalChunksPerRequest(): int
+    {
+        $v = (int) getenv('REPASSE_MP_INTERNAL_CHUNKS_PER_REQUEST');
+        if ($v <= 0) {
+            return 1;
+        }
+
+        return max(1, min(10, $v));
     }
 
     private function readRows(string $path, string $ext): array

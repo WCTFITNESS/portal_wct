@@ -100,6 +100,52 @@ class MercadoPagoPaymentService
     }
 
     /**
+     * Estima chamadas ao Mercado Pago para um conjunto de operacoes unicas.
+     *
+     * @param list<string> $operationValues
+     * @return array{
+     *   unique_total: int,
+     *   numeric_unique: int,
+     *   textual_unique: int,
+     *   estimated_api_calls_min: int,
+     *   estimated_api_calls_max: int
+     * }
+     */
+    public function estimateLookupApiCalls(array $operationValues): array
+    {
+        $values = [];
+        foreach ($operationValues as $v) {
+            $vv = $this->normalizeOperationValue((string) $v);
+            if ($vv !== '') {
+                $values['v:' . $vv] = $vv;
+            }
+        }
+
+        $uniqueValues = array_values($values);
+        $numeric = 0;
+        $textual = 0;
+        foreach ($uniqueValues as $value) {
+            if (ctype_digit($value)) {
+                $numeric++;
+            } else {
+                $textual++;
+            }
+        }
+
+        $total = count($uniqueValues);
+        $estimatedMin = $numeric + $textual;
+        $estimatedMax = ($numeric * 2) + $textual;
+
+        return [
+            'unique_total' => $total,
+            'numeric_unique' => $numeric,
+            'textual_unique' => $textual,
+            'estimated_api_calls_min' => $estimatedMin,
+            'estimated_api_calls_max' => $estimatedMax,
+        ];
+    }
+
+    /**
      * Resolve em lote os valores da coluna D, com chamadas paralelas para ganhar performance.
      *
      * @param list<string> $operationValues
