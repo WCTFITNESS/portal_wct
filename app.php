@@ -20,6 +20,7 @@ use App\Services\LexosHubApiClient;
 use App\Services\LexosOrderMonitorService;
 use App\Services\LexosOrderWebhookService;
 use App\Services\MercadoLivreOrderMonitorService;
+use App\Services\MessageService;
 use App\Services\MlAdsReportService;
 use App\Services\OrderService;
 use App\Services\RepasseService;
