@@ -86,6 +86,45 @@ class OrderService
         return $ordersResult['body']['results'] ?? [];
     }
 
+    /**
+     * Busca pedidos por texto livre (parâmetro {@code q} em {@code GET /orders/search}), sem filtrar por status.
+     * Mais eficiente que listar vários status no período quando se conhece id ou trecho do pedido.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function searchOrdersByQuery(string $q, int $limit = 30): array
+    {
+        $q = trim($q);
+        if ($q === '') {
+            return [];
+        }
+
+        $apiConfig = $this->settingsRepository->getApiConfig();
+        if (!$apiConfig || empty($apiConfig['seller_id'])) {
+            throw new \RuntimeException('Seller ID não configurado em Configurar API.');
+        }
+
+        $sellerId = trim((string) $apiConfig['seller_id']);
+        if (!ctype_digit($sellerId)) {
+            throw new \RuntimeException('Seller ID inválido. Informe o user_id numérico da conta vendedora no Mercado Livre.');
+        }
+
+        $limit = max(1, min(50, $limit));
+        $accessToken = $this->tokenService->getValidAccessToken();
+        $path = '/orders/search?seller=' . urlencode($sellerId)
+            . '&q=' . rawurlencode($q)
+            . '&sort=date_desc&limit=' . $limit;
+        $ordersResult = $this->client->get($path, $accessToken);
+
+        if ($ordersResult['status'] < 200 || $ordersResult['status'] >= 300) {
+            return [];
+        }
+
+        $results = $ordersResult['body']['results'] ?? [];
+
+        return is_array($results) ? $results : [];
+    }
+
     public function getOrderById(string $orderId): ?array
     {
         $orderId = trim($orderId);

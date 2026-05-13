@@ -79,6 +79,35 @@ class MercadoLivreOrderMonitorService
             ];
         }
 
+        try {
+            $searchHits = $this->orderService->searchOrdersByQuery($orderQuery, min(50, $limit));
+        } catch (RuntimeException) {
+            $searchHits = [];
+        }
+
+        foreach ($searchHits as $candidate) {
+            if (!is_array($candidate)) {
+                continue;
+            }
+
+            $id = trim((string) ($candidate['id'] ?? ''));
+            if ($id === '' || !ctype_digit($id)) {
+                continue;
+            }
+
+            if ($id !== $orderQuery && stripos($id, $orderQuery) === false && stripos($orderQuery, $id) === false) {
+                continue;
+            }
+
+            $fromSearch = $this->buildMonitorFromOrderId($id, $startDate, $endDate);
+            if ($fromSearch !== null && is_array($fromSearch['timelines'] ?? null) && $fromSearch['timelines'] !== []) {
+                return [
+                    'query' => $orderQuery,
+                    'timelines' => $fromSearch['timelines'],
+                ];
+            }
+        }
+
         $monitor = $this->monitorPeriod($startDate, $endDate, max(1, min(5000, $limit)));
         $timelines = [];
         foreach ($monitor['timelines'] as $orderId => $events) {

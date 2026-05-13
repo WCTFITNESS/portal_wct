@@ -24,6 +24,10 @@ $selectedOrderId = trim((string) ($_GET['order_id'] ?? ''));
 $usedRecentExample = (($_GET['use_recent_example'] ?? '') === '1');
 $webhookService = $app['lexosOrderWebhookService'];
 $mercadoLivreMonitorService = $app['mercadoLivreOrderMonitorService'];
+$lexosOrderMonitorService = $app['lexosOrderMonitorService'];
+$apiCfg = $app['settingsRepository']->getApiConfig();
+$lexosApiReady = trim((string) ($apiCfg['lexos_token'] ?? '')) !== ''
+    && trim((string) ($apiCfg['lexos_integration_key'] ?? '')) !== '';
 $webhookUrl = portal_wct_absolute_url($baseUrl, 'webhooks/lexos-pedidos.php');
 $storedEvents = $webhookService->countStoredEvents();
 $deliveryStats = $webhookService->getDeliveryStats();
@@ -46,12 +50,25 @@ if ($usedRecentExample && $orderQuery === '') {
 
 try {
     $monitor = $webhookService->monitorPeriod($dateStart, $dateEnd, $limit);
+    if ((int) ($monitor['summary']['total_pedidos'] ?? 0) === 0 && $lexosApiReady) {
+        try {
+            $lexosListMonitor = $lexosOrderMonitorService->monitorPeriod($dateStart, $dateEnd, $limit);
+            if ((int) ($lexosListMonitor['summary']['total_pedidos'] ?? 0) > 0) {
+                $monitor = $lexosListMonitor;
+                $monitor['source'] = 'lexos_api';
+                $monitorSource = 'lexos_api';
+                $feedback = 'Sem eventos de webhook Lexos no período; lista carregada pela Lexos WebAPI (Pedido/DataSource).';
+                $feedbackClass = 'ok';
+            }
+        } catch (Throwable) {
+        }
+    }
     if ((int) ($monitor['summary']['total_pedidos'] ?? 0) === 0) {
         $mlMonitor = $mercadoLivreMonitorService->monitorPeriod($dateStart, $dateEnd, $limit);
         if ((int) ($mlMonitor['summary']['total_pedidos'] ?? 0) > 0) {
             $monitor = $mlMonitor;
             $monitorSource = 'mercado_livre';
-            $feedback = 'Nenhum evento Lexos gravado ainda. Exibindo pedidos do Mercado Livre no período (até 50 por status).';
+            $feedback = 'Nenhum dado Lexos (webhook/API) no período. Exibindo pedidos do Mercado Livre (até 50 por status).';
             $feedbackClass = 'ok';
         }
     }
@@ -62,6 +79,22 @@ try {
 
 if ($monitor !== null && $orderQuery !== '') {
     $monitor = LexosOrderTimelineSupport::filterSnapshot($monitor, $orderQuery);
+    if ((int) ($monitor['summary']['total_pedidos'] ?? 0) === 0 && $lexosApiReady) {
+        try {
+            $lexosHit = $lexosOrderMonitorService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(200, $limit));
+            $lexosTimelines = $lexosHit['timelines'] ?? [];
+            if ($lexosTimelines !== []) {
+                $monitor = array_merge(
+                    LexosOrderTimelineSupport::buildMonitorSnapshot($lexosTimelines, $dateStart, $dateEnd),
+                    ['source' => 'lexos_api', 'rows' => $lexosHit['rows'] ?? []]
+                );
+                $monitorSource = 'lexos_api';
+                $feedback = 'Pedido localizado na Lexos WebAPI (busca direta por código).';
+                $feedbackClass = 'ok';
+            }
+        } catch (Throwable) {
+        }
+    }
     if ((int) ($monitor['summary']['total_pedidos'] ?? 0) === 0) {
         $directMonitor = $mercadoLivreMonitorService->buildMonitorFromOrderId($orderQuery, $dateStart, $dateEnd);
         if ($directMonitor !== null) {
@@ -76,6 +109,20 @@ if ($monitor !== null && $orderQuery !== '') {
 if ($orderQuery !== '') {
     try {
         $timelineDetail = $webhookService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(500, $limit));
+        $tlEmpty = !is_array($timelineDetail['timelines'] ?? null) || $timelineDetail['timelines'] === [];
+        if ($tlEmpty && $lexosApiReady) {
+            try {
+                $lexosTl = $lexosOrderMonitorService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(200, $limit));
+                $lexosTls = $lexosTl['timelines'] ?? [];
+                if (is_array($lexosTls) && $lexosTls !== []) {
+                    $timelineDetail = [
+                        'query' => $orderQuery,
+                        'timelines' => $lexosTls,
+                    ];
+                }
+            } catch (Throwable) {
+            }
+        }
         if (!is_array($timelineDetail['timelines'] ?? null) || $timelineDetail['timelines'] === []) {
             $timelineDetail = $mercadoLivreMonitorService->findOrderTimeline($orderQuery, $dateStart, $dateEnd, min(500, $limit));
         }
@@ -367,7 +414,7 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
 
 <section class="card">
     <h1>Monitor de Pedidos</h1>
-    <p>Visão gerencial do período e timeline por pedido. Prioriza eventos Lexos via webhook; sem eventos gravados, usa pedidos do Mercado Livre.</p>
+    <p>Visão gerencial do período e timeline por pedido. Ordem de consulta: <strong>eventos Lexos (webhook)</strong> → <strong>Lexos WebAPI</strong> (token + chave configurados) → <strong>Mercado Livre</strong>. Busca por número de pedido usa Lexos/ML de forma direcionada quando possível.</p>
     <p><strong>Webhook Lexos (URL completa):</strong> <code><?= htmlspecialchars($webhookUrl) ?></code></p>
     <p>
         Eventos Lexos armazenados: <strong><?= htmlspecialchars((string) $storedEvents) ?></strong>.
@@ -426,7 +473,11 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
     <?php $summary = $monitor['summary']; ?>
     <section class="card">
         <h1><?= $isOrderFilterActive ? 'Resumo do pedido filtrado' : 'Resumo do período' ?></h1>
-        <p>Fonte atual: <strong><?= htmlspecialchars($monitorSource === 'mercado_livre' ? 'Mercado Livre' : 'Webhook Lexos') ?></strong></p>
+        <p>Fonte atual: <strong><?= htmlspecialchars(match ($monitorSource) {
+            'mercado_livre' => 'Mercado Livre',
+            'lexos_api' => 'Lexos WebAPI (Pedido/DataSource)',
+            default => 'Webhook Lexos',
+        }) ?></strong></p>
         <?php if ($isOrderFilterActive): ?>
             <p>Filtro ativo para o pedido <strong><?= htmlspecialchars($orderQuery) ?></strong>. O resumo abaixo reflete somente esse pedido.</p>
         <?php endif; ?>
