@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Services\LexosExpeditionLane;
 use App\Services\LexosOrderTimelineSupport;
 
 $feedback = null;
@@ -14,6 +15,11 @@ $dateStart = trim((string) ($_GET['start_date'] ?? $monthStart->format('Y-m-d'))
 $dateEnd = trim((string) ($_GET['end_date'] ?? $today->format('Y-m-d')));
 $limit = max(1, min(5000, (int) ($_GET['limit'] ?? 1000)));
 $orderQuery = trim((string) ($_GET['order_query'] ?? ''));
+$expLane = trim((string) ($_GET['exp_lane'] ?? LexosExpeditionLane::LANE_TODOS));
+$laneOrderFlip = array_flip(LexosExpeditionLane::laneOrder());
+if (!isset($laneOrderFlip[$expLane])) {
+    $expLane = LexosExpeditionLane::LANE_TODOS;
+}
 $selectedOrderId = trim((string) ($_GET['order_id'] ?? ''));
 $usedRecentExample = (($_GET['use_recent_example'] ?? '') === '1');
 $webhookService = $app['lexosOrderWebhookService'];
@@ -94,7 +100,19 @@ if (is_array($timelineDetail['timelines'] ?? null) && $timelineDetail['timelines
     }
 }
 
-$orders = is_array($monitor['orders'] ?? null) ? $monitor['orders'] : [];
+$allOrders = ($monitor !== null && is_array($monitor['orders'] ?? null)) ? $monitor['orders'] : [];
+$laneCounts = LexosExpeditionLane::countByLane($allOrders);
+$orders = $allOrders;
+if ($expLane !== LexosExpeditionLane::LANE_TODOS) {
+    $orders = array_values(array_filter(
+        $allOrders,
+        static function (array $item) use ($expLane): bool {
+            $status = (string) ($item['status'] ?? '');
+
+            return LexosExpeditionLane::mapLane($status) === $expLane;
+        }
+    ));
+}
 $isOrderFilterActive = $orderQuery !== '';
 
 if ($isOrderFilterActive && $monitor && (int) ($monitor['summary']['total_pedidos'] ?? 0) === 0 && $feedbackClass !== 'err') {
@@ -102,12 +120,13 @@ if ($isOrderFilterActive && $monitor && (int) ($monitor['summary']['total_pedido
     $feedbackClass = 'err';
 }
 
-$monitorUrl = static function (array $extra = []) use ($baseUrl, $dateStart, $dateEnd, $limit, $orderQuery): string {
+$monitorUrl = static function (array $extra = []) use ($baseUrl, $dateStart, $dateEnd, $limit, $orderQuery, $expLane): string {
     $query = array_merge([
         'page' => 'monitor-pedidos',
         'start_date' => $dateStart,
         'end_date' => $dateEnd,
         'limit' => (string) $limit,
+        'exp_lane' => $expLane,
     ], $extra);
 
     if (!array_key_exists('order_query', $extra) && $orderQuery !== '') {
@@ -127,6 +146,8 @@ $categoryLabel = static function (string $category): string {
         default => 'Outros',
     };
 };
+
+$expLaneLabels = LexosExpeditionLane::laneLabels();
 
 $timelineAnchor = static function (string $orderId): string {
     $safe = preg_replace('/[^a-zA-Z0-9_-]+/', '-', $orderId) ?? 'pedido';
@@ -179,6 +200,49 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
     .monitor-actions .btn-secondary:hover {
         border-color: #cbd5e1;
         background: #f9fafb;
+    }
+    .exp-tabs-wrap {
+        margin: 0 0 14px 0;
+        border-bottom: 1px solid var(--wct-border);
+    }
+    .exp-tabs {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 4px;
+        overflow-x: auto;
+        padding-bottom: 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+    .exp-tabs__link {
+        flex: 0 0 auto;
+        padding: 8px 12px;
+        border-radius: 8px 8px 0 0;
+        border: 1px solid transparent;
+        border-bottom: none;
+        background: #f8fafc;
+        color: var(--wct-text);
+        text-decoration: none;
+        font-size: .88rem;
+        white-space: nowrap;
+    }
+    .exp-tabs__link:hover {
+        background: #f1f5f9;
+    }
+    .exp-tabs__link--active {
+        background: #fff;
+        border-color: var(--wct-border);
+        font-weight: 700;
+        color: var(--wct-primary);
+    }
+    .exp-tabs__count {
+        color: var(--wct-muted);
+        font-weight: 600;
+    }
+    .exp-tabs__hint {
+        margin: 0 0 12px 0;
+        font-size: .86rem;
+        color: var(--wct-muted);
+        line-height: 1.45;
     }
     .status-pill {
         display: inline-block;
@@ -320,6 +384,7 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
 
     <form method="get">
         <input type="hidden" name="page" value="monitor-pedidos">
+        <input type="hidden" name="exp_lane" value="<?= htmlspecialchars($expLane) ?>">
 
         <div class="monitor-filters">
             <div>
@@ -393,11 +458,38 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
 
     <section class="card">
         <h1>Situação atual por pedido</h1>
+        <p class="exp-tabs__hint">
+            Abas no estilo <strong>Expedição Lexos</strong>: o portal agrupa o <strong>texto de status</strong> (API, webhook ou ML) em etapas.
+            Se o rótulo da Lexos for diferente do esperado, ajuste os critérios em <code>app/Services/LexosExpeditionLane.php</code> ou use o JSON da linha para mapear campos adicionais (ex.: <em>Status envio</em> vs. aba principal).
+        </p>
+        <div class="exp-tabs-wrap">
+            <nav class="exp-tabs" aria-label="Filtro por etapa de expedição">
+                <?php foreach (LexosExpeditionLane::laneOrder() as $laneId): ?>
+                    <?php
+                    $count = (int) ($laneCounts[$laneId] ?? 0);
+                    $isActive = $expLane === $laneId;
+                    $tabUrl = $monitorUrl(['exp_lane' => $laneId]);
+                    $tabLabel = $expLaneLabels[$laneId] ?? $laneId;
+                    ?>
+                    <a
+                        class="exp-tabs__link<?= $isActive ? ' exp-tabs__link--active' : '' ?>"
+                        href="<?= htmlspecialchars($tabUrl) ?>"
+                        <?= $isActive ? 'aria-current="page"' : '' ?>
+                    ><?= htmlspecialchars($tabLabel) ?> <span class="exp-tabs__count">(<?= htmlspecialchars((string) $count) ?>)</span></a>
+                <?php endforeach; ?>
+            </nav>
+        </div>
+        <?php if ($expLane !== LexosExpeditionLane::LANE_TODOS): ?>
+            <p style="margin:0 0 12px 0;font-size:.9rem;">Exibindo <strong><?= htmlspecialchars((string) count($orders)) ?></strong> pedido(s) na etapa <strong><?= htmlspecialchars($expLaneLabels[$expLane] ?? $expLane) ?></strong>.
+                <a href="<?= htmlspecialchars($monitorUrl(['exp_lane' => LexosExpeditionLane::LANE_TODOS])) ?>">Ver todos</a>
+            </p>
+        <?php endif; ?>
         <div style="overflow-x:auto;">
             <table style="min-width: 1100px;">
                 <thead>
                 <tr>
                     <th>Pedido</th>
+                    <th>Etapa (expedição)</th>
                     <th>Categoria</th>
                     <th>Status atual</th>
                     <th>Última data</th>
@@ -409,18 +501,21 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
                 </thead>
                 <tbody>
                 <?php if (!$orders): ?>
-                    <tr><td colspan="8">Nenhum pedido encontrado para o período selecionado.</td></tr>
+                    <tr><td colspan="9">Nenhum pedido encontrado para o período selecionado.</td></tr>
                 <?php endif; ?>
                 <?php foreach ($orders as $item): ?>
                     <?php
                     $orderId = (string) ($item['order_id'] ?? '');
                     $category = (string) ($item['category'] ?? 'outros');
+                    $rawStatus = (string) ($item['status'] ?? '');
+                    $laneId = LexosExpeditionLane::mapLane($rawStatus);
                     $timelineEvents = is_array($monitor['timelines'][$orderId] ?? null) ? $monitor['timelines'][$orderId] : [];
                     $lastEvent = $timelineEvents[count($timelineEvents) - 1] ?? null;
                     $jsonRow = is_array($lastEvent['row'] ?? null) ? $lastEvent['row'] : [];
                     ?>
                     <tr>
                         <td><?= htmlspecialchars($orderId) ?></td>
+                        <td><?= htmlspecialchars($expLaneLabels[$laneId] ?? $laneId) ?></td>
                         <td><span class="status-pill status-pill--<?= htmlspecialchars($category) ?>"><?= htmlspecialchars($categoryLabel($category)) ?></span></td>
                         <td><?= htmlspecialchars((string) ($item['status'] ?? '')) ?></td>
                         <td><?= htmlspecialchars((string) ($item['date'] ?? '')) ?></td>
