@@ -147,8 +147,15 @@ class MercadoLivreOrderMonitorService
      */
     private function mapMercadoLivreOrder(array $order): array
     {
-        $status = trim((string) ($order['status'] ?? ''));
-        $shippingStatus = trim((string) ($order['shipping']['status'] ?? ''));
+        $nested = $order['order'] ?? null;
+        $nestedOrder = is_array($nested) ? $nested : [];
+
+        $status = trim((string) ($order['status'] ?? $nestedOrder['status'] ?? ''));
+        $shipping = $order['shipping'] ?? null;
+        $shippingStatus = '';
+        if (is_array($shipping)) {
+            $shippingStatus = trim((string) ($shipping['status'] ?? ''));
+        }
         if ($shippingStatus !== '') {
             $status = $status !== '' ? $status . ' / envio: ' . $shippingStatus : $shippingStatus;
         }

@@ -255,7 +255,7 @@ final class LexosOrderTimelineSupport
     if (str_contains($s, 'envia') || str_contains($s, 'post')) {
       return 'Pedido enviado; acompanhar rastreio até entrega.';
     }
-    if (str_contains($s, 'entreg') || str_contains($s, 'conclu')) {
+    if (str_contains($s, 'entreg') || str_contains($s, 'conclu') || str_contains($s, 'delivered') || str_contains($s, 'closed')) {
       return 'Pedido finalizado; nenhuma ação operacional pendente.';
     }
 
@@ -275,7 +275,20 @@ final class LexosOrderTimelineSupport
     if (str_contains($s, 'refund') || str_contains($s, 'reemb')) {
       return 'outros';
     }
-    if (str_contains($s, 'entreg') || str_contains($s, 'conclu') || str_contains($s, 'delivered')) {
+    // Logística ML em inglês: "not_delivered" contém "delivered" — avaliar antes.
+    if (
+      str_contains($s, 'not_delivered')
+      || str_contains($s, 'not delivered')
+      || str_contains($s, 'undelivered')
+    ) {
+      return 'atraso';
+    }
+    if (
+      str_contains($s, 'entreg')
+      || str_contains($s, 'conclu')
+      || str_contains($s, 'delivered')
+      || str_contains($s, 'closed')
+    ) {
       return 'entregue';
     }
     if (
@@ -284,6 +297,10 @@ final class LexosOrderTimelineSupport
       || str_contains($s, 'transit')
       || str_contains($s, 'shipped')
       || str_contains($s, 'ready_to_ship')
+      || str_contains($s, 'picked_up')
+      || str_contains($s, 'in_transit')
+      || str_contains($s, 'out_for_delivery')
+      || str_contains($s, 'fulfilled')
     ) {
       return 'enviado';
     }
