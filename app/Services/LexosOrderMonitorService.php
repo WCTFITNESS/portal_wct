@@ -20,30 +20,63 @@ class LexosOrderMonitorService
         }
 
         $take = max(1, min(500, $take));
-        $url = "https://app-hub-webapi.lexos.com.br/api/Pedido/DataSource?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
-        $payload = [
-            'requiresCounts' => false,
-            'skip' => 0,
-            'take' => $take,
-            'search' => [[
-                'fields' => ['Search', 'Pedido', 'NumeroPedido', 'Codigo', 'CodigoPedido', 'Numero'],
-                'operator' => 'contains',
-                'key' => $orderQuery,
-                'ignoreCase' => true,
-            ]],
-        ];
-
-        $json = $this->lexosHubApiClient->postJson($url, $payload);
-        $rows = $this->normalizeDatasourceRows($json);
 
         $timelines = [];
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
+        $rows = [];
+        $lexosSource = 'pedido_datasource';
+
+        try {
+            $jsonEntrega = $this->postEntregaDataSourceTodos($orderQuery, $take, 0);
+            $entregaRows = $this->normalizeDatasourceRows($jsonEntrega);
+            foreach ($entregaRows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $row = $this->normalizeEntregaRowForTimeline($row);
+                $orderId = $this->extractOrderIdentifier($row);
+                if ($orderId === '' || $orderId === 'sem_identificador') {
+                    continue;
+                }
+
+                $timelines[$orderId][] = $this->buildTimelineEvent($row);
             }
 
-            $orderId = $this->extractOrderIdentifier($row);
-            $timelines[$orderId][] = $this->buildTimelineEvent($row);
+            if ($entregaRows !== []) {
+                $rows = $entregaRows;
+            }
+
+            if ($timelines !== []) {
+                $lexosSource = 'entrega_datasource_todos';
+            }
+        } catch (RuntimeException) {
+        }
+
+        if ($timelines === []) {
+            $url = "https://app-hub-webapi.lexos.com.br/api/Pedido/DataSource?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
+            $payload = [
+                'requiresCounts' => false,
+                'skip' => 0,
+                'take' => $take,
+                'search' => [[
+                    'fields' => ['Search', 'Pedido', 'NumeroPedido', 'Codigo', 'CodigoPedido', 'Numero'],
+                    'operator' => 'contains',
+                    'key' => $orderQuery,
+                    'ignoreCase' => true,
+                ]],
+            ];
+
+            $json = $this->lexosHubApiClient->postJson($url, $payload);
+            $rows = $this->normalizeDatasourceRows($json);
+
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $orderId = $this->extractOrderIdentifier($row);
+                $timelines[$orderId][] = $this->buildTimelineEvent($row);
+            }
         }
 
         $timelines = $this->sortTimelines($timelines);
@@ -52,6 +85,7 @@ class LexosOrderMonitorService
             'query' => $orderQuery,
             'rows' => $rows,
             'timelines' => $timelines,
+            'lexos_source' => $lexosSource,
         ];
     }
 
@@ -60,11 +94,24 @@ class LexosOrderMonitorService
         $take = max(1, min(5000, $take));
         $json = $this->fetchPedidoRowsWithFallback($startDate, $endDate, $take);
         $rows = $this->normalizeDatasourceRows($json);
+        $listSource = 'pedido_datasource';
+
+        if ($rows === []) {
+            $entregaRows = $this->fetchEntregaRowsForPeriod($startDate, $endDate, $take);
+            if ($entregaRows !== []) {
+                $rows = $entregaRows;
+                $listSource = 'entrega_datasource_todos';
+            }
+        }
 
         $timelines = [];
         foreach ($rows as $row) {
             if (!is_array($row)) {
                 continue;
+            }
+
+            if (isset($row['EntregaId'])) {
+                $row = $this->normalizeEntregaRowForTimeline($row);
             }
 
             $orderId = $this->extractOrderIdentifier($row);
@@ -114,11 +161,34 @@ class LexosOrderMonitorService
             'summary' => $summary,
             'start_date' => $startDate,
             'end_date' => $endDate,
+            'lexos_list_source' => $listSource,
         ];
     }
 
     public function getRecentOrderExample(string $startDate, string $endDate): ?string
     {
+        try {
+            $fetchTake = min(80, max(20, 50));
+            $jsonEntrega = $this->postEntregaDataSourceTodos(null, $fetchTake, 0);
+            $entregaRows = $this->normalizeDatasourceRows($jsonEntrega);
+            foreach ($entregaRows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                if (!$this->entregaRowInPeriod($row, $startDate, $endDate)) {
+                    continue;
+                }
+
+                $norm = $this->normalizeEntregaRowForTimeline($row);
+                $id = $this->extractOrderIdentifier($norm);
+                if ($id !== '' && $id !== 'sem_identificador') {
+                    return $id;
+                }
+            }
+        } catch (RuntimeException) {
+        }
+
         $url = "https://app-hub-webapi.lexos.com.br/api/Pedido/DataSource?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
         $payload = [
             'requiresCounts' => false,
@@ -196,7 +266,7 @@ class LexosOrderMonitorService
 
     private function extractEventDate(array $row): string
     {
-        $candidates = ['DataAtualizacao', 'DataAlteracao', 'DataStatus', 'DataPedido', 'DataCriacao', 'Data'];
+        $candidates = ['DataAtualizacao', 'DataAlteracao', 'DataStatus', 'UpdatedOn', 'DataPedido', 'DataCriacao', 'Data'];
         foreach ($candidates as $key) {
             $value = trim((string) ($row[$key] ?? ''));
             if ($value !== '') {
@@ -216,6 +286,13 @@ class LexosOrderMonitorService
         }
         if (str_contains($s, 'cancel')) {
             return 'Validar motivo do cancelamento e alinhar tratativa com o comercial.';
+        }
+        if (
+            str_contains($s, 'paid')
+            || (str_contains($s, 'confirmed') && !str_contains($s, 'cancel'))
+            || str_contains($s, 'payment_in_process')
+        ) {
+            return 'Pagamento confirmado ou em andamento no Mercado Livre; seguir expedição e faturamento na Lexos.';
         }
         if (str_contains($s, 'aprov')) {
             return 'Pedido aprovado; seguir para separação e faturamento.';
@@ -327,5 +404,105 @@ class LexosOrderMonitorService
         }
 
         throw new RuntimeException('Falha ao consultar pedidos na Lexos.');
+    }
+
+    /**
+     * Mesmo contrato da tela Expedição do Lexos Hub: POST {@code /api/Entrega/DataSourceTodos?transportadoraId=-1}.
+     *
+     * @return mixed Resposta JSON bruta (result/count)
+     */
+    private function postEntregaDataSourceTodos(?string $searchKey, int $take, int $skip, int $transportadoraId = -1): mixed
+    {
+        $tid = $transportadoraId === -1 ? '-1' : (string) max(-1, $transportadoraId);
+        $url = 'https://app-hub-webapi.lexos.com.br/api/Entrega/DataSourceTodos?transportadoraId=' . rawurlencode($tid);
+        $payload = [
+            'requiresCounts' => true,
+            'skip' => max(0, $skip),
+            'take' => $take,
+            'sorted' => [
+                ['name' => 'DataLimiteEnvio', 'direction' => 'descending'],
+            ],
+        ];
+
+        if ($searchKey !== null && trim($searchKey) !== '') {
+            $payload['search'] = [[
+                'fields' => ['Search'],
+                'operator' => 'contains',
+                'key' => trim($searchKey),
+                'ignoreCase' => true,
+            ]];
+        }
+
+        return $this->lexosHubApiClient->postJson($url, $payload);
+    }
+
+    /**
+     * Lista Expedição (últimos registros) e filtra por datas em campos típicos da entrega.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fetchEntregaRowsForPeriod(string $startDate, string $endDate, int $take): array
+    {
+        $fetchTake = min(2000, max(200, $take * 2));
+        $json = $this->postEntregaDataSourceTodos(null, $fetchTake, 0);
+        $raw = $this->normalizeDatasourceRows($json);
+        $out = [];
+        foreach ($raw as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            if (!$this->entregaRowInPeriod($row, $startDate, $endDate)) {
+                continue;
+            }
+
+            $out[] = $row;
+            if (count($out) >= $take) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function entregaRowInPeriod(array $row, string $startDate, string $endDate): bool
+    {
+        foreach (['Data', 'UpdatedOn', 'CreatedOn', 'DataLimiteEnvio', 'DataInicioEnvio'] as $key) {
+            $v = trim((string) ($row[$key] ?? ''));
+            if ($v === '') {
+                continue;
+            }
+
+            $d = substr($v, 0, 10);
+            if (strlen($d) === 10 && $d >= $startDate && $d <= $endDate) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function normalizeEntregaRowForTimeline(array $row): array
+    {
+        $out = $row;
+        $codigo = trim((string) ($row['Codigo'] ?? ''));
+        if ($codigo !== '' && trim((string) ($row['Pedido'] ?? '')) === '') {
+            $out['Pedido'] = $codigo;
+        }
+
+        $st = trim((string) ($row['Status'] ?? ''));
+        $se = trim((string) ($row['StatusEnvio'] ?? ''));
+        if ($se !== '' && mb_strtolower($se) !== mb_strtolower($st)) {
+            $out['Status'] = $st !== '' ? $st . ' · ' . $se : $se;
+        }
+
+        return $out;
     }
 }

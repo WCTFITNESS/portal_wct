@@ -36,6 +36,15 @@ $monitorSource = 'webhook';
 if ($usedRecentExample && $orderQuery === '') {
     $example = $webhookService->getRecentOrderExample($dateStart, $dateEnd);
     if ($example === null || $example === '') {
+        if ($lexosApiReady) {
+            try {
+                $example = $lexosOrderMonitorService->getRecentOrderExample($dateStart, $dateEnd);
+            } catch (Throwable) {
+                $example = null;
+            }
+        }
+    }
+    if ($example === null || $example === '') {
         $example = $mercadoLivreMonitorService->getRecentOrderExample($dateStart, $dateEnd);
     }
 
@@ -57,7 +66,10 @@ try {
                 $monitor = $lexosListMonitor;
                 $monitor['source'] = 'lexos_api';
                 $monitorSource = 'lexos_api';
-                $feedback = 'Sem eventos de webhook Lexos no período; lista carregada pela Lexos WebAPI (Pedido/DataSource).';
+                $listSrc = (string) ($lexosListMonitor['lexos_list_source'] ?? 'pedido_datasource');
+                $feedback = $listSrc === 'entrega_datasource_todos'
+                    ? 'Sem eventos de webhook Lexos; lista do período via Expedição Lexos (Entrega/DataSourceTodos), filtrada pelas datas do pedido.'
+                    : 'Sem eventos de webhook Lexos; lista do período via Lexos Pedido/DataSource.';
                 $feedbackClass = 'ok';
             }
         } catch (Throwable) {
@@ -86,7 +98,11 @@ if ($monitor !== null && $orderQuery !== '') {
             if ($lexosTimelines !== []) {
                 $monitor = array_merge(
                     LexosOrderTimelineSupport::buildMonitorSnapshot($lexosTimelines, $dateStart, $dateEnd),
-                    ['source' => 'lexos_api', 'rows' => $lexosHit['rows'] ?? []]
+                    [
+                        'source' => 'lexos_api',
+                        'rows' => $lexosHit['rows'] ?? [],
+                        'lexos_find_source' => (string) ($lexosHit['lexos_source'] ?? ''),
+                    ]
                 );
                 $monitorSource = 'lexos_api';
                 $feedback = 'Pedido localizado na Lexos WebAPI (busca direta por código).';
@@ -425,6 +441,11 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
             Ainda não recebemos POST da Lexos neste endpoint.
         <?php endif; ?>
     </p>
+    <?php if (!$lexosApiReady): ?>
+        <p class="msg" style="margin-top:10px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e;padding:10px 12px;border-radius:8px;">
+            Sem <strong>Token Lexos</strong> e <strong>Chave</strong> da integração em Configurar API, o monitor não consulta a Expedição na Lexos e cai direto no Mercado Livre quando o webhook está vazio.
+        </p>
+    <?php endif; ?>
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>
@@ -470,14 +491,26 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
 </section>
 
 <?php if ($monitor && is_array($monitor['summary'] ?? null)): ?>
-    <?php $summary = $monitor['summary']; ?>
+    <?php
+    $summary = $monitor['summary'];
+    $fonteAtualLabel = match ($monitorSource) {
+        'mercado_livre' => 'Mercado Livre',
+        'lexos_api' => 'Lexos WebAPI',
+        default => 'Webhook Lexos',
+    };
+    if ($monitorSource === 'lexos_api') {
+        if (($monitor['lexos_find_source'] ?? '') === 'entrega_datasource_todos') {
+            $fonteAtualLabel = 'Lexos Expedição (busca DataSourceTodos)';
+        } elseif (($monitor['lexos_list_source'] ?? '') === 'entrega_datasource_todos') {
+            $fonteAtualLabel = 'Lexos Expedição (lista no período · DataSourceTodos)';
+        } else {
+            $fonteAtualLabel = 'Lexos WebAPI (Pedido/DataSource)';
+        }
+    }
+    ?>
     <section class="card">
         <h1><?= $isOrderFilterActive ? 'Resumo do pedido filtrado' : 'Resumo do período' ?></h1>
-        <p>Fonte atual: <strong><?= htmlspecialchars(match ($monitorSource) {
-            'mercado_livre' => 'Mercado Livre',
-            'lexos_api' => 'Lexos WebAPI (Pedido/DataSource)',
-            default => 'Webhook Lexos',
-        }) ?></strong></p>
+        <p>Fonte atual: <strong><?= htmlspecialchars($fonteAtualLabel) ?></strong></p>
         <?php if ($isOrderFilterActive): ?>
             <p>Filtro ativo para o pedido <strong><?= htmlspecialchars($orderQuery) ?></strong>. O resumo abaixo reflete somente esse pedido.</p>
         <?php endif; ?>

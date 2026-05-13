@@ -237,6 +237,13 @@ final class LexosOrderTimelineSupport
     if (str_contains($s, 'cancel')) {
       return 'Validar motivo do cancelamento e alinhar tratativa com o comercial.';
     }
+    if (
+      str_contains($s, 'paid')
+      || (str_contains($s, 'confirmed') && !str_contains($s, 'cancel'))
+      || str_contains($s, 'payment_in_process')
+    ) {
+      return 'Pagamento confirmado ou em andamento no Mercado Livre; seguir expedição e faturamento na Lexos.';
+    }
     if (str_contains($s, 'payment') || str_contains($s, 'pag')) {
       return 'Aguardar ou confirmar pagamento do comprador.';
     }
