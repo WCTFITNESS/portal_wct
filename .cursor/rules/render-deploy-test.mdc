@@ -1,0 +1,17 @@
+---
+description: Ambiente de teste é o Portal WCT no Render; enviar alterações para lá após implementar
+alwaysApply: true
+---
+
+# Deploy e testes no Render
+
+O usuário **valida tudo no Portal WCT hospedado no Render**, não só no ambiente local.
+
+Após implementar correções ou features neste repositório:
+
+1. **Garantir commit** das alterações relevantes (mensagem clara, escopo focado).
+2. **Enviar para o remoto** com `git push` na **branch que o Web Service do Render usa** (ex.: `main` ou a branch configurada no painel do Render). Se o push falhar por credencial/rede, avisar e deixar o comando exato para o usuário rodar.
+3. Mencionar que o **próximo passo** é o build automático do Render (ou “Deploy manual” no painel, se o auto-deploy estiver desligado).
+4. Não tratar XAMPP/Docker local como destino final da entrega; local é desenvolvimento — **Render é onde o teste de aceite acontece**.
+
+Documentação de deploy: `deploy/RENDER.txt` e `render.yaml` na raiz.
