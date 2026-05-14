@@ -458,6 +458,7 @@ class RepasseMpService
             $linesByOp = [];
         }
 
+        $tipoOperacaoColumnIndex = 1;
         foreach ($rows as $index => $row) {
             if (!is_array($row)) {
                 continue;
@@ -466,6 +467,7 @@ class RepasseMpService
             // Usa a primeira linha array valida como cabecalho.
             if ($header === null) {
                 $header = $row;
+                $tipoOperacaoColumnIndex = $this->detectTipoOperacaoColumnIndex($header);
                 $headerOut = $header;
                 $headerOut[] = 'order';
                 $outRows[] = $headerOut;
@@ -475,6 +477,7 @@ class RepasseMpService
             $raw = $this->getCellValueAt($row, $operationColumnIndex);
             $op = $this->normalizeOperationValue($raw);
             $match = $op !== '' ? ($matchByValue[(string) $op] ?? ['order_id' => '', 'payment_id' => '', 'status' => 'Nao encontrado']) : ['order_id' => '', 'payment_id' => '', 'status' => 'Ignorada (coluna D vazia)'];
+            $this->applyRecebimentoExportLabel($row, $tipoOperacaoColumnIndex);
             $row[] = (string) ($match['order_id'] ?? '');
             $outRows[] = $row;
             $processed++;
@@ -741,6 +744,49 @@ class RepasseMpService
     {
         if (function_exists('connection_aborted') && connection_aborted() !== 0) {
             throw new \RuntimeException('Processamento cancelado: conexao do cliente encerrada (F5/saida da pagina).');
+        }
+    }
+
+    /**
+     * Coluna B no relatorio MP: "Tipo de Operacao" (ou "Tipo de recebimento").
+     * Fallback indice 1 = coluna B.
+     */
+    private function detectTipoOperacaoColumnIndex(array $headerRow): int
+    {
+        foreach ($headerRow as $idx => $cell) {
+            $label = $this->normalizeHeader((string) (is_scalar($cell) ? $cell : ''));
+            if ($label === 'tipo de operacao' || $label === 'tipo de recebimento') {
+                return is_int($idx) ? $idx : (int) $idx;
+            }
+        }
+
+        return 1;
+    }
+
+    /**
+     * No XLSX de saida, o valor isolado "Recebimento" vira "Recebimentoo";
+     * textos como "Recebimento pelo desconto da sua contraparte" permanecem.
+     *
+     * @param array<int|string, mixed> $row
+     */
+    private function applyRecebimentoExportLabel(array &$row, int $index): void
+    {
+        $value = $this->getCellValueAt($row, $index);
+        if (!is_scalar($value)) {
+            return;
+        }
+
+        $s = str_replace("\xc2\xa0", ' ', (string) $value);
+        if (trim($s) !== 'Recebimento') {
+            return;
+        }
+
+        if (array_key_exists($index, $row)) {
+            $row[$index] = 'Recebimentoo';
+        }
+        $keyStr = (string) $index;
+        if (array_key_exists($keyStr, $row)) {
+            $row[$keyStr] = 'Recebimentoo';
         }
     }
 
