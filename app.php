@@ -8,6 +8,7 @@ use App\Repositories\MessageLogRepository;
 use App\Repositories\MessageTemplateRepository;
 use App\Repositories\RequestLogRepository;
 use App\Repositories\LexosOrderWebhookRepository;
+use App\Repositories\ProtheusSettingsRepository;
 use App\Repositories\RepasseMpJobRepository;
 use App\Repositories\SettingsRepository;
 use App\Repositories\TokenRepository;
@@ -23,6 +24,8 @@ use App\Services\MercadoLivreOrderMonitorService;
 use App\Services\MessageService;
 use App\Services\MlAdsReportService;
 use App\Services\OrderService;
+use App\Services\ProtheusConnectionService;
+use App\Services\ProtheusMedidosMonitorService;
 use App\Services\RepasseService;
 use App\Services\RepasseMpService;
 use App\Services\TokenService;
@@ -39,6 +42,7 @@ $templateRepository = new MessageTemplateRepository($pdo);
 $logRepository = new MessageLogRepository($pdo);
 $requestLogRepository = new RequestLogRepository($pdo);
 $repasseMpJobRepository = new RepasseMpJobRepository($pdo);
+$protheusSettingsRepository = new ProtheusSettingsRepository($pdo);
 $client = new MercadoLivreClient($requestLogRepository);
 $mercadopagoClient = new MercadoPagoClient($requestLogRepository);
 $tokenService = new TokenService($settingsRepository, $tokenRepository, $client);
@@ -55,6 +59,8 @@ $lexosOrderWebhookRepository = new LexosOrderWebhookRepository($pdo);
 $lexosOrderWebhookService = new LexosOrderWebhookService($lexosOrderWebhookRepository);
 $mercadoLivreOrderMonitorService = new MercadoLivreOrderMonitorService($orderService);
 $lexosOrderMonitorService = new LexosOrderMonitorService($lexosHubApiClient);
+$protheusConnectionService = new ProtheusConnectionService($protheusSettingsRepository);
+$protheusMedidosMonitorService = new ProtheusMedidosMonitorService($protheusConnectionService);
 
 return [
     'config' => $config,
@@ -78,4 +84,7 @@ return [
     'lexosOrderWebhookService' => $lexosOrderWebhookService,
     'mercadoLivreOrderMonitorService' => $mercadoLivreOrderMonitorService,
     'lexosOrderMonitorService' => $lexosOrderMonitorService,
+    'protheusSettingsRepository' => $protheusSettingsRepository,
+    'protheusConnectionService' => $protheusConnectionService,
+    'protheusMedidosMonitorService' => $protheusMedidosMonitorService,
 ];

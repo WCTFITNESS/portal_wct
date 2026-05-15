@@ -6,7 +6,18 @@ $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
-$allowedPages = ['dashboard', 'api-config', 'orders', 'monitor-pedidos', 'repasse-mp', 'message-template', 'manual-send', 'ml-ads-report'];
+$allowedPages = [
+    'dashboard',
+    'api-config',
+    'orders',
+    'monitor-pedidos',
+    'repasse-mp',
+    'message-template',
+    'manual-send',
+    'ml-ads-report',
+    'protheus-config',
+    'protheus-monitor-medidos',
+];
 
 if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
@@ -55,6 +66,10 @@ $menuSections = [
     ],
     'Relatórios ML' => [
         ['id' => 'ml-ads-report', 'label' => 'Relatório de anúncios'],
+    ],
+    'Protheus' => [
+        ['id' => 'protheus-config', 'label' => 'Config Protheus'],
+        ['id' => 'protheus-monitor-medidos', 'label' => 'Monitor de Medidos'],
     ],
     'Integração' => [
         [
@@ -342,6 +357,14 @@ if (
                     <nav class="subnav">
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=message-template')) ?>" class="<?= $page === 'message-template' ? 'active' : '' ?>">Mensagem</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=manual-send')) ?>" class="<?= $page === 'manual-send' ? 'active' : '' ?>">Mensagem manual</a>
+                    </nav>
+                </div>
+            <?php endif; ?>
+            <?php if ($page === 'protheus-config' || $page === 'protheus-monitor-medidos'): ?>
+                <div class="subnav-sticky">
+                    <nav class="subnav">
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-config')) ?>" class="<?= $page === 'protheus-config' ? 'active' : '' ?>">Config Protheus</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-medidos')) ?>" class="<?= $page === 'protheus-monitor-medidos' ? 'active' : '' ?>">Monitor de Medidos</a>
                     </nav>
                 </div>
             <?php endif; ?>

@@ -96,3 +96,14 @@ CREATE TABLE IF NOT EXISTS lexos_order_webhook_events (
     received_at TIMESTAMP NOT NULL,
     CONSTRAINT uq_lexos_order_webhook_event_key UNIQUE (event_key)
 );
+
+CREATE TABLE IF NOT EXISTS protheus_settings (
+    id BIGSERIAL PRIMARY KEY,
+    host VARCHAR(255) NOT NULL,
+    database_name VARCHAR(120) NOT NULL,
+    port INT NOT NULL DEFAULT 1433,
+    username VARCHAR(120) NOT NULL,
+    password TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);

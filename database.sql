@@ -102,3 +102,14 @@ CREATE TABLE IF NOT EXISTS lexos_order_webhook_events (
     KEY idx_lexos_order_webhook_event_date (event_date),
     KEY idx_lexos_order_webhook_received (received_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS protheus_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    host VARCHAR(255) NOT NULL,
+    database_name VARCHAR(120) NOT NULL,
+    port INT NOT NULL DEFAULT 1433,
+    username VARCHAR(120) NOT NULL,
+    password TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
