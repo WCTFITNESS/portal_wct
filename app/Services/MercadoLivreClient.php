@@ -29,20 +29,38 @@ class MercadoLivreClient
         string $clientSecret,
         string $refreshToken
     ): array {
-        $url = self::API_BASE . '/oauth/token';
         $payloadArray = [
             'grant_type' => 'refresh_token',
-            'client_id' => $appId,
-            'client_secret' => $clientSecret,
-            'refresh_token' => $refreshToken,
+            'client_id' => trim($appId),
+            'client_secret' => trim($clientSecret),
+            'refresh_token' => trim($refreshToken),
         ];
-        $payload = json_encode($payloadArray, JSON_THROW_ON_ERROR);
+
+        $result = $this->postOAuthToken($payloadArray, 'application/x-www-form-urlencoded');
+        if ($result['status'] >= 200 && $result['status'] < 300) {
+            return $result;
+        }
+
+        return $this->postOAuthToken($payloadArray, 'application/json');
+    }
+
+    private function postOAuthToken(array $payloadArray, string $contentType): array
+    {
+        $url = self::API_BASE . '/oauth/token';
+
+        if ($contentType === 'application/json') {
+            $payload = json_encode($payloadArray, JSON_THROW_ON_ERROR);
+            $headers = ['Content-Type: application/json', 'Accept: application/json'];
+        } else {
+            $payload = http_build_query($payloadArray);
+            $headers = ['Content-Type: application/x-www-form-urlencoded', 'Accept: application/json'];
+        }
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_POSTFIELDS => $payload,
         ]);
 

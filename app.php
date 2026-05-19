@@ -15,6 +15,7 @@ use App\Repositories\TokenRepository;
 use App\Services\MercadoPagoClient;
 use App\Services\MercadoPagoPaymentService;
 use App\Services\MercadoLivreClient;
+use App\Services\MercadoLivreOAuthService;
 use App\Services\LexosDashboardService;
 use App\Services\LexosAuthService;
 use App\Services\LexosHubApiClient;
@@ -26,6 +27,7 @@ use App\Services\MlAdsReportService;
 use App\Services\OrderService;
 use App\Services\ProtheusConnectionService;
 use App\Services\ProtheusMedidosMonitorService;
+use App\Services\ProtheusNfeMonitorService;
 use App\Services\RepasseService;
 use App\Services\RepasseMpService;
 use App\Services\TokenService;
@@ -44,6 +46,7 @@ $requestLogRepository = new RequestLogRepository($pdo);
 $repasseMpJobRepository = new RepasseMpJobRepository($pdo);
 $protheusSettingsRepository = new ProtheusSettingsRepository($pdo);
 $client = new MercadoLivreClient($requestLogRepository);
+$mercadoLivreOAuthService = new MercadoLivreOAuthService($requestLogRepository);
 $mercadopagoClient = new MercadoPagoClient($requestLogRepository);
 $tokenService = new TokenService($settingsRepository, $tokenRepository, $client);
 $messageService = new MessageService($tokenService, $client, $logRepository);
@@ -61,10 +64,12 @@ $mercadoLivreOrderMonitorService = new MercadoLivreOrderMonitorService($orderSer
 $lexosOrderMonitorService = new LexosOrderMonitorService($lexosHubApiClient);
 $protheusConnectionService = new ProtheusConnectionService($protheusSettingsRepository);
 $protheusMedidosMonitorService = new ProtheusMedidosMonitorService($protheusConnectionService);
+$protheusNfeMonitorService = new ProtheusNfeMonitorService($protheusConnectionService);
 
 return [
     'config' => $config,
     'mercadoLivreClient' => $client,
+    'mercadoLivreOAuthService' => $mercadoLivreOAuthService,
     'settingsRepository' => $settingsRepository,
     'tokenRepository' => $tokenRepository,
     'templateRepository' => $templateRepository,
@@ -87,4 +92,5 @@ return [
     'protheusSettingsRepository' => $protheusSettingsRepository,
     'protheusConnectionService' => $protheusConnectionService,
     'protheusMedidosMonitorService' => $protheusMedidosMonitorService,
+    'protheusNfeMonitorService' => $protheusNfeMonitorService,
 ];
