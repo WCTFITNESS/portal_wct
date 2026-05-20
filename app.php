@@ -28,6 +28,7 @@ use App\Services\OrderService;
 use App\Services\ProtheusConnectionService;
 use App\Services\ProtheusMedidosMonitorService;
 use App\Services\ProtheusNfeMonitorService;
+use App\Services\ProtheusEdiConsultaService;
 use App\Services\RepasseService;
 use App\Services\RepasseMpService;
 use App\Services\TokenService;
@@ -65,6 +66,7 @@ $lexosOrderMonitorService = new LexosOrderMonitorService($lexosHubApiClient);
 $protheusConnectionService = new ProtheusConnectionService($protheusSettingsRepository);
 $protheusMedidosMonitorService = new ProtheusMedidosMonitorService($protheusConnectionService);
 $protheusNfeMonitorService = new ProtheusNfeMonitorService($protheusConnectionService);
+$protheusEdiConsultaService = new ProtheusEdiConsultaService($protheusConnectionService);
 
 return [
     'config' => $config,
@@ -93,4 +95,5 @@ return [
     'protheusConnectionService' => $protheusConnectionService,
     'protheusMedidosMonitorService' => $protheusMedidosMonitorService,
     'protheusNfeMonitorService' => $protheusNfeMonitorService,
+    'protheusEdiConsultaService' => $protheusEdiConsultaService,
 ];
