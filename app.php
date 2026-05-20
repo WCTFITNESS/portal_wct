@@ -29,6 +29,7 @@ use App\Services\ProtheusConnectionService;
 use App\Services\ProtheusMedidosMonitorService;
 use App\Services\ProtheusNfeMonitorService;
 use App\Services\ProtheusEdiConsultaService;
+use App\Services\ProtheusZa4PedidosErroMonitorService;
 use App\Services\RepasseService;
 use App\Services\RepasseMpService;
 use App\Services\TokenService;
@@ -67,6 +68,7 @@ $protheusConnectionService = new ProtheusConnectionService($protheusSettingsRepo
 $protheusMedidosMonitorService = new ProtheusMedidosMonitorService($protheusConnectionService);
 $protheusNfeMonitorService = new ProtheusNfeMonitorService($protheusConnectionService);
 $protheusEdiConsultaService = new ProtheusEdiConsultaService($protheusConnectionService);
+$protheusZa4PedidosErroMonitorService = new ProtheusZa4PedidosErroMonitorService($protheusConnectionService);
 
 return [
     'config' => $config,
@@ -96,4 +98,5 @@ return [
     'protheusMedidosMonitorService' => $protheusMedidosMonitorService,
     'protheusNfeMonitorService' => $protheusNfeMonitorService,
     'protheusEdiConsultaService' => $protheusEdiConsultaService,
+    'protheusZa4PedidosErroMonitorService' => $protheusZa4PedidosErroMonitorService,
 ];

@@ -19,6 +19,7 @@ $allowedPages = [
     'protheus-monitor-medidos',
     'protheus-monitor-nfe',
     'protheus-consulta-edi',
+    'protheus-monitor-pedidos-erro',
 ];
 
 if (!in_array($page, $allowedPages, true)) {
@@ -74,6 +75,7 @@ $menuSections = [
         ['id' => 'protheus-monitor-medidos', 'label' => 'Monitor de Medidos'],
         ['id' => 'protheus-monitor-nfe', 'label' => 'Monitor NF-e SEFAZ'],
         ['id' => 'protheus-consulta-edi', 'label' => 'Consultas EDI'],
+        ['id' => 'protheus-monitor-pedidos-erro', 'label' => 'Erros Pedidos ZA4'],
     ],
     'Integração' => [
         [
@@ -133,6 +135,50 @@ if ($page === 'protheus-monitor-nfe' && ($_GET['export'] ?? '') === 'xlsx') {
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
         header('Content-Length: ' . (string) filesize($filePath));
         readfile($filePath);
+        exit;
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo 'Erro na exportacao: ' . htmlspecialchars($e->getMessage());
+        exit;
+    }
+}
+
+if ($page === 'protheus-monitor-pedidos-erro' && ($_GET['export'] ?? '') === 'xlsx') {
+    try {
+        $settings = $app['protheusSettingsRepository']->getSettings();
+        if ($settings === null) {
+            throw new RuntimeException('Configure o Protheus antes de exportar.');
+        }
+        if (!$app['protheusConnectionService']->isDriverAvailable()) {
+            throw new RuntimeException('Driver SQL Server nao disponivel neste PHP.');
+        }
+
+        $dataCorte = \App\Repositories\ProtheusSettingsRepository::resolveDataCorte($settings);
+        $filial = trim((string) ($_GET['filial'] ?? '0101'));
+        $dataDe = trim((string) ($_GET['data_de'] ?? $dataCorte));
+        $dataAte = trim((string) ($_GET['data_ate'] ?? date('Y-m-d')));
+        if ($dataDe === '') {
+            $dataDe = $dataCorte;
+        }
+        if ($dataDe < $dataCorte) {
+            $dataDe = $dataCorte;
+        }
+
+        $filePath = $app['protheusZa4PedidosErroMonitorService']->exportToXlsx(
+            $filial,
+            $dataDe,
+            $dataAte,
+            ($_GET['somente_erro'] ?? '1') !== '0',
+            trim((string) ($_GET['idlexo'] ?? '')),
+            trim((string) ($_GET['ped_mar'] ?? '')),
+            trim((string) ($_GET['texto_erro'] ?? ''))
+        );
+        $fileName = basename($filePath);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
         exit;
     } catch (Throwable $e) {
         http_response_code(500);
@@ -456,7 +502,7 @@ if (
         }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi'], true) ? 'page-protheus-monitor-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro'], true) ? 'page-protheus-monitor-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">
@@ -493,13 +539,14 @@ if (
                     </nav>
                 </div>
             <?php endif; ?>
-            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi'], true)): ?>
+            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro'], true)): ?>
                 <div class="subnav-sticky">
                     <nav class="subnav">
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-config')) ?>" class="<?= $page === 'protheus-config' ? 'active' : '' ?>">Config Protheus</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-medidos')) ?>" class="<?= $page === 'protheus-monitor-medidos' ? 'active' : '' ?>">Monitor de Medidos</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-nfe')) ?>" class="<?= $page === 'protheus-monitor-nfe' ? 'active' : '' ?>">Monitor NF-e SEFAZ</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-edi')) ?>" class="<?= $page === 'protheus-consulta-edi' ? 'active' : '' ?>">Consultas EDI</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-pedidos-erro')) ?>" class="<?= $page === 'protheus-monitor-pedidos-erro' ? 'active' : '' ?>">Erros Pedidos ZA4</a>
                     </nav>
                 </div>
             <?php endif; ?>
