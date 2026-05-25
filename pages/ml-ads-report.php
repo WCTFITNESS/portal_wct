@@ -241,7 +241,14 @@ $canExport = is_array($summary) && $previewTotal > 0;
                             <td><?= ml_ads_h($row['marca'] ?? '') ?></td>
                             <td class="cell-link">
                                 <?php if ($permalink !== ''): ?>
-                                    <a href="<?= ml_ads_h($permalink) ?>" target="_blank" rel="noopener">Abrir</a>
+                                    <button
+                                        type="button"
+                                        class="ml-ads-open-link"
+                                        data-url="<?= ml_ads_h($permalink) ?>"
+                                        data-mlb="<?= ml_ads_h($row['mlb'] ?? '') ?>"
+                                        data-ajustado="<?= ml_ads_h($row['permalink_ajustado'] ?? 'nao') ?>"
+                                        data-original="<?= ml_ads_h($row['permalink_original'] ?? '') ?>"
+                                    >Abrir</button>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -259,6 +266,90 @@ $canExport = is_array($summary) && $previewTotal > 0;
         </div>
     <?php endif; ?>
 </section>
+
+<div id="ml-ads-link-modal" class="ml-ads-link-modal" hidden aria-hidden="true">
+    <div class="ml-ads-link-modal-backdrop" data-ml-ads-link-close></div>
+    <div class="ml-ads-link-modal-card" role="dialog" aria-labelledby="ml-ads-link-modal-title" aria-modal="true">
+        <h2 id="ml-ads-link-modal-title">Link do anuncio</h2>
+        <p id="ml-ads-link-modal-text" class="ml-ads-link-modal-text"></p>
+        <p class="ml-ads-link-modal-meta"><strong id="ml-ads-link-modal-mlb"></strong></p>
+        <div class="ml-ads-link-modal-actions">
+            <button type="button" class="ml-ads-link-btn-primary" id="ml-ads-link-modal-open">Abrir pagina publica</button>
+            <button type="button" class="ml-ads-link-btn-secondary" data-ml-ads-link-close>Fechar</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var modal = document.getElementById('ml-ads-link-modal');
+    if (!modal) return;
+
+    var textEl = document.getElementById('ml-ads-link-modal-text');
+    var mlbEl = document.getElementById('ml-ads-link-modal-mlb');
+    var openBtn = document.getElementById('ml-ads-link-modal-open');
+    var pendingUrl = '';
+
+    function closeModal() {
+        modal.hidden = true;
+        modal.setAttribute('aria-hidden', 'true');
+        pendingUrl = '';
+    }
+
+    function openModal(message, url, mlb) {
+        pendingUrl = url;
+        textEl.textContent = message;
+        mlbEl.textContent = mlb ? ('Anuncio: ' + mlb) : '';
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+        openBtn.focus();
+    }
+
+    function openExternal(url) {
+        if (!url) return;
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    modal.querySelectorAll('[data-ml-ads-link-close]').forEach(function (el) {
+        el.addEventListener('click', closeModal);
+    });
+
+    openBtn.addEventListener('click', function () {
+        openExternal(pendingUrl);
+        closeModal();
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.hidden) closeModal();
+    });
+
+    document.querySelectorAll('.ml-ads-open-link').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var url = btn.getAttribute('data-url') || '';
+            var mlb = btn.getAttribute('data-mlb') || '';
+            var ajustado = (btn.getAttribute('data-ajustado') || '') === 'sim';
+            var original = btn.getAttribute('data-original') || '';
+
+            if (!url) {
+                openModal('Nao ha link publico disponivel para este anuncio.', '', mlb);
+                return;
+            }
+
+            if (ajustado) {
+                var msg = 'A API do Mercado Livre retornou um endereco interno (nao abre no navegador). '
+                    + 'O portal converteu para a pagina publica do anuncio.';
+                if (original) {
+                    msg += ' Link original ignorado: ' + original + '.';
+                }
+                openModal(msg, url, mlb);
+                return;
+            }
+
+            openExternal(url);
+        });
+    });
+})();
+</script>
 
 <style>
     .legend-tipo-premium { background: #fef9c3; color: #713f12; border: 1px solid #fde047; }
@@ -281,13 +372,93 @@ $canExport = is_array($summary) && $previewTotal > 0;
         white-space: nowrap;
         font-size: .72rem;
     }
-    .protheus-table .cell-link a {
+    .protheus-table .cell-link .ml-ads-open-link {
+        border: none;
+        background: transparent;
         color: #1d4ed8;
         font-weight: bold;
-        text-decoration: none;
+        cursor: pointer;
+        padding: 0;
+        font-size: inherit;
+        font-family: inherit;
+        text-decoration: underline;
         white-space: nowrap;
     }
-    .protheus-table .cell-link a:hover {
-        text-decoration: underline;
+    .protheus-table .cell-link .ml-ads-open-link:hover {
+        color: #1e3a8a;
+    }
+    .ml-ads-link-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+    }
+    .ml-ads-link-modal[hidden] {
+        display: none !important;
+    }
+    .ml-ads-link-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.55);
+    }
+    .ml-ads-link-modal-card {
+        position: relative;
+        width: min(520px, 100%);
+        background: #fff;
+        border-radius: 10px;
+        border: 1px solid var(--wct-border, #e5e7eb);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+        padding: 18px 20px;
+    }
+    .ml-ads-link-modal-card h2 {
+        margin: 0 0 10px;
+        font-size: 1.1rem;
+    }
+    .ml-ads-link-modal-text {
+        margin: 0 0 8px;
+        font-size: .9rem;
+        line-height: 1.45;
+        color: #334155;
+    }
+    .ml-ads-link-modal-meta {
+        margin: 0 0 14px;
+        font-size: .82rem;
+        color: #64748b;
+    }
+    .ml-ads-link-modal-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .ml-ads-link-btn-primary,
+    .ml-ads-link-btn-secondary {
+        border-radius: 6px;
+        padding: 9px 14px;
+        font-weight: bold;
+        font-size: .78rem;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .ml-ads-link-btn-primary {
+        border: 1px solid #f5b700;
+        background: #111111;
+        color: #f5b700;
+    }
+    .ml-ads-link-btn-primary:hover {
+        background: #f5b700;
+        color: #111111;
+    }
+    .ml-ads-link-btn-secondary {
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #475569;
+    }
+    .ml-ads-link-btn-secondary:hover {
+        background: #f8fafc;
     }
 </style>

@@ -38,6 +38,8 @@ class MlAdsReportService
         'Catalog Product ID',
         'Site ID',
         'Permalink',
+        'Permalink API',
+        'Link Ajustado',
         'Full',
         'Modo Envio',
         'Tipo Logistica',
@@ -318,9 +320,13 @@ class MlAdsReportService
     ): array {
         $dimensions = $this->extractDimensions($item, $shipping);
         $brandModel = $this->extractAttributeValues($item, ['BRAND', 'MODEL', 'GTIN', 'EAN']);
+        $itemId = (string) ($item['id'] ?? '');
+        $siteId = (string) ($item['site_id'] ?? '');
+        $permalinkRaw = trim((string) ($item['permalink'] ?? ''));
+        [$permalinkPublic, $permalinkAdjusted] = $this->resolvePublicPermalink($permalinkRaw, $itemId, $siteId);
 
         return [
-            'MLB' => (string) ($item['id'] ?? ''),
+            'MLB' => $itemId,
             'Titulo' => (string) ($item['title'] ?? ''),
             'Data Criacao' => $this->formatApiDateTime($item['date_created'] ?? null),
             'Data Atualizacao' => $this->formatApiDateTime($item['last_updated'] ?? null),
@@ -338,8 +344,10 @@ class MlAdsReportService
             'listing_type_id' => $listingTypeId,
             'Categoria ID' => (string) ($item['category_id'] ?? ''),
             'Catalog Product ID' => (string) ($item['catalog_product_id'] ?? ''),
-            'Site ID' => (string) ($item['site_id'] ?? ''),
-            'Permalink' => (string) ($item['permalink'] ?? ''),
+            'Site ID' => $siteId,
+            'Permalink' => $permalinkPublic,
+            'Permalink API' => $permalinkRaw,
+            'Link Ajustado' => $permalinkAdjusted ? 'sim' : 'nao',
             'Full' => ((string) ($shipping['logistic_type'] ?? '') === 'fulfillment') ? 'SIM' : 'NAO',
             'Modo Envio' => (string) ($shipping['mode'] ?? ''),
             'Tipo Logistica' => (string) ($shipping['logistic_type'] ?? ''),
@@ -407,6 +415,8 @@ class MlAdsReportService
             'categoria_id' => $fields['Categoria ID'],
             'catalog_product_id' => $fields['Catalog Product ID'],
             'permalink' => $fields['Permalink'],
+            'permalink_original' => $fields['Permalink API'],
+            'permalink_ajustado' => $fields['Link Ajustado'],
             'full' => $fields['Full'],
             'modo_envio' => $fields['Modo Envio'],
             'tipo_logistica' => $fields['Tipo Logistica'],
@@ -537,6 +547,84 @@ class MlAdsReportService
         $pictures = $item['pictures'] ?? null;
 
         return is_array($pictures) ? count($pictures) : 0;
+    }
+
+    /**
+     * Converte links internos do ML/Mercado Shops (nao abrem no navegador) para URL publica.
+     *
+     * @return array{0: string, 1: bool} [url publica, foi ajustado]
+     */
+    private function resolvePublicPermalink(string $permalink, string $itemId, string $siteId): array
+    {
+        if ($permalink === '') {
+            $fallback = $this->buildFallbackPermalink($itemId, $siteId);
+
+            return [$fallback, $fallback !== ''];
+        }
+
+        $host = strtolower((string) parse_url($permalink, PHP_URL_HOST));
+        if ($host === 'internal-shop.mercadoshops.com.br') {
+            $fixed = preg_replace(
+                '#^https?://internal-shop\.mercadoshops\.com\.br#i',
+                'https://www.mercadoshops.com.br',
+                $permalink
+            ) ?? '';
+
+            return [$fixed !== '' ? $fixed : $this->buildFallbackPermalink($itemId, $siteId), true];
+        }
+
+        if ($this->isInternalPermalinkHost($host)) {
+            $fallback = $this->buildFallbackPermalink($itemId, $siteId);
+
+            return [$fallback !== '' ? $fallback : $permalink, true];
+        }
+
+        return [$permalink, false];
+    }
+
+    private function isInternalPermalinkHost(string $host): bool
+    {
+        if ($host === '') {
+            return true;
+        }
+        $blocked = [
+            'internal-shop.mercadoshops.com.br',
+            'internal-shop.mercadolivre.com',
+            'internal.mercadolibre.com',
+        ];
+        foreach ($blocked as $needle) {
+            if ($host === $needle || str_ends_with($host, '.' . $needle)) {
+                return true;
+            }
+        }
+        if (str_starts_with($host, 'internal-') || str_contains($host, 'internal-shop')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function buildFallbackPermalink(string $itemId, string $siteId): string
+    {
+        $itemId = trim($itemId);
+        if ($itemId === '') {
+            return '';
+        }
+
+        $siteId = strtoupper(trim($siteId) !== '' ? trim($siteId) : 'MLB');
+        /** @var array<string, string> $bases */
+        $bases = [
+            'MLB' => 'https://www.mercadolivre.com.br',
+            'MLA' => 'https://www.mercadolivre.com.ar',
+            'MLM' => 'https://www.mercadolivre.com.mx',
+            'MLC' => 'https://www.mercadolivre.cl',
+            'MLU' => 'https://www.mercadolivre.com.uy',
+            'MCO' => 'https://www.mercadolivre.com.co',
+            'MPE' => 'https://www.mercadolivre.com.pe',
+        ];
+        $base = $bases[$siteId] ?? $bases['MLB'];
+
+        return $base . '/anuncios/' . rawurlencode($itemId);
     }
 
     private function exportDirectory(): string
