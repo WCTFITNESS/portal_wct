@@ -516,6 +516,41 @@ if ($page === 'protheus-monitor-medidos' && ($_GET['export'] ?? '') === 'xlsx') 
     exit;
 }
 
+if ($page === 'ml-ads-report' && ($_GET['export'] ?? '') === 'xlsx') {
+    try {
+        $limitRaw = trim((string) ($_GET['limit'] ?? '200'));
+        $limit = (int) $limitRaw;
+        if ($limit < 0) {
+            $limit = 0;
+        }
+        if ($limit > 5000) {
+            $limit = 5000;
+        }
+        $filters = [
+            'date_from' => trim((string) ($_GET['date_from'] ?? '')),
+            'date_to' => trim((string) ($_GET['date_to'] ?? '')),
+            'sku' => trim((string) ($_GET['sku'] ?? '')),
+            'tipo' => trim((string) ($_GET['tipo'] ?? 'todos')),
+        ];
+        $result = $app['mlAdsReportService']->generateReport($limit, $filters);
+        $filePath = $app['mlAdsReportService']->getExportFilePath((string) ($result['file_name'] ?? ''));
+        if ($filePath === null) {
+            throw new RuntimeException('Arquivo de exportacao nao encontrado.');
+        }
+        $fileName = basename($filePath);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao exportar: ' . $exception->getMessage();
+    }
+    exit;
+}
+
 if ($page === 'ml-ads-report' && isset($_GET['download']) && $_GET['download'] !== '') {
     $filePath = $app['mlAdsReportService']->getExportFilePath((string) $_GET['download']);
     if (!$filePath) {

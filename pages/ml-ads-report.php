@@ -2,15 +2,37 @@
 
 declare(strict_types=1);
 
+function ml_ads_h(mixed $value): string
+{
+    $text = (string) $value;
+    if ($text === '') {
+        return '';
+    }
+    if (!mb_check_encoding($text, 'UTF-8')) {
+        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $text);
+        $text = is_string($clean) ? $clean : $text;
+    }
+
+    return htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function ml_ads_row_class(string $tipoRow): string
+{
+    if ($tipoRow === 'Premium') {
+        return 'row-tipo-premium';
+    }
+    if ($tipoRow === 'Classico') {
+        return 'row-tipo-classico';
+    }
+
+    return '';
+}
+
 $feedback = null;
 $feedbackClass = 'ok';
 $summary = null;
-$downloadFile = null;
 $previewRows = [];
-$previewDisplayRows = [];
-$previewTotal = 0;
-$previewShown = 0;
-const ML_ADS_PREVIEW_MAX_DISPLAY = 500;
+$previewLimitOnScreen = 500;
 
 $limitRaw = trim((string) ($_REQUEST['limit'] ?? '200'));
 $limit = (int) $limitRaw;
@@ -32,31 +54,11 @@ $filters = [
     'tipo' => $tipo,
 ];
 
-$mlAdsRowClass = static function (string $tipoRow): string {
-    if ($tipoRow === 'Premium') {
-        return 'row-tipo-premium';
-    }
-    if ($tipoRow === 'Classico') {
-        return 'row-tipo-classico';
-    }
+$isPreviewRequest = ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && (string) ($_POST['form_type'] ?? '') === 'ml_ads_preview';
+$isGetPreviewRequest = (($_GET['run'] ?? '') === '1');
 
-    return '';
-};
-
-$mlAdsFormAction = portal_wct_public_path($baseUrl, 'index.php?page=ml-ads-report');
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? '') === 'ml_ads_report') {
-    try {
-        $result = $app['mlAdsReportService']->generateReport($limit, $filters);
-        $summary = $result;
-        $previewRows = is_array($result['preview'] ?? null) ? $result['preview'] : [];
-        $downloadFile = (string) ($result['file_name'] ?? '');
-        $feedback = 'Relatorio gerado com sucesso.';
-    } catch (Throwable $e) {
-        $feedback = 'Erro: ' . $e->getMessage();
-        $feedbackClass = 'err';
-    }
-} elseif (($_REQUEST['run'] ?? '') === '1') {
+if ($isPreviewRequest || $isGetPreviewRequest) {
     try {
         $result = $app['mlAdsReportService']->collectReportRows($limit, $filters);
         $summary = [
@@ -65,13 +67,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
             'count_by_tipo' => $result['count_by_tipo'],
         ];
         $previewRows = is_array($result['preview'] ?? null) ? $result['preview'] : [];
-        $previewTotal = count($previewRows);
-        $previewDisplayRows = array_slice($previewRows, 0, ML_ADS_PREVIEW_MAX_DISPLAY);
-        $previewShown = count($previewDisplayRows);
-        $feedback = $previewTotal > 0
+        $rowCount = count($previewRows);
+        $feedback = $rowCount > 0
             ? 'Consulta realizada.'
             : 'Nenhum anuncio encontrado com os filtros informados.';
-        if ($previewTotal === 0) {
+        if ($rowCount === 0) {
             $feedbackClass = 'err';
         }
     } catch (Throwable $e) {
@@ -79,6 +79,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
         $feedbackClass = 'err';
     }
 }
+
+function ml_ads_report_query(array $overrides = []): string
+{
+    global $baseUrl, $limit, $dateFrom, $dateTo, $sku, $tipo;
+
+    $params = array_merge([
+        'page' => 'ml-ads-report',
+        'limit' => (string) $limit,
+        'date_from' => $dateFrom,
+        'date_to' => $dateTo,
+        'sku' => $sku,
+        'tipo' => $tipo,
+    ], $overrides);
+
+    foreach ($params as $key => $value) {
+        if ($value === null || $value === '') {
+            unset($params[$key]);
+        }
+    }
+
+    return portal_wct_public_path($baseUrl, 'index.php?' . http_build_query($params));
+}
+
+$previewOnScreen = array_slice($previewRows, 0, $previewLimitOnScreen);
+$previewTotal = count($previewRows);
+$canExport = is_array($summary) && $previewTotal > 0;
 ?>
 <section class="card protheus-monitor-card">
     <h1>Relatorio de Anuncios ML</h1>
@@ -90,24 +116,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
     </div>
 
     <?php if ($feedback !== null): ?>
-        <p class="msg <?= htmlspecialchars($feedbackClass) ?>"><?= htmlspecialchars($feedback) ?></p>
+        <p class="msg <?= ml_ads_h($feedbackClass) ?>"><?= ml_ads_h($feedback) ?></p>
     <?php endif; ?>
 
-    <form method="get" action="<?= htmlspecialchars($mlAdsFormAction) ?>" class="protheus-filters" id="ml-ads-filter-form">
-        <input type="hidden" name="page" value="ml-ads-report">
-        <input type="hidden" name="run" value="1">
+    <form method="post" action="<?= ml_ads_h(ml_ads_report_query()) ?>" class="protheus-filters" id="ml-ads-filter-form">
+        <input type="hidden" name="form_type" value="ml_ads_preview">
         <div class="filter-grid">
             <label>Limite (0 = todos)
-                <input type="number" name="limit" min="0" max="5000" value="<?= htmlspecialchars((string) $limit) ?>">
+                <input type="number" name="limit" min="0" max="5000" value="<?= ml_ads_h((string) $limit) ?>">
             </label>
             <label>Data inicial
-                <input type="date" name="date_from" value="<?= htmlspecialchars($dateFrom) ?>">
+                <input type="date" name="date_from" value="<?= ml_ads_h($dateFrom) ?>">
             </label>
             <label>Data final
-                <input type="date" name="date_to" value="<?= htmlspecialchars($dateTo) ?>">
+                <input type="date" name="date_to" value="<?= ml_ads_h($dateTo) ?>">
             </label>
             <label>SKU (contém)
-                <input type="text" name="sku" value="<?= htmlspecialchars($sku) ?>" placeholder="Ex.: 10100052">
+                <input type="text" name="sku" value="<?= ml_ads_h($sku) ?>" placeholder="Ex.: 10100052">
             </label>
             <label>Tipo
                 <select name="tipo">
@@ -125,11 +150,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
     <?php if (is_array($summary)): ?>
         <div class="protheus-summary-row">
             <p class="protheus-summary">
-                Limite: <strong><?= $limit === 0 ? 'Todos' : htmlspecialchars((string) $limit) ?></strong>
+                Limite: <strong><?= $limit === 0 ? 'Todos' : ml_ads_h((string) $limit) ?></strong>
                 | IDs consultados: <strong><?= (int) ($summary['total_ids'] ?? 0) ?></strong>
                 | Exibidos: <strong><?= (int) ($summary['matched_rows'] ?? $previewTotal) ?></strong>
-                <?php if ($previewShown > 0 && $previewTotal > $previewShown): ?>
-                    | Na tela: <strong><?= $previewShown ?></strong> de <?= $previewTotal ?>
+                <?php if ($previewTotal > count($previewOnScreen)): ?>
+                    | Na tela: <strong><?= count($previewOnScreen) ?></strong> de <?= $previewTotal ?>
                 <?php endif; ?>
                 <?php if (!empty($summary['count_by_tipo']) && is_array($summary['count_by_tipo'])): ?>
                     | Premium: <strong><?= (int) ($summary['count_by_tipo']['Premium'] ?? 0) ?></strong>
@@ -139,36 +164,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
                     <?php endif; ?>
                 <?php endif; ?>
             </p>
-            <?php if ($previewTotal > 0): ?>
-                <button
-                    type="submit"
-                    form="ml-ads-export-form"
-                    class="btn-export-xlsx btn-export-xlsx-submit"
-                >Exportar Excel</button>
-            <?php endif; ?>
-            <?php if ($downloadFile !== ''): ?>
+            <?php if ($canExport): ?>
                 <a
                     class="btn-export-xlsx"
-                    href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=ml-ads-report&download=' . urlencode($downloadFile))) ?>"
-                >Baixar Excel</a>
+                    href="<?= ml_ads_h(ml_ads_report_query(['export' => 'xlsx'])) ?>"
+                >Exportar Excel</a>
             <?php endif; ?>
         </div>
     <?php endif; ?>
 
-    <?php if ($previewShown > 0): ?>
-        <form method="post" action="<?= htmlspecialchars($mlAdsFormAction) ?>" id="ml-ads-export-form" class="ml-ads-export-hidden">
-            <input type="hidden" name="form_type" value="ml_ads_report">
-            <input type="hidden" name="limit" value="<?= htmlspecialchars((string) $limit) ?>">
-            <input type="hidden" name="date_from" value="<?= htmlspecialchars($dateFrom) ?>">
-            <input type="hidden" name="date_to" value="<?= htmlspecialchars($dateTo) ?>">
-            <input type="hidden" name="sku" value="<?= htmlspecialchars($sku) ?>">
-            <input type="hidden" name="tipo" value="<?= htmlspecialchars($tipo) ?>">
-        </form>
-
-        <?php if ($previewTotal > $previewShown): ?>
+    <?php if ($previewTotal > 0): ?>
+        <?php if ($previewTotal > count($previewOnScreen)): ?>
             <p class="protheus-summary" style="margin:8px 0 4px;">
-                Mostrando os primeiros <?= (int) $previewShown ?> anuncios na tela.
-                Use <strong>Exportar Excel</strong> para obter a lista completa (<?= (int) $previewTotal ?>).
+                Mostrando os primeiros <?= count($previewOnScreen) ?> anuncios na tela.
+                Use <strong>Exportar Excel</strong> para obter a lista completa (<?= $previewTotal ?>).
             </p>
         <?php endif; ?>
 
@@ -190,31 +199,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($previewDisplayRows as $row): ?>
+                    <?php foreach ($previewOnScreen as $row): ?>
                         <?php
                         $tipoRow = (string) ($row['tipo'] ?? '');
-                        $rowClass = $mlAdsRowClass($tipoRow);
+                        $rowClass = ml_ads_row_class($tipoRow);
                         ?>
-                        <tr class="<?= htmlspecialchars($rowClass) ?>">
-                            <td><?= htmlspecialchars((string) ($row['mlb'] ?? '')) ?></td>
-                            <td class="cell-titulo" title="<?= htmlspecialchars((string) ($row['titulo'] ?? '')) ?>">
-                                <?= htmlspecialchars((string) ($row['titulo'] ?? '')) ?>
+                        <tr class="<?= ml_ads_h($rowClass) ?>">
+                            <td><?= ml_ads_h($row['mlb'] ?? '') ?></td>
+                            <td class="cell-titulo" title="<?= ml_ads_h($row['titulo'] ?? '') ?>">
+                                <?= ml_ads_h($row['titulo'] ?? '') ?>
                             </td>
-                            <td><?= htmlspecialchars((string) ($row['preco_de'] ?? '')) ?></td>
-                            <td><?= htmlspecialchars((string) ($row['preco_por'] ?? '')) ?></td>
-                            <td><?= htmlspecialchars((string) ($row['status'] ?? '')) ?></td>
-                            <td><?= htmlspecialchars((string) ($row['sku'] ?? '')) ?></td>
-                            <td><?= htmlspecialchars($tipoRow) ?></td>
-                            <td><code class="cell-code"><?= htmlspecialchars((string) ($row['listing_type_id'] ?? '')) ?></code></td>
-                            <td><?= htmlspecialchars((string) ($row['full'] ?? '')) ?></td>
-                            <td><?= htmlspecialchars((string) ($row['estoque'] ?? '')) ?></td>
-                            <td><?= htmlspecialchars((string) ($row['vendas'] ?? '')) ?></td>
+                            <td><?= ml_ads_h($row['preco_de'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['preco_por'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['status'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['sku'] ?? '') ?></td>
+                            <td><?= ml_ads_h($tipoRow) ?></td>
+                            <td><code class="cell-code"><?= ml_ads_h($row['listing_type_id'] ?? '') ?></code></td>
+                            <td><?= ml_ads_h($row['full'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['estoque'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['vendas'] ?? '') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
         </div>
-    <?php elseif (is_array($summary) && ($_REQUEST['run'] ?? '') === '1'): ?>
+    <?php elseif (is_array($summary) && ($isPreviewRequest || $isGetPreviewRequest)): ?>
         <div class="table-wrap">
             <table class="protheus-table">
                 <tbody>
@@ -242,5 +251,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form_type'] ?? ''
         padding: 1px 4px;
         border-radius: 3px;
     }
-    .ml-ads-export-hidden { display: none; }
 </style>
