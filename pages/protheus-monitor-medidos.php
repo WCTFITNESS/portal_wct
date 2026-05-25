@@ -2,18 +2,29 @@
 
 declare(strict_types=1);
 
+use App\Repositories\ProtheusSettingsRepository;
+
 $feedback = null;
 $feedbackClass = 'ok';
 $result = null;
 
 $filial = trim((string) ($_GET['filial'] ?? '0101'));
-$emissaoDe = trim((string) ($_GET['emissao_de'] ?? '2026-01-01'));
-$emissaoAte = trim((string) ($_GET['emissao_ate'] ?? '2026-05-14'));
+$settings = $app['protheusSettingsRepository']->getSettings();
+$dataCorte = ProtheusSettingsRepository::resolveDataCorte($settings);
+$emissaoDe = trim((string) ($_GET['emissao_de'] ?? $dataCorte));
+$emissaoAte = trim((string) ($_GET['emissao_ate'] ?? date('Y-m-d')));
+if ($emissaoDe === '') {
+    $emissaoDe = $dataCorte;
+}
+if ($emissaoDe < $dataCorte) {
+    $emissaoDe = $dataCorte;
+}
 $page = max(1, (int) ($_GET['p'] ?? 1));
 $perPage = max(10, min(200, (int) ($_GET['per_page'] ?? 50)));
+$marketplace = trim((string) ($_GET['marketplace'] ?? ''));
 
-$settings = $app['protheusSettingsRepository']->getSettings();
 $monitorService = $app['protheusMedidosMonitorService'];
+$marketplaceOptions = [];
 
 if ($settings === null) {
     $feedback = 'Configure o Protheus em Config Protheus antes de consultar.';
@@ -23,7 +34,18 @@ if ($settings === null) {
     $feedbackClass = 'err';
 } else {
     try {
-        $result = $monitorService->listMedidos($filial, $emissaoDe, $emissaoAte, $page, $perPage);
+        $marketplaceOptions = $monitorService->listMarketplaces($filial, $emissaoDe, $emissaoAte);
+        if ($marketplace !== '' && !in_array($marketplace, $marketplaceOptions, true)) {
+            $marketplace = '';
+        }
+        $result = $monitorService->listMedidos(
+            $filial,
+            $emissaoDe,
+            $emissaoAte,
+            $page,
+            $perPage,
+            $marketplace
+        );
     } catch (Throwable $exception) {
         $feedback = 'Erro na consulta: ' . $exception->getMessage();
         $feedbackClass = 'err';
@@ -32,7 +54,7 @@ if ($settings === null) {
 
 function protheus_monitor_query(array $overrides = []): string
 {
-    global $baseUrl, $filial, $emissaoDe, $emissaoAte, $perPage;
+    global $baseUrl, $filial, $emissaoDe, $emissaoAte, $perPage, $marketplace;
 
     $params = array_merge([
         'page' => 'protheus-monitor-medidos',
@@ -40,31 +62,28 @@ function protheus_monitor_query(array $overrides = []): string
         'emissao_de' => $emissaoDe,
         'emissao_ate' => $emissaoAte,
         'per_page' => (string) $perPage,
+        'marketplace' => $marketplace,
     ], $overrides);
+
+    foreach ($params as $key => $value) {
+        if ($value === null || $value === '') {
+            unset($params[$key]);
+        }
+    }
 
     return portal_wct_public_path($baseUrl, 'index.php?' . http_build_query($params));
 }
 
-$columns = [
-    'F2_FILIAL' => 'Filial',
-    'F2_DOC' => 'Doc',
-    'F2_SERIE' => 'Serie',
-    'F2_CLIENTE' => 'Cliente',
-    'F2_LOJA' => 'Loja',
-    'F2_EMISSAO' => 'Emissao',
-    'F2_VALBRUT' => 'Valor bruto',
-    'ROMANEIO' => 'Romaneio',
-    'DT_LIBERACAO' => 'Dt liberacao',
-    'HR_LIBERACAO' => 'Hr liberacao',
-    'PED_Marketplace' => 'Ped. marketplace',
-    'Marketplace' => 'Marketplace',
-    'IDLEXOS' => 'ID Lexos',
-    'GW1_SITINT' => 'Sit. int.',
-];
+$columns = $monitorService::exportColumns();
+$canExport = $settings !== null && $app['protheusConnectionService']->isDriverAvailable();
 ?>
-<section class="card">
-    <h1>Monitor de Medidos</h1>
+<section class="card protheus-monitor-card">
+    <h1>Monitor de Pedidos</h1>
     <p>Notas fiscais sem liberacao de romaneio (GW1_DTSAI / GW1_HRSAI vazios) com ID Lexos preenchido.</p>
+    <p style="font-size:.9rem;color:#64748b;">
+        Data de corte (config): <strong><?= htmlspecialchars(date('d/m/Y', strtotime($dataCorte))) ?></strong>
+        — emissao anterior nao e listada.
+    </p>
 
     <div class="protheus-legend">
         <span class="legend-item legend-romaneio">Sem romaneio (GW1_NRROM)</span>
@@ -82,10 +101,20 @@ $columns = [
                 <input type="text" name="filial" value="<?= htmlspecialchars($filial) ?>" maxlength="4" required>
             </label>
             <label>Emissao de
-                <input type="date" name="emissao_de" value="<?= htmlspecialchars($emissaoDe) ?>" required>
+                <input type="date" name="emissao_de" value="<?= htmlspecialchars($emissaoDe) ?>" min="<?= htmlspecialchars($dataCorte) ?>" required>
             </label>
             <label>Emissao ate
                 <input type="date" name="emissao_ate" value="<?= htmlspecialchars($emissaoAte) ?>" required>
+            </label>
+            <label>Marketplace
+                <select name="marketplace">
+                    <option value="">Todos</option>
+                    <?php foreach ($marketplaceOptions as $opt): ?>
+                        <option value="<?= htmlspecialchars($opt) ?>"<?= $marketplace === $opt ? ' selected' : '' ?>>
+                            <?= htmlspecialchars($opt) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </label>
             <label>Por pagina
                 <select name="per_page">
@@ -99,10 +128,21 @@ $columns = [
     </form>
 
     <?php if (is_array($result)): ?>
-        <p class="protheus-summary">
-            Total: <strong><?= (int) $result['total'] ?></strong>
-            | Pagina <strong><?= (int) $result['page'] ?></strong> de <strong><?= (int) $result['total_pages'] ?></strong>
-        </p>
+        <div class="protheus-summary-row">
+            <p class="protheus-summary">
+                Total: <strong><?= (int) $result['total'] ?></strong>
+                | Pagina <strong><?= (int) $result['page'] ?></strong> de <strong><?= (int) $result['total_pages'] ?></strong>
+                <?php if ($marketplace !== ''): ?>
+                    | Marketplace: <strong><?= htmlspecialchars($marketplace) ?></strong>
+                <?php endif; ?>
+            </p>
+            <?php if ($canExport): ?>
+                <a
+                    class="btn-export-xlsx"
+                    href="<?= htmlspecialchars(protheus_monitor_query(['export' => 'xlsx', 'p' => null])) ?>"
+                >Exportar Excel</a>
+            <?php endif; ?>
+        </div>
 
         <div class="table-wrap">
             <table class="protheus-table">
@@ -124,7 +164,7 @@ $columns = [
                             ?>
                             <tr class="<?= htmlspecialchars($alertClass) ?>">
                                 <?php foreach (array_keys($columns) as $key): ?>
-                                    <td><?= htmlspecialchars((string) ($row[$key] ?? '')) ?></td>
+                                    <td><?= $monitorService->displayCellHtml((string) $key, $row[$key] ?? null) ?></td>
                                 <?php endforeach; ?>
                             </tr>
                         <?php endforeach; ?>
@@ -148,23 +188,99 @@ $columns = [
 </section>
 
 <style>
-    .protheus-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-    .legend-item { display: inline-block; padding: 6px 10px; border-radius: 6px; font-size: .85rem; font-weight: bold; }
+    .protheus-monitor-card {
+        width: 100%;
+        max-width: 100%;
+    }
+    .protheus-monitor-card h1 { font-size: 1.25rem; margin-bottom: 8px; }
+    .protheus-monitor-card > p { margin: 0 0 8px 0; font-size: .88rem; }
+    .protheus-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .legend-item { display: inline-block; padding: 5px 9px; border-radius: 6px; font-size: .8rem; font-weight: bold; }
     .legend-romaneio { background: #fef9c3; color: #713f12; border: 1px solid #fde047; }
     .legend-liberacao { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
     .protheus-filters .filter-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 12px;
-        margin-top: 8px;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px 14px;
+        margin-top: 6px;
+        align-items: end;
     }
-    .protheus-filters label { margin-top: 0; font-weight: bold; }
-    .protheus-filters input, .protheus-filters select { margin-top: 6px; }
-    .protheus-summary { margin: 16px 0 8px; color: var(--wct-muted); }
-    .table-wrap { overflow-x: auto; }
-    .protheus-table th { white-space: nowrap; }
+    .protheus-filters label { margin-top: 0; font-weight: bold; font-size: .85rem; }
+    .protheus-filters input, .protheus-filters select { margin-top: 4px; }
+    .protheus-filters button { margin-top: 0; }
+    .protheus-summary-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 12px 0 6px;
+    }
+    .protheus-summary { margin: 0; color: var(--wct-muted); font-size: .88rem; }
+    a.btn-export-xlsx {
+        display: inline-block;
+        padding: 9px 14px;
+        border-radius: 6px;
+        border: 1px solid #f5b700;
+        background: #111111;
+        color: #f5b700;
+        font-weight: bold;
+        font-size: .78rem;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    a.btn-export-xlsx:hover {
+        background: #f5b700;
+        color: #111111;
+    }
+    .table-wrap {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border: 1px solid var(--wct-border);
+        border-radius: 6px;
+        margin-top: 6px;
+    }
+    .protheus-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        font-size: .78rem;
+        line-height: 1.35;
+    }
+    .protheus-table th,
+    .protheus-table td {
+        padding: 5px 8px;
+        border-bottom: 1px solid #e8edf5;
+        text-align: left;
+        vertical-align: top;
+    }
+    .protheus-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: #f1f5f9;
+        white-space: nowrap;
+        font-size: .75rem;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+    }
+    .protheus-table tbody tr:hover { background: #f8fafc; }
     tr.row-alert-romaneio { background: #fef9c3 !important; }
     tr.row-alert-liberacao { background: #ffedd5 !important; }
-    .pagination { display: flex; align-items: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
+    .cell-empty-alert {
+        color: #dc2626;
+        font-weight: bold;
+        white-space: nowrap;
+    }
+    .pagination { display: flex; align-items: center; gap: 14px; margin-top: 12px; flex-wrap: wrap; font-size: .88rem; }
     .pagination a { font-weight: bold; }
+    @media (max-width: 1100px) {
+        .protheus-filters .filter-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
 </style>

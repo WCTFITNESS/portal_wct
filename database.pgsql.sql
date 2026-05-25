@@ -104,6 +104,28 @@ CREATE TABLE IF NOT EXISTS protheus_settings (
     port INT NOT NULL DEFAULT 1433,
     username VARCHAR(120) NOT NULL,
     password TEXT NOT NULL,
+    data_corte DATE NOT NULL DEFAULT '2026-04-01',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS protheus_sql_query_history (
+    id BIGSERIAL PRIMARY KEY,
+    table_name VARCHAR(64) NOT NULL,
+    columns_expr VARCHAR(4000) NOT NULL DEFAULT '*',
+    where_clause TEXT NOT NULL,
+    order_by_clause TEXT NOT NULL DEFAULT '',
+    top_limit INT NOT NULL DEFAULT 200,
+    sql_text TEXT NOT NULL,
+    row_count INT NOT NULL DEFAULT 0,
+    elapsed_ms INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS protheus_sql_saved_queries (
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(120) NOT NULL,
+    sql_text TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );

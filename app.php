@@ -9,6 +9,8 @@ use App\Repositories\MessageTemplateRepository;
 use App\Repositories\RequestLogRepository;
 use App\Repositories\LexosOrderWebhookRepository;
 use App\Repositories\ProtheusSettingsRepository;
+use App\Repositories\ProtheusSqlQueryHistoryRepository;
+use App\Repositories\ProtheusSqlSavedQueriesRepository;
 use App\Repositories\RepasseMpJobRepository;
 use App\Repositories\SettingsRepository;
 use App\Repositories\TokenRepository;
@@ -30,6 +32,7 @@ use App\Services\ProtheusMedidosMonitorService;
 use App\Services\ProtheusNfeMonitorService;
 use App\Services\ProtheusEdiConsultaService;
 use App\Services\ProtheusZa4PedidosErroMonitorService;
+use App\Services\ProtheusAdHocQueryService;
 use App\Services\RepasseService;
 use App\Services\RepasseMpService;
 use App\Services\TokenService;
@@ -47,6 +50,8 @@ $logRepository = new MessageLogRepository($pdo);
 $requestLogRepository = new RequestLogRepository($pdo);
 $repasseMpJobRepository = new RepasseMpJobRepository($pdo);
 $protheusSettingsRepository = new ProtheusSettingsRepository($pdo);
+$protheusSqlQueryHistoryRepository = new ProtheusSqlQueryHistoryRepository($pdo);
+$protheusSqlSavedQueriesRepository = new ProtheusSqlSavedQueriesRepository($pdo);
 $client = new MercadoLivreClient($requestLogRepository);
 $mercadoLivreOAuthService = new MercadoLivreOAuthService($requestLogRepository);
 $mercadopagoClient = new MercadoPagoClient($requestLogRepository);
@@ -69,6 +74,7 @@ $protheusMedidosMonitorService = new ProtheusMedidosMonitorService($protheusConn
 $protheusNfeMonitorService = new ProtheusNfeMonitorService($protheusConnectionService);
 $protheusEdiConsultaService = new ProtheusEdiConsultaService($protheusConnectionService);
 $protheusZa4PedidosErroMonitorService = new ProtheusZa4PedidosErroMonitorService($protheusConnectionService);
+$protheusAdHocQueryService = new ProtheusAdHocQueryService($protheusConnectionService);
 
 return [
     'config' => $config,
@@ -94,9 +100,12 @@ return [
     'mercadoLivreOrderMonitorService' => $mercadoLivreOrderMonitorService,
     'lexosOrderMonitorService' => $lexosOrderMonitorService,
     'protheusSettingsRepository' => $protheusSettingsRepository,
+    'protheusSqlQueryHistoryRepository' => $protheusSqlQueryHistoryRepository,
+    'protheusSqlSavedQueriesRepository' => $protheusSqlSavedQueriesRepository,
     'protheusConnectionService' => $protheusConnectionService,
     'protheusMedidosMonitorService' => $protheusMedidosMonitorService,
     'protheusNfeMonitorService' => $protheusNfeMonitorService,
     'protheusEdiConsultaService' => $protheusEdiConsultaService,
     'protheusZa4PedidosErroMonitorService' => $protheusZa4PedidosErroMonitorService,
+    'protheusAdHocQueryService' => $protheusAdHocQueryService,
 ];

@@ -20,10 +20,250 @@ $allowedPages = [
     'protheus-monitor-nfe',
     'protheus-consulta-edi',
     'protheus-monitor-pedidos-erro',
+    'protheus-consulta-sql',
 ];
 
 if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
+}
+
+if ($page === 'protheus-consulta-sql' && isset($_GET['protheus_sql_action']) && $_GET['protheus_sql_action'] !== '') {
+    header('Content-Type: application/json; charset=utf-8');
+    $action = (string) $_GET['protheus_sql_action'];
+
+    try {
+        $service = $app['protheusAdHocQueryService'];
+        $body = json_decode((string) file_get_contents('php://input'), true);
+        if (!is_array($body)) {
+            $body = $_POST;
+        }
+
+        if ($action === 'run_raw' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            $sql = (string) ($body['sql'] ?? '');
+            $result = $service->runRawQuery(
+                $sql,
+                isset($body['query_id']) ? (string) $body['query_id'] : null
+            );
+
+            $historyId = $app['protheusSqlQueryHistoryRepository']->save([
+                'table' => \App\Services\ProtheusAdHocQueryService::RAW_QUERY_MARKER,
+                'columns' => '*',
+                'where' => '',
+                'order_by' => '',
+                'top' => 0,
+                'sql' => (string) ($result['sql'] ?? ''),
+                'row_count' => (int) ($result['row_count'] ?? 0),
+                'elapsed_ms' => (int) ($result['elapsed_ms'] ?? 0),
+            ]);
+            $result['history_id'] = $historyId;
+
+            echo json_encode($result, JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'run' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            $table = (string) ($body['table'] ?? '');
+            $where = (string) ($body['where'] ?? '');
+            $columns = (string) ($body['columns'] ?? '*');
+            $top = (int) ($body['top'] ?? \App\Services\ProtheusAdHocQueryService::DEFAULT_TOP);
+            $orderBy = (string) ($body['order_by'] ?? '');
+
+            $result = $service->runQuery(
+                $table,
+                $where,
+                $columns,
+                $top,
+                isset($body['query_id']) ? (string) $body['query_id'] : null,
+                $orderBy
+            );
+
+            $historyId = $app['protheusSqlQueryHistoryRepository']->save([
+                'table' => $table,
+                'columns' => $columns,
+                'where' => $where,
+                'order_by' => $orderBy,
+                'top' => $top,
+                'sql' => (string) ($result['sql'] ?? ''),
+                'row_count' => (int) ($result['row_count'] ?? 0),
+                'elapsed_ms' => (int) ($result['elapsed_ms'] ?? 0),
+            ]);
+            $result['history_id'] = $historyId;
+
+            echo json_encode($result, JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'cancel' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            echo json_encode(
+                $service->cancelQuery((string) ($body['query_id'] ?? '')),
+                JSON_UNESCAPED_UNICODE
+            );
+
+            exit;
+        }
+
+        if ($action === 'tables' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+            echo json_encode(
+                $service->listTables(
+                    isset($_GET['q']) ? (string) $_GET['q'] : null,
+                    isset($_GET['limit']) ? (int) $_GET['limit'] : \App\Services\ProtheusAdHocQueryService::MAX_TABLES_LIST
+                ),
+                JSON_UNESCAPED_UNICODE
+            );
+
+            exit;
+        }
+
+        if ($action === 'columns' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+            echo json_encode(
+                $service->listTableColumns((string) ($_GET['table'] ?? '')),
+                JSON_UNESCAPED_UNICODE
+            );
+
+            exit;
+        }
+
+        if ($action === 'history' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+            echo json_encode([
+                'ok' => true,
+                'items' => $app['protheusSqlQueryHistoryRepository']->listRecent(50),
+            ], JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'history_item' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+            $item = $app['protheusSqlQueryHistoryRepository']->findById((int) ($_GET['id'] ?? 0));
+            if ($item === null) {
+                http_response_code(404);
+                echo json_encode(['ok' => false, 'error' => 'Historico nao encontrado.'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            echo json_encode(['ok' => true, 'item' => $item], JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'saved_queries' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+            echo json_encode([
+                'ok' => true,
+                'items' => $app['protheusSqlSavedQueriesRepository']->listAll(),
+            ], JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'saved_query_item' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+            $item = $app['protheusSqlSavedQueriesRepository']->findById((int) ($_GET['id'] ?? 0));
+            if ($item === null) {
+                http_response_code(404);
+                echo json_encode(['ok' => false, 'error' => 'Query salva nao encontrada.'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            echo json_encode(['ok' => true, 'item' => $item], JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'saved_query_save' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            $title = (string) ($body['title'] ?? '');
+            $sql = (string) ($body['sql'] ?? '');
+            $service->validateRawSql($sql);
+            $id = $app['protheusSqlSavedQueriesRepository']->save($title, $sql);
+            echo json_encode(['ok' => true, 'id' => $id], JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'saved_query_delete' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            $id = (int) ($body['id'] ?? 0);
+            $deleted = $app['protheusSqlSavedQueriesRepository']->deleteById($id);
+            if (!$deleted) {
+                http_response_code(404);
+                echo json_encode(['ok' => false, 'error' => 'Query salva nao encontrada.'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            echo json_encode(['ok' => true, 'id' => $id], JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        if ($action === 'history_delete' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+            $id = (int) ($body['id'] ?? 0);
+            $deleted = $app['protheusSqlQueryHistoryRepository']->deleteById($id);
+            if (!$deleted) {
+                http_response_code(404);
+                echo json_encode(['ok' => false, 'error' => 'Registro nao encontrado.'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            echo json_encode(['ok' => true, 'id' => $id], JSON_UNESCAPED_UNICODE);
+
+            exit;
+        }
+
+        http_response_code(405);
+        echo json_encode(['ok' => false, 'error' => 'Metodo ou acao invalidos.'], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($page === 'protheus-consulta-sql' && ($_GET['export'] ?? '') === 'xlsx') {
+    try {
+        if (!$app['protheusConnectionService']->isDriverAvailable()) {
+            throw new RuntimeException('Driver SQL Server nao disponivel neste PHP.');
+        }
+        if ($app['protheusSettingsRepository']->getSettings() === null) {
+            throw new RuntimeException('Configure o Protheus antes de exportar.');
+        }
+
+        $historyRepo = $app['protheusSqlQueryHistoryRepository'];
+        $historyId = (int) ($_GET['history_id'] ?? 0);
+        if ($historyId > 0) {
+            $item = $historyRepo->findById($historyId);
+            if ($item === null) {
+                throw new RuntimeException('Historico da consulta nao encontrado.');
+            }
+            if ($item['table'] === \App\Services\ProtheusAdHocQueryService::RAW_QUERY_MARKER) {
+                $filePath = $app['protheusAdHocQueryService']->exportRawToXlsx((string) $item['sql']);
+                $fileName = basename($filePath);
+                header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                header('Content-Disposition: attachment; filename="' . $fileName . '"');
+                header('Content-Length: ' . (string) filesize($filePath));
+                readfile($filePath);
+                @unlink($filePath);
+                exit;
+            }
+            $table = (string) $item['table'];
+            $where = (string) $item['where'];
+            $columns = (string) $item['columns'];
+            $top = (int) $item['top'];
+            $orderBy = (string) ($item['order_by'] ?? '');
+        } else {
+            $table = (string) ($_GET['table'] ?? '');
+            $where = (string) ($_GET['where'] ?? '');
+            $columns = (string) ($_GET['columns'] ?? '*');
+            $top = (int) ($_GET['top'] ?? \App\Services\ProtheusAdHocQueryService::DEFAULT_TOP);
+            $orderBy = (string) ($_GET['order_by'] ?? '');
+        }
+
+        $filePath = $app['protheusAdHocQueryService']->exportToXlsx($table, $where, $columns, $top, $orderBy);
+        $fileName = basename($filePath);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+        exit;
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo 'Erro na exportacao: ' . htmlspecialchars($e->getMessage());
+        exit;
+    }
 }
 
 if ($page === 'repasse-mp' && isset($_GET['repasse_action']) && $_GET['repasse_action'] !== '') {
@@ -72,10 +312,11 @@ $menuSections = [
     ],
     'Protheus' => [
         ['id' => 'protheus-config', 'label' => 'Config Protheus'],
-        ['id' => 'protheus-monitor-medidos', 'label' => 'Monitor de Medidos'],
+        ['id' => 'protheus-monitor-medidos', 'label' => 'Monitor de Pedidos'],
         ['id' => 'protheus-monitor-nfe', 'label' => 'Monitor NF-e SEFAZ'],
-        ['id' => 'protheus-consulta-edi', 'label' => 'Consultas EDI'],
+        ['id' => 'protheus-consulta-edi', 'label' => 'Monitor EDI'],
         ['id' => 'protheus-monitor-pedidos-erro', 'label' => 'Erros Pedidos ZA4'],
+        ['id' => 'protheus-consulta-sql', 'label' => 'Consulta SQL'],
     ],
     'Integração' => [
         [
@@ -212,9 +453,12 @@ if ($page === 'protheus-consulta-edi' && ($_GET['export'] ?? '') === 'xlsx') {
             $filial,
             $dataDe,
             $dataAte,
-            trim((string) ($_GET['transportadora'] ?? '')),
-            trim((string) ($_GET['sit_edi'] ?? '')),
-            trim((string) ($_GET['arquivo'] ?? ''))
+            trim((string) ($_GET['nota_fiscal'] ?? '')),
+            trim((string) ($_GET['idlexo'] ?? '')),
+            trim((string) ($_GET['ped_mar'] ?? '')),
+            trim((string) ($_GET['cod_ocorrencia'] ?? '')),
+            trim((string) ($_GET['motivo_ocorrencia'] ?? '')),
+            trim((string) ($_GET['status'] ?? ''))
         );
         $fileName = basename($filePath);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -250,8 +494,14 @@ if ($page === 'protheus-monitor-medidos' && ($_GET['export'] ?? '') === 'xlsx') 
         if ($emissaoDe < $dataCorte) {
             $emissaoDe = $dataCorte;
         }
+        $marketplace = trim((string) ($_GET['marketplace'] ?? ''));
 
-        $filePath = $app['protheusMedidosMonitorService']->exportToXlsx($filial, $emissaoDe, $emissaoAte);
+        $filePath = $app['protheusMedidosMonitorService']->exportToXlsx(
+            $filial,
+            $emissaoDe,
+            $emissaoAte,
+            $marketplace
+        );
         $fileName = basename($filePath);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
@@ -502,7 +752,7 @@ if (
         }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro'], true) ? 'page-protheus-monitor-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-ads-report'], true) ? 'page-protheus-monitor-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">
@@ -539,14 +789,15 @@ if (
                     </nav>
                 </div>
             <?php endif; ?>
-            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro'], true)): ?>
+            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql'], true)): ?>
                 <div class="subnav-sticky">
                     <nav class="subnav">
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-config')) ?>" class="<?= $page === 'protheus-config' ? 'active' : '' ?>">Config Protheus</a>
-                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-medidos')) ?>" class="<?= $page === 'protheus-monitor-medidos' ? 'active' : '' ?>">Monitor de Medidos</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-medidos')) ?>" class="<?= $page === 'protheus-monitor-medidos' ? 'active' : '' ?>">Monitor de Pedidos</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-nfe')) ?>" class="<?= $page === 'protheus-monitor-nfe' ? 'active' : '' ?>">Monitor NF-e SEFAZ</a>
-                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-edi')) ?>" class="<?= $page === 'protheus-consulta-edi' ? 'active' : '' ?>">Consultas EDI</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-edi')) ?>" class="<?= $page === 'protheus-consulta-edi' ? 'active' : '' ?>">Monitor EDI</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-pedidos-erro')) ?>" class="<?= $page === 'protheus-monitor-pedidos-erro' ? 'active' : '' ?>">Erros Pedidos ZA4</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sql')) ?>" class="<?= $page === 'protheus-consulta-sql' ? 'active' : '' ?>">Consulta SQL</a>
                     </nav>
                 </div>
             <?php endif; ?>

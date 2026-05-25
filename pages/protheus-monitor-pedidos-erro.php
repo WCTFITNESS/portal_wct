@@ -87,14 +87,16 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
 $deletedHint = ProtheusZa4PedidosErroMonitorService::deletedFlagSql('ZA4');
 ?>
 <section class="card protheus-monitor-card">
-    <h1>Monitor — Pedidos com erro (ZA4 / ZA5)</h1>
+    <h1>Monitor — Pedidos com erro (ZA4)</h1>
     <p>
-        Consulta <strong>ZA4010</strong> com <strong>INNER JOIN ZA5010</strong> (integracao Lexos).
-        Por padrao lista apenas registros com indicacao de erro.
+        Consulta <strong>ZA4010</strong> (pedido e erro de integracao Lexos).
+        <strong>SC5</strong> para ID Lexos e pedido marketplace; <strong>ZA5</strong> apenas para dados do cliente (opcional).
+        Por padrao lista apenas registros com indicacao de erro em ZA4.
     </p>
     <p style="font-size:.9rem;color:#64748b;">
         Exclusao logica: <code><?= htmlspecialchars($deletedHint) ?></code> (um espaco — padrao Protheus no portal).
-        Consulta paginada (max. 200 por pagina) para nao sobrecarregar o SQL Server.
+        Consulta paginada: no maximo <strong>200</strong> linhas por pagina; contagem e lista filtram so em ZA4
+        (joins SC5/ZA5 apenas nas linhas da pagina). Timeout SQL: 45s.
     </p>
 
     <?php if ($schemaNotes !== []): ?>

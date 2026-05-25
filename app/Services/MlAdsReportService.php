@@ -10,6 +10,12 @@ use Shuchkin\SimpleXLSXGen;
 
 class MlAdsReportService
 {
+    /** @var list<string> */
+    private const PREMIUM_LISTING_TYPES = ['gold_pro', 'gold_premium', 'gold'];
+
+    /** @var list<string> */
+    private const CLASSICO_LISTING_TYPES = ['gold_special', 'silver', 'bronze', 'free'];
+
     public function __construct(
         private TokenService $tokenService,
         private MercadoLivreClient $client,
@@ -20,7 +26,18 @@ class MlAdsReportService
     /**
      * @param array{date_from?: ?string, date_to?: ?string, sku?: ?string, tipo?: ?string} $filters
      */
-    public function generateReport(int $maxItems = 200, array $filters = []): array
+    /**
+     * @param array{date_from?: ?string, date_to?: ?string, sku?: ?string, tipo?: ?string} $filters
+     * @return array{
+     *   header: list<string>,
+     *   rows: list<list<string>>,
+     *   preview: list<array<string, string>>,
+     *   total_ids: int,
+     *   matched_rows: int,
+     *   count_by_tipo: array<string, int>
+     * }
+     */
+    public function collectReportRows(int $maxItems = 200, array $filters = []): array
     {
         $maxItems = $maxItems <= 0 ? 0 : max(1, min(5000, $maxItems));
         $skuFilter = trim((string) ($filters['sku'] ?? ''));
@@ -42,7 +59,7 @@ class MlAdsReportService
 
         $items = $this->fetchItemsInBatch($itemIds, $accessToken);
 
-        $rows = [[
+        $header = [
             'MLB',
             'Titulo',
             'Preco De',
@@ -62,21 +79,27 @@ class MlAdsReportService
             'Largura',
             'Comprimento',
             'tipo',
-        ]];
+            'listing_type_id',
+        ];
 
+        $rows = [$header];
+        $preview = [];
         $matchedRows = 0;
+        $countByTipo = ['Premium' => 0, 'Classico' => 0, 'Outros' => 0];
+
         foreach ($items as $item) {
             if (!is_array($item)) {
                 continue;
             }
             $shipping = is_array($item['shipping'] ?? null) ? $item['shipping'] : [];
             $sku = $this->extractSku($item);
-            $typeLabel = $this->listingTypeLabel((string) ($item['listing_type_id'] ?? ''));
+            $listingTypeId = (string) ($item['listing_type_id'] ?? '');
+            $typeLabel = $this->listingTypeLabel($listingTypeId);
 
             if ($skuFilter !== '' && stripos($sku, $skuFilter) === false) {
                 continue;
             }
-            if (!$this->matchTypeFilter($tipoFilter, $typeLabel)) {
+            if (!$this->matchTypeFilter($tipoFilter, $listingTypeId)) {
                 continue;
             }
             if (!$this->matchDateFilter((string) ($item['date_created'] ?? ''), (string) ($item['last_updated'] ?? ''), $dateFrom, $dateTo)) {
@@ -84,8 +107,16 @@ class MlAdsReportService
             }
 
             $matchedRows++;
+            if ($typeLabel === 'Premium') {
+                $countByTipo['Premium']++;
+            } elseif ($typeLabel === 'Classico') {
+                $countByTipo['Classico']++;
+            } else {
+                $countByTipo['Outros']++;
+            }
+
             $dimensions = $this->extractDimensions($item, $shipping);
-            $rows[] = [
+            $row = [
                 (string) ($item['id'] ?? ''),
                 (string) ($item['title'] ?? ''),
                 (string) ($item['original_price'] ?? ''),
@@ -105,23 +136,57 @@ class MlAdsReportService
                 $dimensions['largura'],
                 $dimensions['comprimento'],
                 $typeLabel,
+                $listingTypeId,
+            ];
+            $rows[] = $row;
+            $preview[] = [
+                'mlb' => (string) ($item['id'] ?? ''),
+                'titulo' => (string) ($item['title'] ?? ''),
+                'preco_de' => (string) ($item['original_price'] ?? ''),
+                'preco_por' => (string) ($item['price'] ?? ''),
+                'status' => (string) ($item['status'] ?? ''),
+                'sku' => $sku,
+                'tipo' => $typeLabel,
+                'listing_type_id' => $listingTypeId,
+                'full' => ((string) ($shipping['logistic_type'] ?? '') === 'fulfillment') ? 'SIM' : 'NAO',
+                'estoque' => (string) ($item['available_quantity'] ?? ''),
+                'vendas' => (string) ($item['sold_quantity'] ?? ''),
             ];
         }
+
+        return [
+            'header' => $header,
+            'rows' => $rows,
+            'preview' => $preview,
+            'total_ids' => count($itemIds),
+            'matched_rows' => $matchedRows,
+            'count_by_tipo' => $countByTipo,
+        ];
+    }
+
+    /**
+     * @param array{date_from?: ?string, date_to?: ?string, sku?: ?string, tipo?: ?string} $filters
+     */
+    public function generateReport(int $maxItems = 200, array $filters = []): array
+    {
+        $data = $this->collectReportRows($maxItems, $filters);
 
         $fileName = 'ml_anuncios_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.xlsx';
         $filePath = $this->exportDirectory() . DIRECTORY_SEPARATOR . $fileName;
 
         require_once __DIR__ . '/../Lib/SimpleXLSXGen.php';
-        $xlsx = SimpleXLSXGen::fromArray($rows, 'Anuncios ML');
+        $xlsx = SimpleXLSXGen::fromArray($data['rows'], 'Anuncios ML');
         if (!$xlsx->saveAs($filePath)) {
             throw new RuntimeException('Nao foi possivel salvar o arquivo de relatorio.');
         }
 
         return [
             'file_name' => $fileName,
-            'total_ids' => count($itemIds),
-            'total_rows' => max(0, count($rows) - 1),
-            'matched_rows' => $matchedRows,
+            'total_ids' => $data['total_ids'],
+            'total_rows' => max(0, count($data['rows']) - 1),
+            'matched_rows' => $data['matched_rows'],
+            'count_by_tipo' => $data['count_by_tipo'],
+            'preview' => $data['preview'],
         ];
     }
 
@@ -338,33 +403,49 @@ class MlAdsReportService
         return 'todos';
     }
 
-    private function matchTypeFilter(string $filter, string $label): bool
+    private function matchTypeFilter(string $filter, string $listingTypeId): bool
     {
         if ($filter === 'todos') {
             return true;
         }
-        $v = mb_strtolower($label);
         if ($filter === 'premium') {
-            return str_contains($v, 'premium');
+            return $this->isPremiumListingType($listingTypeId);
         }
         if ($filter === 'classico') {
-            return str_contains($v, 'classico');
+            return $this->isClassicoListingType($listingTypeId);
         }
 
         return true;
     }
 
-    private function listingTypeLabel(string $listingTypeId): string
+    private function isPremiumListingType(string $listingTypeId): bool
     {
         $id = mb_strtolower(trim($listingTypeId));
+
+        return in_array($id, self::PREMIUM_LISTING_TYPES, true);
+    }
+
+    private function isClassicoListingType(string $listingTypeId): bool
+    {
+        $id = mb_strtolower(trim($listingTypeId));
+
+        return in_array($id, self::CLASSICO_LISTING_TYPES, true);
+    }
+
+    private function listingTypeLabel(string $listingTypeId): string
+    {
+        if ($this->isPremiumListingType($listingTypeId)) {
+            return 'Premium';
+        }
+        if ($this->isClassicoListingType($listingTypeId)) {
+            return 'Classico';
+        }
+        $id = trim($listingTypeId);
         if ($id === '') {
             return '';
         }
-        if (str_contains($id, 'gold') || str_contains($id, 'premium')) {
-            return 'Premium';
-        }
 
-        return 'Classico';
+        return 'Outros';
     }
 
     /**

@@ -8,18 +8,20 @@ use App\Services\ProtheusEdiConsultaService;
 $feedback = null;
 $feedbackClass = 'ok';
 $result = null;
-$transportadoras = [];
 
 $filial = trim((string) ($_GET['filial'] ?? '0101'));
 $settings = $app['protheusSettingsRepository']->getSettings();
 $dataCorte = ProtheusSettingsRepository::resolveDataCorte($settings);
 $dataDe = trim((string) ($_GET['data_de'] ?? $dataCorte));
 $dataAte = trim((string) ($_GET['data_ate'] ?? date('Y-m-d')));
-$transportadora = trim((string) ($_GET['transportadora'] ?? ''));
-$situacaoEdi = trim((string) ($_GET['sit_edi'] ?? ''));
-$arquivo = trim((string) ($_GET['arquivo'] ?? ''));
+$notaFiscal = trim((string) ($_GET['nota_fiscal'] ?? ''));
+$idlexo = trim((string) ($_GET['idlexo'] ?? ''));
+$pedMar = trim((string) ($_GET['ped_mar'] ?? ''));
+$codOcorrencia = trim((string) ($_GET['cod_ocorrencia'] ?? ''));
+$motivoOcorrencia = trim((string) ($_GET['motivo_ocorrencia'] ?? ''));
+$status = trim((string) ($_GET['status'] ?? ''));
 $page = max(1, (int) ($_GET['p'] ?? 1));
-$perPage = max(10, min(200, (int) ($_GET['per_page'] ?? 50)));
+$perPage = max(10, min(200, (int) ($_GET['per_page'] ?? ProtheusEdiConsultaService::DEFAULT_PER_PAGE)));
 
 if ($dataDe === '') {
     $dataDe = $dataCorte;
@@ -38,14 +40,16 @@ if ($settings === null) {
     $feedbackClass = 'err';
 } else {
     try {
-        $transportadoras = $monitorService->listTransportadoras($filial, $dataDe, $dataAte);
-        $result = $monitorService->listEdi(
+        $result = $monitorService->listOcorrencias(
             $filial,
             $dataDe,
             $dataAte,
-            $transportadora,
-            $situacaoEdi,
-            $arquivo,
+            $notaFiscal,
+            $idlexo,
+            $pedMar,
+            $codOcorrencia,
+            $motivoOcorrencia,
+            $status,
             $page,
             $perPage
         );
@@ -57,16 +61,20 @@ if ($settings === null) {
 
 function protheus_edi_query(array $overrides = []): string
 {
-    global $baseUrl, $filial, $dataDe, $dataAte, $transportadora, $situacaoEdi, $arquivo, $perPage;
+    global $baseUrl, $filial, $dataDe, $dataAte, $notaFiscal, $idlexo, $pedMar;
+    global $codOcorrencia, $motivoOcorrencia, $status, $perPage;
 
     $params = array_merge([
         'page' => 'protheus-consulta-edi',
         'filial' => $filial,
         'data_de' => $dataDe,
         'data_ate' => $dataAte,
-        'transportadora' => $transportadora,
-        'sit_edi' => $situacaoEdi,
-        'arquivo' => $arquivo,
+        'nota_fiscal' => $notaFiscal,
+        'idlexo' => $idlexo,
+        'ped_mar' => $pedMar,
+        'cod_ocorrencia' => $codOcorrencia,
+        'motivo_ocorrencia' => $motivoOcorrencia,
+        'status' => $status,
         'per_page' => (string) $perPage,
     ], $overrides);
 
@@ -81,31 +89,20 @@ function protheus_edi_query(array $overrides = []): string
 
 $columns = $monitorService::exportColumns();
 $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAvailable();
-$sitLabels = [
-    '' => 'Todas',
-    '1' => '1-Importado',
-    '2' => '2-Importado com erro',
-    '3' => '3-Rejeitado',
-    '4' => '4-Processado',
-    '5' => '5-Erro impeditivo',
-];
+$deletedHint = ProtheusEdiConsultaService::deletedFlagSql('GWD');
 ?>
 <section class="card protheus-monitor-card">
-    <h1>Consultas EDI — Transportadoras</h1>
+    <h1>Monitor EDI</h1>
     <p>
-        Documentos de frete importados via EDI no SIGAGFE (tabela <strong>GXG</strong>),
-        com emitente/transportadora (<strong>GU3</strong>) e chave NF-e do documento de carga (<strong>GXH</strong>, quando existir).
+        Lista <strong>ocorrencias EDI de transporte</strong> (<strong>GWL</strong> / <strong>GWD</strong>), nao o pedido sozinho.
+        Cada linha exige NF (<strong>SF2</strong>), pedido com <strong>ID Lexos</strong> (<strong>SC5</strong> / <strong>ZA4</strong>) e data da ocorrencia no periodo informado.
     </p>
     <p style="font-size:.9rem;color:#64748b;">
-        Data de corte (config): <strong><?= htmlspecialchars(date('d/m/Y', strtotime($dataCorte))) ?></strong>
-        — importacoes anteriores nao sao listadas por padrao.
+        Periodo do filtro: <strong>data da ocorrencia</strong> (<code>GWD_DTOCOR</code>), nao data do pedido.
+        Ped. marketplace busca em <strong>ZA4.ZA4_PEDMAR</strong> e <strong>SC5.C5_PEDMAR</strong>.
+        Transportadoras excluidas: 000006, 000176, 000177, 000179, 000265.
+        Exclusao logica: <code><?= htmlspecialchars($deletedHint) ?></code>.
     </p>
-
-    <div class="protheus-legend">
-        <span class="legend-item legend-edi-ok">Importado / Processado</span>
-        <span class="legend-item legend-edi-rejeitado">Rejeitado</span>
-        <span class="legend-item legend-edi-erro">Erro na importacao</span>
-    </div>
 
     <?php if ($feedback !== null): ?>
         <p class="msg <?= htmlspecialchars($feedbackClass) ?>"><?= htmlspecialchars($feedback) ?></p>
@@ -117,35 +114,33 @@ $sitLabels = [
             <label>Filial
                 <input type="text" name="filial" value="<?= htmlspecialchars($filial) ?>" maxlength="4" required>
             </label>
-            <label>Importacao de
-                <input type="date" name="data_de" value="<?= htmlspecialchars($dataDe) ?>" min="<?= htmlspecialchars($dataCorte) ?>" required>
+            <label>Ocorrencia de
+                <input type="date" name="data_de" value="<?= htmlspecialchars($dataDe) ?>" min="<?= htmlspecialchars($dataCorte) ?>">
             </label>
-            <label>Importacao ate
-                <input type="date" name="data_ate" value="<?= htmlspecialchars($dataAte) ?>" required>
+            <label>Ocorrencia ate
+                <input type="date" name="data_ate" value="<?= htmlspecialchars($dataAte) ?>">
             </label>
-            <label>Transportadora
-                <select name="transportadora">
-                    <option value="">Todas</option>
-                    <?php foreach ($transportadoras as $tr): ?>
-                        <option value="<?= htmlspecialchars($tr['cod']) ?>"<?= $transportadora === $tr['cod'] ? ' selected' : '' ?>>
-                            <?= htmlspecialchars($tr['nome'] . ' (' . $tr['cod'] . ')') ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
+            <label>Nota fiscal
+                <input type="text" name="nota_fiscal" value="<?= htmlspecialchars($notaFiscal) ?>" placeholder="Ex.: 000546036">
             </label>
-            <label>Situacao EDI
-                <select name="sit_edi">
-                    <?php foreach ($sitLabels as $val => $label): ?>
-                        <option value="<?= htmlspecialchars($val) ?>"<?= $situacaoEdi === $val ? ' selected' : '' ?>><?= htmlspecialchars($label) ?></option>
-                    <?php endforeach; ?>
-                </select>
+            <label>ID Lexos (contem)
+                <input type="text" name="idlexo" value="<?= htmlspecialchars($idlexo) ?>" placeholder="Ex.: 12345">
             </label>
-            <label>Arquivo EDI (contem)
-                <input type="text" name="arquivo" value="<?= htmlspecialchars($arquivo) ?>" placeholder="Ex.: OCOREN, NOTFIS">
+            <label>Ped. marketplace (ZA4 ou SC5)
+                <input type="text" name="ped_mar" value="<?= htmlspecialchars($pedMar) ?>" placeholder="Ex.: 2000016375887148">
+            </label>
+            <label>Cod. ocorrencia
+                <input type="text" name="cod_ocorrencia" value="<?= htmlspecialchars($codOcorrencia) ?>" placeholder="Ex.: 001" maxlength="10">
+            </label>
+            <label>Motivo ocorrencia
+                <input type="text" name="motivo_ocorrencia" value="<?= htmlspecialchars($motivoOcorrencia) ?>" placeholder="Ex.: 001" maxlength="10">
+            </label>
+            <label>Status integracao
+                <input type="text" name="status" value="<?= htmlspecialchars($status) ?>" placeholder="Em branco = todos" maxlength="10">
             </label>
             <label>Por pagina
                 <select name="per_page">
-                    <?php foreach ([25, 50, 100, 200] as $opt): ?>
+                    <?php foreach ([50, 100, 150, 200] as $opt): ?>
                         <option value="<?= $opt ?>"<?= $perPage === $opt ? ' selected' : '' ?>><?= $opt ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -161,10 +156,7 @@ $sitLabels = [
                 | Pagina <strong><?= (int) $result['page'] ?></strong> de <strong><?= (int) $result['total_pages'] ?></strong>
             </p>
             <?php if ($canExport): ?>
-                <a
-                    class="btn-export-xlsx"
-                    href="<?= htmlspecialchars(protheus_edi_query(['export' => 'xlsx', 'p' => null])) ?>"
-                >Exportar Excel</a>
+                <a class="btn-export-xlsx" href="<?= htmlspecialchars(protheus_edi_query(['export' => 'xlsx', 'p' => null])) ?>">Exportar Excel</a>
             <?php endif; ?>
         </div>
 
@@ -214,22 +206,20 @@ $sitLabels = [
 <style>
     .protheus-monitor-card { width: 100%; max-width: 100%; }
     .protheus-monitor-card h1 { font-size: 1.25rem; margin-bottom: 8px; }
-    .protheus-monitor-card > p { margin: 0 0 8px 0; font-size: .88rem; }
-    .protheus-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-    .legend-item { display: inline-block; padding: 5px 9px; border-radius: 6px; font-size: .8rem; font-weight: bold; }
-    .legend-edi-ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
-    .legend-edi-rejeitado { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
-    .legend-edi-erro { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
     .protheus-filters .filter-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 10px 14px;
         margin-top: 6px;
         align-items: end;
     }
     .protheus-filters label { margin-top: 0; font-weight: bold; font-size: .85rem; }
-    .protheus-filters input, .protheus-filters select { margin-top: 4px; }
-    .protheus-filters button { margin-top: 0; }
+    .protheus-filters input,
+    .protheus-filters select {
+        margin-top: 4px;
+        width: 100%;
+        box-sizing: border-box;
+    }
     .protheus-summary-row {
         display: flex;
         flex-wrap: wrap;
@@ -248,17 +238,12 @@ $sitLabels = [
         color: #f5b700;
         font-weight: bold;
         font-size: .78rem;
-        letter-spacing: .04em;
-        text-transform: uppercase;
         text-decoration: none;
-        white-space: nowrap;
     }
     a.btn-export-xlsx:hover { background: #f5b700; color: #111111; }
     .table-wrap {
         width: 100%;
-        max-width: 100%;
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
         border: 1px solid var(--wct-border);
         border-radius: 6px;
         margin-top: 6px;
@@ -268,31 +253,26 @@ $sitLabels = [
         min-width: 100%;
         border-collapse: collapse;
         font-size: .78rem;
-        line-height: 1.35;
     }
     .protheus-table th,
     .protheus-table td {
         padding: 5px 8px;
         border-bottom: 1px solid #e8edf5;
-        text-align: left;
         vertical-align: top;
+        text-align: left;
     }
     .protheus-table thead th {
         position: sticky;
         top: 0;
-        z-index: 2;
         background: #f1f5f9;
         white-space: nowrap;
         font-size: .75rem;
         text-transform: uppercase;
-        letter-spacing: .03em;
     }
-    .protheus-table tbody tr:hover { background: #f8fafc; }
-    tr.row-edi-ok { background: #f0fdf4 !important; }
-    tr.row-edi-rejeitado { background: #ffedd5 !important; }
+    tr.row-edi-alerta { background: #ffedd5 !important; }
     tr.row-edi-erro { background: #fee2e2 !important; }
-    .pagination { display: flex; align-items: center; gap: 14px; margin-top: 12px; flex-wrap: wrap; font-size: .88rem; }
-    .pagination a { font-weight: bold; }
+    .cell-desc { max-width: 280px; display: inline-block; }
+    .pagination { display: flex; gap: 14px; margin-top: 12px; font-size: .88rem; }
     @media (max-width: 1100px) {
         .protheus-filters .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }

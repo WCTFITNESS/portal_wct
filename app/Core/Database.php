@@ -21,7 +21,8 @@ class Database
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_TIMEOUT => 20,
         ];
-        if ($this->driver === 'mysql' && extension_loaded('pdo_mysql')) {
+        // Nem todo build PHP define PDO::MYSQL_ATTR_* (ex.: alguns XAMPP); ATTR_TIMEOUT acima já cobre.
+        if ($this->driver === 'mysql' && defined('PDO::MYSQL_ATTR_CONNECT_TIMEOUT')) {
             $options[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 15;
         }
 

@@ -12,7 +12,8 @@ return [
     ],
     'app' => [
         'timezone' => 'America/Sao_Paulo',
-        'base_url' => '/portal_wct',
+        // Pasta local no XAMPP: htdocs/ml-portal (atalho portal_wct aponta para ela).
+        'base_url' => '/ml-portal',
         /** URL do Tracking WCT (Node, ex.: http://localhost:3001/admin/dashboard) */
         'tracking_wct_url' => 'http://localhost:3001/admin/dashboard',
     ],

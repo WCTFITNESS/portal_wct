@@ -7,147 +7,58 @@ namespace App\Services;
 use PDO;
 use Shuchkin\SimpleXLSXGen;
 
+/**
+ * Monitor EDI — ocorrencias GWL/GWD vinculadas a NF (SF2), pedido Lexos (SC5) e ZA4.
+ */
 class ProtheusEdiConsultaService
 {
-    private const COLOR_HEADER = 'F1F5F9';
-    private const COLOR_ROW_ERRO = 'FEE2E2';
-    private const COLOR_ROW_REJEITADO = 'FFEDD5';
-    private const COLOR_ROW_OK = 'DCFCE7';
+    private const DELETED_ACTIVE = ' ';
 
-    private ?bool $hasGu3Table = null;
-    private ?bool $hasGxhTable = null;
+    public const DEFAULT_PER_PAGE = 100;
+
+    private const MAX_PER_PAGE = 200;
+
+    private const EXPORT_MAX_ROWS = 5000;
+
+    private const QUERY_TIMEOUT_SEC = 45;
+
+    private const COLOR_HEADER = 'F1F5F9';
+    private const COLOR_ROW_ALERT = 'FFEDD5';
+    private const COLOR_ROW_ERRO = 'FEE2E2';
+
+    /** Transportadoras excluidas (regra de negocio WCT). */
+    private const TRANSP_EXCLUIDAS = ['000006', '000176', '000177', '000179', '000265'];
 
     public function __construct(
         private ProtheusConnectionService $connectionService
     ) {
     }
 
+    public static function deletedFlagSql(string $alias): string
+    {
+        return $alias . ".D_E_L_E_T_ = '" . self::DELETED_ACTIVE . "'";
+    }
+
     /** @return array<string, string> */
     public static function exportColumns(): array
     {
         return [
-            'GXG_FILIAL' => 'Filial',
-            'DT_IMPORT' => 'Dt importacao',
-            'DT_EMISSAO' => 'Dt emissao',
-            'COD_TRANSPORTADORA' => 'Cod. transp.',
-            'NOME_TRANSPORTADORA' => 'Transportadora',
-            'CNPJ_TRANSPORTADORA' => 'CNPJ transp.',
-            'ARQUIVO_EDI' => 'Arquivo EDI',
-            'ESPECIE' => 'Especie',
+            'REC' => 'REC',
+            'GWL_NROCO' => 'Nº coleta',
+            'NOTAFISCAL' => 'Nota fiscal',
             'SERIE' => 'Serie',
-            'NR_DOCUMENTO' => 'Nr documento',
-            'SIT_EDI' => 'Sit. EDI',
-            'ACAO' => 'Acao',
-            'CHAVE_CTE' => 'Chave CT-e',
-            'CHAVE_NFE' => 'Chave NF-e',
-            'DOC_ORIGEM' => 'Doc origem',
-            'SERIE_ORIGEM' => 'Serie origem',
-            'SEQ_IMPORT' => 'Seq. import.',
-            'MSG_EDI' => 'Mensagem EDI',
+            'F2_IDHUB' => 'ID Hub',
+            'DATA_OCORRENCIA' => 'Data ocorrencia',
+            'HORA_OCORRENIA' => 'Hora ocorrencia',
+            'IDLEXOS' => 'ID Lexos',
+            'COD_OCORRENCIA' => 'Cod. ocorrencia',
+            'MOTIVO_OCORRENCIA' => 'Motivo',
+            'DESCRICAO_OCORRENCIA' => 'Descricao',
+            'CRIACAO_OCORRENCIA' => 'Criacao',
+            'HORA_CRIACAO' => 'Hora criacao',
+            'STATUS' => 'Status integracao',
+            'PED_MAR' => 'Ped. marketplace',
         ];
-    }
-
-    /** @return list<string> */
-    public static function situacaoFilterOptions(): array
-    {
-        return ['', '1', '2', '3', '4', '5'];
-    }
-
-    public static function formatEdiSitLabel(mixed $value): string
-    {
-        $raw = trim((string) ($value ?? ''));
-        if ($raw === '') {
-            return '';
-        }
-
-        return match ($raw) {
-            '1' => '1-Importado',
-            '2' => '2-Importado com erro',
-            '3' => '3-Rejeitado',
-            '4' => '4-Processado',
-            '5' => '5-Erro impeditivo',
-            default => $raw,
-        };
-    }
-
-    public static function formatAcaoLabel(mixed $value): string
-    {
-        $raw = trim((string) ($value ?? ''));
-        if ($raw === '') {
-            return '';
-        }
-
-        return match ($raw) {
-            '1' => '1-Incluir',
-            '2' => '2-Eliminar',
-            default => $raw,
-        };
-    }
-
-    /**
-     * @return list<array{cod: string, nome: string}>
-     */
-    public function listTransportadoras(string $filial, string $dataDe, string $dataAte): array
-    {
-        $this->assertEdiTables();
-        $filial = $this->normalizeFilial($filial);
-        $dataDe = $this->normalizeProtheusDate($dataDe, '20260101');
-        $dataAte = $this->normalizeProtheusDate($dataAte, date('Ymd'));
-
-        $pdo = $this->connectionService->connect();
-        $hasGu3 = $this->hasGu3Table($pdo);
-
-        $nomeExpr = $hasGu3
-            ? 'COALESCE(NULLIF(RTRIM(GU3.GU3_NMEMIT), \'\'), RTRIM(GXG.GXG_EMISDF))'
-            : 'RTRIM(GXG.GXG_EMISDF)';
-
-        $joinGu3 = $hasGu3
-            ? 'LEFT JOIN GU3010 GU3
-                ON GU3.GU3_FILIAL = GXG.GXG_FILIAL
-                AND RTRIM(GU3.GU3_CDEMIT) = RTRIM(GXG.GXG_EMISDF)
-                AND GU3.D_E_L_E_T_ = \' \''
-            : '';
-
-        $sql = <<<SQL
-SELECT DISTINCT
-    RTRIM(GXG.GXG_EMISDF) AS cod,
-    {$nomeExpr} AS nome
-FROM GXG010 GXG
-{$joinGu3}
-WHERE GXG.D_E_L_E_T_ = ' '
-    AND GXG.GXG_FILIAL = :filial
-    AND GXG.GXG_DTIMP BETWEEN :data_de AND :data_ate
-    AND RTRIM(GXG.GXG_EMISDF) <> ''
-ORDER BY nome
-SQL;
-
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([
-            ':filial' => $filial,
-            ':data_de' => $dataDe,
-            ':data_ate' => $dataAte,
-        ]);
-        $rows = $stmt->fetchAll();
-        if (!is_array($rows)) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $cod = trim((string) ($row['cod'] ?? ''));
-            if ($cod === '') {
-                continue;
-            }
-            $out[] = [
-                'cod' => $cod,
-                'nome' => trim((string) ($row['nome'] ?? $cod)),
-            ];
-        }
-
-        return $out;
     }
 
     /**
@@ -159,25 +70,41 @@ SQL;
      *   total_pages: int
      * }
      */
-    public function listEdi(
+    public function listOcorrencias(
         string $filial,
         string $dataDe,
         string $dataAte,
-        string $transportadora = '',
-        string $situacaoEdi = '',
-        string $arquivo = '',
+        string $notaFiscal = '',
+        string $idlexo = '',
+        string $pedMar = '',
+        string $codOcorrencia = '',
+        string $motivoOcorrencia = '',
+        string $status = '',
         int $page = 1,
-        int $perPage = 50
+        int $perPage = self::DEFAULT_PER_PAGE
     ): array {
         $filial = $this->normalizeFilial($filial);
         $dataDe = $this->normalizeProtheusDate($dataDe, '20260101');
         $dataAte = $this->normalizeProtheusDate($dataAte, date('Ymd'));
         $page = max(1, $page);
-        $perPage = max(10, min(200, $perPage));
+        $perPage = max(10, min(self::MAX_PER_PAGE, $perPage));
         $offset = ($page - 1) * $perPage;
 
         $pdo = $this->connectionService->connect();
-        $params = $this->buildParams($filial, $dataDe, $dataAte, $transportadora, $situacaoEdi, $arquivo);
+        $this->applyQueryTimeout($pdo);
+        $this->assertEdiTables($pdo);
+
+        $params = $this->buildParams(
+            $filial,
+            $dataDe,
+            $dataAte,
+            $notaFiscal,
+            $idlexo,
+            $pedMar,
+            $codOcorrencia,
+            $motivoOcorrencia,
+            $status
+        );
 
         $total = $this->fetchTotal($pdo, $params);
         $rows = $this->fetchPage($pdo, $params, $offset, $perPage);
@@ -195,41 +122,58 @@ SQL;
     /**
      * @return list<array<string, mixed>>
      */
-    public function listAllEdi(
+    public function listAllForExport(
         string $filial,
         string $dataDe,
         string $dataAte,
-        string $transportadora = '',
-        string $situacaoEdi = '',
-        string $arquivo = ''
+        string $notaFiscal = '',
+        string $idlexo = '',
+        string $pedMar = '',
+        string $codOcorrencia = '',
+        string $motivoOcorrencia = '',
+        string $status = ''
     ): array {
-        $filial = $this->normalizeFilial($filial);
-        $dataDe = $this->normalizeProtheusDate($dataDe, '20260101');
-        $dataAte = $this->normalizeProtheusDate($dataAte, date('Ymd'));
-
         $pdo = $this->connectionService->connect();
-        $params = $this->buildParams($filial, $dataDe, $dataAte, $transportadora, $situacaoEdi, $arquivo);
+        $this->applyQueryTimeout($pdo);
+        $this->assertEdiTables($pdo);
 
-        $sql = $this->baseSql()
-            . $this->filterSql($params)
-            . ' ORDER BY GXG.GXG_DTIMP DESC, GXG.GXG_NRIMP DESC';
+        $params = $this->buildParams(
+            $this->normalizeFilial($filial),
+            $this->normalizeProtheusDate($dataDe, '20260101'),
+            $this->normalizeProtheusDate($dataAte, date('Ymd')),
+            $notaFiscal,
+            $idlexo,
+            $pedMar,
+            $codOcorrencia,
+            $motivoOcorrencia,
+            $status
+        );
 
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll();
-
-        return is_array($rows) ? $rows : [];
+        return $this->fetchPage($pdo, $params, 0, self::EXPORT_MAX_ROWS);
     }
 
     public function exportToXlsx(
         string $filial,
         string $dataDe,
         string $dataAte,
-        string $transportadora = '',
-        string $situacaoEdi = '',
-        string $arquivo = ''
+        string $notaFiscal = '',
+        string $idlexo = '',
+        string $pedMar = '',
+        string $codOcorrencia = '',
+        string $motivoOcorrencia = '',
+        string $status = ''
     ): string {
-        $rows = $this->listAllEdi($filial, $dataDe, $dataAte, $transportadora, $situacaoEdi, $arquivo);
+        $rows = $this->listAllForExport(
+            $filial,
+            $dataDe,
+            $dataAte,
+            $notaFiscal,
+            $idlexo,
+            $pedMar,
+            $codOcorrencia,
+            $motivoOcorrencia,
+            $status
+        );
         $columns = self::exportColumns();
 
         $headerRow = [];
@@ -245,18 +189,18 @@ SQL;
             $line = [];
             foreach (array_keys($columns) as $key) {
                 $text = $this->displayCellText((string) $key, $row[$key] ?? null);
-                $line[] = $this->exportDataCell($row, (string) $key, $text);
+                $line[] = $this->exportDataCell($row, $text);
             }
             $sheet[] = $line;
         }
 
         $dir = $this->exportDirectory();
         $safeFilial = preg_replace('/[^0-9]/', '', $this->normalizeFilial($filial)) ?: 'filial';
-        $fileName = sprintf('consulta_edi_%s_%s.xlsx', $safeFilial, date('Ymd_His'));
+        $fileName = sprintf('monitor_edi_%s_%s.xlsx', $safeFilial, date('Ymd_His'));
         $fullPath = $dir . DIRECTORY_SEPARATOR . $fileName;
 
         require_once __DIR__ . '/../Lib/SimpleXLSXGen.php';
-        $xlsx = SimpleXLSXGen::fromArray($sheet, 'EDI Transportadoras');
+        $xlsx = SimpleXLSXGen::fromArray($sheet, 'Monitor EDI');
         if (!$xlsx->saveAs($fullPath)) {
             throw new \RuntimeException('Nao foi possivel gravar o arquivo de exportacao.');
         }
@@ -269,74 +213,168 @@ SQL;
      */
     public function rowAlertClass(array $row): string
     {
-        $sit = trim((string) ($row['SIT_EDI'] ?? ''));
+        $status = trim((string) ($row['STATUS'] ?? ''));
+        if ($status !== '' && $status !== ' ' && !in_array($status, ['1', '2', '3', '4'], true)) {
+            return 'row-edi-erro';
+        }
 
-        return match ($sit) {
-            '2', '5' => 'row-edi-erro',
-            '3' => 'row-edi-rejeitado',
-            '1', '4' => 'row-edi-ok',
-            default => '',
-        };
+        $cod = trim((string) ($row['COD_OCORRENCIA'] ?? ''));
+        if ($cod !== '' && $cod !== '001') {
+            return 'row-edi-alerta';
+        }
+
+        return '';
     }
 
     public function displayCellText(string $columnKey, mixed $value): string
     {
-        if ($columnKey === 'SIT_EDI') {
-            return self::formatEdiSitLabel($value);
-        }
-        if ($columnKey === 'ACAO') {
-            return self::formatAcaoLabel($value);
-        }
-        if ($columnKey === 'CNPJ_TRANSPORTADORA') {
-            return ProtheusMedidosMonitorService::formatCpfCnpj($value);
-        }
-
         return $this->cellText($value);
     }
 
     public function displayCellHtml(string $columnKey, mixed $value): string
     {
+        if ($columnKey === 'DESCRICAO_OCORRENCIA') {
+            $text = $this->cellText($value);
+            if ($text === '') {
+                return '';
+            }
+
+            return '<span class="cell-desc">' . htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</span>';
+        }
+
         return htmlspecialchars($this->displayCellText($columnKey, $value), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
-    public function assertEdiTables(): void
+    public function assertEdiTables(?PDO $pdo = null): void
     {
-        $pdo = $this->connectionService->connect();
-        if (!$this->tableExists($pdo, 'GXG010')) {
-            throw new \RuntimeException(
-                'Tabela GXG010 (EDI - Documento de Frete) nao encontrada no banco Protheus. Verifique se o modulo SIGAGFE esta em uso.'
-            );
+        $pdo ??= $this->connectionService->connect();
+        foreach (['GWL010', 'GWD010', 'SF2010', 'SC5010', 'ZA4010'] as $table) {
+            if (!$this->tableExists($pdo, $table)) {
+                throw new \RuntimeException(
+                    'Tabela ' . $table . ' nao encontrada no banco Protheus. Verifique o ambiente EDI (GWL/GWD).'
+                );
+            }
         }
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @return array<string, mixed>
      */
     private function buildParams(
         string $filial,
         string $dataDe,
         string $dataAte,
-        string $transportadora,
-        string $situacaoEdi,
-        string $arquivo
+        string $notaFiscal,
+        string $idlexo,
+        string $pedMar,
+        string $codOcorrencia,
+        string $motivoOcorrencia,
+        string $status
     ): array {
+        // ODBC SQL Server exige um bind por placeholder (nao repetir :filial).
         $params = [
             ':filial' => $filial,
+            ':filial_gwd' => $filial,
+            ':filial_sf2' => $filial,
+            ':filial_za4' => $filial,
             ':data_de' => $dataDe,
             ':data_ate' => $dataAte,
         ];
 
-        if (trim($transportadora) !== '') {
-            $params[':transportadora'] = trim($transportadora);
+        if (trim($notaFiscal) !== '') {
+            $params[':nota_fiscal'] = trim($notaFiscal);
         }
-        if (trim($situacaoEdi) !== '') {
-            $params[':sit_edi'] = trim($situacaoEdi);
+        if (trim($idlexo) !== '') {
+            $params[':idlexo'] = '%' . trim($idlexo) . '%';
         }
-        if (trim($arquivo) !== '') {
-            $params[':arquivo'] = '%' . trim($arquivo) . '%';
+        if (trim($pedMar) !== '') {
+            $like = '%' . trim($pedMar) . '%';
+            $params[':ped_mar'] = $like;
+            $params[':ped_mar_sc5'] = $like;
+        }
+        if (trim($codOcorrencia) !== '') {
+            $params[':cod_ocorrencia'] = trim($codOcorrencia);
+        }
+        if (trim($motivoOcorrencia) !== '') {
+            $params[':motivo_ocorrencia'] = trim($motivoOcorrencia);
+        }
+        if (trim($status) !== '') {
+            $params[':status'] = trim($status);
         }
 
         return $params;
+    }
+
+    private function joinSql(): string
+    {
+        $gwl = ProtheusSqlHelper::tbl('GWL010', 'GWL');
+        $gwd = ProtheusSqlHelper::tbl('GWD010', 'GWD');
+        $sf2 = ProtheusSqlHelper::tbl('SF2010', 'SF2');
+        $sc5 = ProtheusSqlHelper::tbl('SC5010', 'SC5');
+        $za4 = ProtheusSqlHelper::tbl('ZA4010', 'ZA4');
+
+        $transpList = implode(', ', array_map(
+            static fn (string $c) => "'" . $c . "'",
+            self::TRANSP_EXCLUIDAS
+        ));
+
+        return <<<SQL
+FROM {$gwl}
+INNER JOIN {$gwd}
+    ON GWD.GWD_FILIAL = :filial_gwd
+   AND GWD.GWD_NROCO = GWL.GWL_NROCO
+   AND {$this->deletedFlagSql('GWD')}
+INNER JOIN {$sf2}
+    ON SF2.F2_FILIAL = :filial_sf2
+   AND SF2.F2_DOC = GWL.GWL_NRDC
+   AND SF2.F2_SERIE = GWL.GWL_SERDC
+   AND SF2.F2_TRANSP NOT IN ({$transpList})
+   AND {$this->deletedFlagSql('SF2')}
+INNER JOIN {$sc5}
+    ON SF2.F2_FILIAL = SC5.C5_FILIAL
+   AND SF2.F2_DOC = SC5.C5_NOTA
+   AND SF2.F2_SERIE = SC5.C5_SERIE
+   AND SF2.F2_CLIENTE = SC5.C5_CLIENTE
+   AND SF2.F2_LOJA = SC5.C5_LOJACLI
+   AND {$this->deletedFlagSql('SC5')}
+   AND RTRIM(SC5.C5_ZIDLEX) <> ''
+INNER JOIN {$za4}
+    ON ZA4.ZA4_FILIAL = :filial_za4
+   AND ZA4.ZA4_IDLEXO = SC5.C5_ZIDLEX
+   AND {$this->deletedFlagSql('ZA4')}
+SQL;
+    }
+
+    private function selectSql(): string
+    {
+        $dtOcor = $this->formatProtheusDateSql('GWD.GWD_DTOCOR');
+        $dtCria = $this->formatProtheusDateSql('GWD.GWD_DTCRIA');
+        $hrOcor = $this->formatProtheusTimeSql('GWD.GWD_HROCOR');
+        $hrCria = $this->formatProtheusTimeSql('GWD.GWD_HRCRIA');
+
+        return <<<SQL
+SELECT
+    GWD.R_E_C_N_O_ AS REC,
+    RTRIM(GWL.GWL_NROCO) AS GWL_NROCO,
+    RTRIM(GWL.GWL_NRDC) AS NOTAFISCAL,
+    RTRIM(GWL.GWL_SERDC) AS SERIE,
+    RTRIM(SF2.F2_IDHUB) AS F2_IDHUB,
+    {$dtOcor} AS DATA_OCORRENCIA,
+    {$hrOcor} AS HORA_OCORRENIA,
+    RTRIM(SC5.C5_ZIDLEX) AS IDLEXOS,
+    RTRIM(GWD.GWD_CDTIPO) AS COD_OCORRENCIA,
+    RTRIM(GWD.GWD_CDMOT) AS MOTIVO_OCORRENCIA,
+    LEFT(CAST(GWD.GWD_DSOCOR AS VARCHAR(4000)), 500) AS DESCRICAO_OCORRENCIA,
+    {$dtCria} AS CRIACAO_OCORRENCIA,
+    {$hrCria} AS HORA_CRIACAO,
+    RTRIM(GWD.GWD_SITINT) AS STATUS,
+    COALESCE(NULLIF(RTRIM(ZA4.ZA4_PEDMAR), ''), RTRIM(SC5.C5_PEDMAR)) AS PED_MAR
+SQL;
+    }
+
+    private function baseSql(): string
+    {
+        return $this->selectSql() . "\n" . $this->joinSql();
     }
 
     /**
@@ -346,83 +384,31 @@ SQL;
     {
         $sql = <<<'SQL'
 
-WHERE GXG.D_E_L_E_T_ = ' '
-    AND GXG.GXG_FILIAL = :filial
-    AND GXG.GXG_DTIMP BETWEEN :data_de AND :data_ate
+WHERE GWL.GWL_FILIAL = :filial
+  AND GWL.D_E_L_E_T_ = ' '
+  AND GWD.GWD_DTOCOR BETWEEN :data_de AND :data_ate
 SQL;
 
-        if (isset($params[':transportadora'])) {
-            $sql .= "\n    AND RTRIM(GXG.GXG_EMISDF) = :transportadora";
+        if (isset($params[':nota_fiscal'])) {
+            $sql .= "\n  AND RTRIM(GWL.GWL_NRDC) = :nota_fiscal";
         }
-        if (isset($params[':sit_edi'])) {
-            $sql .= "\n    AND RTRIM(GXG.GXG_EDISIT) = :sit_edi";
+        if (isset($params[':idlexo'])) {
+            $sql .= "\n  AND RTRIM(SC5.C5_ZIDLEX) LIKE :idlexo";
         }
-        if (isset($params[':arquivo'])) {
-            $sql .= "\n    AND RTRIM(GXG.GXG_EDIARQ) LIKE :arquivo";
+        if (isset($params[':ped_mar'])) {
+            $sql .= "\n  AND (RTRIM(ZA4.ZA4_PEDMAR) LIKE :ped_mar OR RTRIM(SC5.C5_PEDMAR) LIKE :ped_mar_sc5)";
+        }
+        if (isset($params[':cod_ocorrencia'])) {
+            $sql .= "\n  AND RTRIM(GWD.GWD_CDTIPO) = :cod_ocorrencia";
+        }
+        if (isset($params[':motivo_ocorrencia'])) {
+            $sql .= "\n  AND RTRIM(GWD.GWD_CDMOT) = :motivo_ocorrencia";
+        }
+        if (isset($params[':status'])) {
+            $sql .= "\n  AND RTRIM(GWD.GWD_SITINT) = :status";
         }
 
         return $sql;
-    }
-
-    private function baseSql(): string
-    {
-        $pdo = $this->connectionService->connect();
-        $hasGu3 = $this->hasGu3Table($pdo);
-        $hasGxh = $this->hasGxhTable($pdo);
-
-        $nomeTransp = $hasGu3
-            ? 'COALESCE(NULLIF(RTRIM(GU3.GU3_NMEMIT), \'\'), RTRIM(GXG.GXG_EMISDF))'
-            : 'RTRIM(GXG.GXG_EMISDF)';
-        $cnpjTransp = $hasGu3 ? 'RTRIM(GU3.GU3_IDFED)' : "''";
-
-        $joinGu3 = $hasGu3
-            ? 'LEFT JOIN GU3010 GU3
-                ON GU3.GU3_FILIAL = GXG.GXG_FILIAL
-                AND RTRIM(GU3.GU3_CDEMIT) = RTRIM(GXG.GXG_EMISDF)
-                AND GU3.D_E_L_E_T_ = \' \''
-            : '';
-
-        $joinGxh = $hasGxh
-            ? 'LEFT JOIN (
-                SELECT
-                    GXH.GXH_NRIMP,
-                    MIN(NULLIF(RTRIM(GXH.GXH_DANFE), \'\')) AS CHAVE_NFE
-                FROM GXH010 GXH
-                WHERE GXH.D_E_L_E_T_ = \' \'
-                GROUP BY GXH.GXH_NRIMP
-            ) GXH_AGG ON GXH_AGG.GXH_NRIMP = GXG.GXG_NRIMP'
-            : '';
-
-        $chaveNfe = $hasGxh ? 'RTRIM(GXH_AGG.CHAVE_NFE)' : "''";
-
-        return <<<SQL
-SELECT
-    RTRIM(GXG.GXG_FILIAL) AS GXG_FILIAL,
-    SUBSTRING(GXG.GXG_DTIMP, 7, 2) + '/' +
-        SUBSTRING(GXG.GXG_DTIMP, 5, 2) + '/' +
-        SUBSTRING(GXG.GXG_DTIMP, 1, 4) AS DT_IMPORT,
-    SUBSTRING(GXG.GXG_DTEMIS, 7, 2) + '/' +
-        SUBSTRING(GXG.GXG_DTEMIS, 5, 2) + '/' +
-        SUBSTRING(GXG.GXG_DTEMIS, 1, 4) AS DT_EMISSAO,
-    RTRIM(GXG.GXG_EMISDF) AS COD_TRANSPORTADORA,
-    {$nomeTransp} AS NOME_TRANSPORTADORA,
-    {$cnpjTransp} AS CNPJ_TRANSPORTADORA,
-    RTRIM(GXG.GXG_EDIARQ) AS ARQUIVO_EDI,
-    RTRIM(GXG.GXG_CDESP) AS ESPECIE,
-    RTRIM(GXG.GXG_SERDF) AS SERIE,
-    RTRIM(GXG.GXG_NRDF) AS NR_DOCUMENTO,
-    RTRIM(GXG.GXG_EDISIT) AS SIT_EDI,
-    RTRIM(GXG.GXG_ACAO) AS ACAO,
-    RTRIM(GXG.GXG_CTE) AS CHAVE_CTE,
-    {$chaveNfe} AS CHAVE_NFE,
-    RTRIM(GXG.GXG_ORINR) AS DOC_ORIGEM,
-    RTRIM(GXG.GXG_ORISER) AS SERIE_ORIGEM,
-    RTRIM(GXG.GXG_NRIMP) AS SEQ_IMPORT,
-    LEFT(CAST(GXG.GXG_EDIMSG AS VARCHAR(4000)), 220) AS MSG_EDI
-FROM GXG010 GXG
-{$joinGu3}
-{$joinGxh}
-SQL;
     }
 
     /**
@@ -430,9 +416,10 @@ SQL;
      */
     private function fetchTotal(PDO $pdo, array $params): int
     {
-        $sql = 'SELECT COUNT(1) AS total FROM GXG010 GXG' . $this->filterSql($params);
+        $sql = 'SELECT COUNT(1) AS total ' . $this->joinSql() . $this->filterSql($params);
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
+        $this->bindParams($stmt, $params);
+        $stmt->execute();
         $row = $stmt->fetch();
 
         return is_array($row) ? (int) ($row['total'] ?? 0) : 0;
@@ -446,13 +433,11 @@ SQL;
     {
         $sql = $this->baseSql()
             . $this->filterSql($params)
-            . ' ORDER BY GXG.GXG_DTIMP DESC, GXG.GXG_NRIMP DESC'
+            . ' ORDER BY GWD.R_E_C_N_O_ DESC'
             . ' OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY';
 
         $stmt = $pdo->prepare($sql);
-        foreach ($params as $key => $value) {
-            $stmt->bindValue($key, $value);
-        }
+        $this->bindParams($stmt, $params);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
@@ -461,24 +446,36 @@ SQL;
         return is_array($rows) ? $rows : [];
     }
 
-    private function hasGu3Table(PDO $pdo): bool
+    private function formatProtheusDateSql(string $column): string
     {
-        if ($this->hasGu3Table !== null) {
-            return $this->hasGu3Table;
-        }
-        $this->hasGu3Table = $this->tableExists($pdo, 'GU3010');
-
-        return $this->hasGu3Table;
+        return "CASE WHEN NULLIF(RTRIM({$column}), '') IS NULL THEN '' ELSE "
+            . "SUBSTRING({$column}, 7, 2) + '/' + SUBSTRING({$column}, 5, 2) + '/' + SUBSTRING({$column}, 1, 4) END";
     }
 
-    private function hasGxhTable(PDO $pdo): bool
+    private function formatProtheusTimeSql(string $column): string
     {
-        if ($this->hasGxhTable !== null) {
-            return $this->hasGxhTable;
-        }
-        $this->hasGxhTable = $this->tableExists($pdo, 'GXH010');
+        return "CASE WHEN NULLIF(RTRIM({$column}), '') IS NULL THEN '' ELSE "
+            . "SUBSTRING({$column}, 1, 2) + ':' + SUBSTRING({$column}, 3, 2) "
+            . "+ CASE WHEN LEN(RTRIM({$column})) >= 6 THEN ':' + SUBSTRING({$column}, 5, 2) ELSE '' END END";
+    }
 
-        return $this->hasGxhTable;
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function bindParams(\PDOStatement $stmt, array $params): void
+    {
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value);
+        }
+    }
+
+    private function applyQueryTimeout(PDO $pdo): void
+    {
+        try {
+            $pdo->exec('SET LOCK_TIMEOUT 45000');
+        } catch (\Throwable) {
+            // ignorar se o driver nao suportar
+        }
     }
 
     private function tableExists(PDO $pdo, string $table): bool
@@ -534,12 +531,11 @@ SQL;
     /**
      * @param array<string, mixed> $row
      */
-    private function exportDataCell(array $row, string $columnKey, string $text): string
+    private function exportDataCell(array $row, string $text): string
     {
         $color = match ($this->rowAlertClass($row)) {
             'row-edi-erro' => self::COLOR_ROW_ERRO,
-            'row-edi-rejeitado' => self::COLOR_ROW_REJEITADO,
-            'row-edi-ok' => self::COLOR_ROW_OK,
+            'row-edi-alerta' => self::COLOR_ROW_ALERT,
             default => 'FFFFFF',
         };
         $safe = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');

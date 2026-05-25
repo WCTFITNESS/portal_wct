@@ -8,8 +8,9 @@ use PDO;
 use Shuchkin\SimpleXLSXGen;
 
 /**
- * Monitor de pedidos Lexos com erro (ZA4010 + ZA5010).
- * D_E_L_E_T_: no Protheus/TOTVS o registro ativo usa um espaco (' '), nao vazio nem multiplos espacos.
+ * Monitor de pedidos Lexos com erro (ZA4010).
+ * SC5: ID Lexos / pedido marketplace. ZA5: somente dados do cliente (opcional).
+ * D_E_L_E_T_: registro ativo usa um espaco (' ').
  */
 class ProtheusZa4PedidosErroMonitorService
 {
@@ -17,6 +18,12 @@ class ProtheusZa4PedidosErroMonitorService
     private const DELETED_ACTIVE = ' ';
 
     private const EXPORT_MAX_ROWS = 5000;
+
+    /** Pagina maxima na tela (OFFSET/FETCH na listagem). */
+    private const MAX_PER_PAGE = 200;
+
+    /** Timeout da consulta no SQL Server (segundos). */
+    private const QUERY_TIMEOUT_SEC = 45;
 
     private const COLOR_HEADER = 'F1F5F9';
     private const COLOR_ROW_ERRO = 'FEE2E2';
@@ -45,8 +52,8 @@ class ProtheusZa4PedidosErroMonitorService
             'MARKETPLACE' => 'Marketplace',
             'STATUS_PED' => 'Status',
             'MSG_ERRO' => 'Mensagem erro',
-            'DETALHE_ZA5' => 'Detalhe (ZA5)',
-            'SEQ_ZA5' => 'Seq. ZA5',
+            'CLIENTE' => 'Cliente',
+            'CPF_CNPJ' => 'CPF/CNPJ',
         ];
     }
 
@@ -75,10 +82,11 @@ class ProtheusZa4PedidosErroMonitorService
         $dataDe = $this->normalizeProtheusDate($dataDe, '20260101');
         $dataAte = $this->normalizeProtheusDate($dataAte, date('Ymd'));
         $page = max(1, $page);
-        $perPage = max(10, min(200, $perPage));
+        $perPage = max(10, min(self::MAX_PER_PAGE, $perPage));
         $offset = ($page - 1) * $perPage;
 
         $pdo = $this->connectionService->connect();
+        $this->applyQueryTimeout($pdo);
         $schema = $this->resolveSchema($pdo);
         $params = $this->buildParams($filial, $dataDe, $dataAte, $idlexo, $pedMar, $textoErro, $schema);
 
@@ -109,6 +117,7 @@ class ProtheusZa4PedidosErroMonitorService
         string $textoErro = ''
     ): array {
         $pdo = $this->connectionService->connect();
+        $this->applyQueryTimeout($pdo);
         $schema = $this->resolveSchema($pdo);
         $params = $this->buildParams(
             $this->normalizeFilial($filial),
@@ -120,16 +129,7 @@ class ProtheusZa4PedidosErroMonitorService
             $schema
         );
 
-        $sql = $this->selectSql($schema)
-            . $this->filterSql($schema, $params, $somenteErro)
-            . $this->orderSql($schema)
-            . ' OFFSET 0 ROWS FETCH NEXT ' . self::EXPORT_MAX_ROWS . ' ROWS ONLY';
-
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll();
-
-        return is_array($rows) ? $rows : [];
+        return $this->fetchPage($pdo, $schema, $params, $somenteErro, 0, self::EXPORT_MAX_ROWS);
     }
 
     public function exportToXlsx(
@@ -181,7 +181,7 @@ class ProtheusZa4PedidosErroMonitorService
      */
     public function rowAlertClass(array $row): string
     {
-        $msg = trim((string) ($row['MSG_ERRO'] ?? '') . (string) ($row['DETALHE_ZA5'] ?? ''));
+        $msg = trim((string) ($row['MSG_ERRO'] ?? ''));
         $status = strtoupper(trim((string) ($row['STATUS_PED'] ?? '')));
 
         if ($msg !== '' || in_array($status, ['E', 'ER', 'ERR', '2', 'ERRO', 'F', 'FALHA', 'X'], true)) {
@@ -193,6 +193,9 @@ class ProtheusZa4PedidosErroMonitorService
 
     public function displayCellText(string $columnKey, mixed $value): string
     {
+        if ($columnKey === 'CPF_CNPJ') {
+            return ProtheusMedidosMonitorService::formatCpfCnpj($value);
+        }
         if ($value === null) {
             return '';
         }
@@ -203,7 +206,7 @@ class ProtheusZa4PedidosErroMonitorService
     public function displayCellHtml(string $columnKey, mixed $value): string
     {
         $text = $this->displayCellText($columnKey, $value);
-        if ($columnKey === 'MSG_ERRO' || $columnKey === 'DETALHE_ZA5') {
+        if ($columnKey === 'MSG_ERRO') {
             return '<span class="cell-erro-text">' . htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</span>';
         }
 
@@ -223,72 +226,51 @@ class ProtheusZa4PedidosErroMonitorService
         if (!$this->tableExists($pdo, 'ZA4010')) {
             throw new \RuntimeException('Tabela ZA4010 nao encontrada no banco Protheus.');
         }
-        if (!$this->tableExists($pdo, 'ZA5010')) {
-            throw new \RuntimeException('Tabela ZA5010 nao encontrada no banco Protheus.');
-        }
+
+        $lexos = ProtheusZa4LexosSchema::resolvePedidosErro($pdo);
+        $notes = array_merge($notes, $lexos['notes']);
 
         $za4Cols = $this->tableColumns($pdo, 'ZA4010');
-        $za5Cols = $this->tableColumns($pdo, 'ZA5010');
 
-        $idlexo4 = $this->pickColumn($za4Cols, ['ZA4_IDLEXO', 'ZA4_IDLEXOS', 'ZA4_IDLEX']);
-        $idlexo5 = $this->pickColumn($za5Cols, ['ZA5_IDLEXO', 'ZA5_IDLEXOS', 'ZA5_IDLEX', 'ZA4_IDLEXO']);
-        if ($idlexo4 === null) {
-            throw new \RuntimeException('Coluna de ID Lexos nao encontrada em ZA4010 (esperado ZA4_IDLEXO).');
-        }
-        if ($idlexo5 === null) {
-            $idlexo5 = $idlexo4;
-            $notes[] = 'ZA5010 sem coluna ID Lexos dedicada; join pelo mesmo campo ' . $idlexo5 . '.';
-        }
-
-        $pedmar4 = $this->pickColumn($za4Cols, ['ZA4_PEDMAR', 'ZA4_PEDMK', 'ZA4_PEDMARKE', 'ZA4_PEDIDO']);
         $date4 = $this->pickDateColumn($za4Cols, 'ZA4');
         $status4 = $this->pickColumn($za4Cols, ['ZA4_STATUS', 'ZA4_SIT', 'ZA4_SITUAC', 'ZA4_SITINT', 'ZA4_SITPED']);
         $msg4 = $this->pickColumn($za4Cols, ['ZA4_ERRO', 'ZA4_MSG', 'ZA4_MSGER', 'ZA4_MENSAG', 'ZA4_LOG', 'ZA4_OBS', 'ZA4_OBSERV']);
         $mkt4 = $this->pickColumn($za4Cols, ['ZA4_MARKET', 'ZA4_MKT', 'ZA4_ZMAKET', 'ZA4_CANAL']);
 
-        $status5 = $this->pickColumn($za5Cols, ['ZA5_STATUS', 'ZA5_SIT', 'ZA5_SITUAC', 'ZA5_SITINT']);
-        $msg5 = $this->pickColumn($za5Cols, ['ZA5_ERRO', 'ZA5_MSG', 'ZA5_MSGER', 'ZA5_MENSAG', 'ZA5_LOG', 'ZA5_OBS', 'ZA5_OBSERV', 'ZA5_DETALH']);
-        $seq5 = $this->pickColumn($za5Cols, ['ZA5_ITEM', 'ZA5_SEQ', 'ZA5_LINHA', 'ZA5_SEQUEN']);
-
-        $joinParts = [
-            'ZA5.ZA5_FILIAL = ZA4.ZA4_FILIAL',
-            'RTRIM(ZA5.' . $idlexo5 . ') = RTRIM(ZA4.' . $idlexo4 . ')',
-        ];
-        $pedmar5 = $this->pickColumn($za5Cols, ['ZA5_PEDMAR', 'ZA5_PEDMK']);
-        if ($pedmar4 !== null && $pedmar5 !== null) {
-            $joinParts[] = 'RTRIM(ZA5.' . $pedmar5 . ') = RTRIM(ZA4.' . $pedmar4 . ')';
-        }
-
-        $hasSc5 = $this->tableExists($pdo, 'SC5010');
         $notes[] = "Filtro de exclusao: D_E_L_E_T_ = '" . self::DELETED_ACTIVE . "' (1 espaco — padrao Protheus).";
         if ($date4 === null) {
             $notes[] = 'Nenhuma coluna de data em ZA4 detectada; filtro por periodo desabilitado.';
         }
-        if ($status4 === null && $msg4 === null && $status5 === null && $msg5 === null) {
-            $notes[] = 'Colunas de erro/status nao detectadas; use o filtro de texto de erro ou desmarque "Somente com erro".';
+        if ($status4 === null && $msg4 === null) {
+            $notes[] = 'Colunas de erro/status nao detectadas em ZA4; use o filtro de texto ou desmarque "Somente com erro".';
         }
 
         $this->schema = [
-            'idlexo4' => $idlexo4,
-            'idlexo5' => $idlexo5,
-            'pedmar4' => $pedmar4,
-            'pedmar5' => $pedmar5,
+            'idlexo4' => $lexos['idlexo4'],
+            'idlexo_expr' => $lexos['idlexo_expr'],
+            'pedmar4' => $lexos['pedmar4'],
             'date4' => $date4,
             'status4' => $status4,
             'msg4' => $msg4,
             'mkt4' => $mkt4,
-            'status5' => $status5,
-            'msg5' => $msg5,
-            'seq5' => $seq5,
-            'join_sql' => implode(' AND ', $joinParts),
-            'has_sc5' => $hasSc5,
+            'sc5_match_cond' => $lexos['sc5_match_cond'],
+            'sc5_apply_sql' => $lexos['sc5_apply_sql'],
+            'za5_apply_sql' => $lexos['za5_apply_sql'],
+            'recno' => $this->pickColumn($za4Cols, ['R_E_C_N_O_']) ?? 'R_E_C_N_O_',
+            'has_sc5' => $lexos['has_sc5'],
+            'has_za5' => $lexos['has_za5'],
+            'client_nome' => $lexos['client_nome'],
+            'client_cgc' => $lexos['client_cgc'],
             'notes' => $notes,
         ];
 
         return $this->schema;
     }
 
-    private function selectSql(array $schema): string
+    /**
+     * SELECT enriquecido (SC5/ZA5) apos paginar ZA4 — evita scan completo com joins.
+     */
+    private function selectEnrichedSql(array $schema): string
     {
         $dateExpr = $schema['date4'] !== null
             ? "SUBSTRING(ZA4.{$schema['date4']}, 7, 2) + '/' +
@@ -296,28 +278,21 @@ class ProtheusZa4PedidosErroMonitorService
                 SUBSTRING(ZA4.{$schema['date4']}, 1, 4)"
             : "''";
 
-        $idlexo = 'RTRIM(ZA4.' . $schema['idlexo4'] . ')';
+        $idlexo = $schema['idlexo_expr'];
         $pedMarExpr = $this->pedMarExpr($schema);
         $mktExpr = $schema['mkt4'] !== null
             ? 'RTRIM(ZA4.' . $schema['mkt4'] . ')'
             : ($schema['has_sc5'] ? 'RTRIM(SC5.C5_ZMAKET)' : "''");
         $statusExpr = $schema['status4'] !== null
             ? 'RTRIM(ZA4.' . $schema['status4'] . ')'
-            : ($schema['status5'] !== null ? 'RTRIM(ZA5.' . $schema['status5'] . ')' : "''");
-        $msgZa4 = $schema['msg4'] !== null ? 'RTRIM(ZA4.' . $schema['msg4'] . ')' : "''";
-        $msgZa5 = $schema['msg5'] !== null
-            ? 'LEFT(CAST(ZA5.' . $schema['msg5'] . " AS VARCHAR(4000)), 500)"
             : "''";
-        $seqExpr = $schema['seq5'] !== null ? 'RTRIM(ZA5.' . $schema['seq5'] . ')' : "''";
-
-        $sc5Join = '';
-        if ($schema['has_sc5']) {
-            $sc5Join = "
-LEFT JOIN SC5010 SC5
-    ON SC5.C5_FILIAL = ZA4.ZA4_FILIAL
-    AND RTRIM(SC5.C5_ZIDLEX) = RTRIM(ZA4.{$schema['idlexo4']})
-    AND " . self::deletedFlagSql('SC5');
-        }
+        $msgZa4 = $schema['msg4'] !== null ? 'RTRIM(ZA4.' . $schema['msg4'] . ')' : "''";
+        $clienteExpr = $schema['has_za5'] && $schema['client_nome'] !== null
+            ? 'RTRIM(ZA5.' . $schema['client_nome'] . ')'
+            : "''";
+        $cgcExpr = $schema['has_za5'] && $schema['client_cgc'] !== null
+            ? 'RTRIM(ZA5.' . $schema['client_cgc'] . ')'
+            : "''";
 
         return <<<SQL
 SELECT
@@ -328,13 +303,11 @@ SELECT
     {$mktExpr} AS MARKETPLACE,
     {$statusExpr} AS STATUS_PED,
     {$msgZa4} AS MSG_ERRO,
-    {$msgZa5} AS DETALHE_ZA5,
-    {$seqExpr} AS SEQ_ZA5
-FROM ZA4010 ZA4
-INNER JOIN ZA5010 ZA5
-    ON {$schema['join_sql']}
-    AND {$this->deletedFlagSql('ZA5')}
-{$sc5Join}
+    {$clienteExpr} AS CLIENTE,
+    {$cgcExpr} AS CPF_CNPJ
+FROM {$this->tblZa4()}
+{$schema['sc5_apply_sql']}
+{$schema['za5_apply_sql']}
 SQL;
     }
 
@@ -355,10 +328,12 @@ SQL;
     }
 
     /**
+     * Filtros apenas em ZA4 (+ EXISTS em SC5 quando necessario). Sem JOIN/APPLY — rapido para COUNT e paginacao.
+     *
      * @param array<string, mixed> $schema
      * @param array<string, mixed> $params
      */
-    private function filterSql(array $schema, array $params, bool $somenteErro): string
+    private function za4FilterSql(array $schema, array $params, bool $somenteErro): string
     {
         $sql = '
 WHERE ' . $this->deletedFlagSql('ZA4') . '
@@ -370,22 +345,39 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
         }
 
         if (isset($params[':idlexo'])) {
-            $sql .= "
-    AND RTRIM(ZA4.{$schema['idlexo4']}) LIKE :idlexo";
+            $idlexoParts = [];
+            if ($schema['idlexo4'] !== null) {
+                $idlexoParts[] = 'RTRIM(ZA4.' . $schema['idlexo4'] . ') LIKE :idlexo';
+            }
+            $exists = $this->sc5ExistsSql($schema, 'AND RTRIM(SC5.C5_ZIDLEX) LIKE :idlexo');
+            if ($exists !== '') {
+                $idlexoParts[] = $exists;
+            }
+            if ($idlexoParts !== []) {
+                $sql .= '
+    AND (' . implode(' OR ', $idlexoParts) . ')';
+            }
         }
 
         if (isset($params[':ped_mar'])) {
-            $sql .= '
-    AND ' . $this->pedMarExpr($schema) . ' LIKE :ped_mar';
+            $pedParts = [];
+            if ($schema['pedmar4'] !== null) {
+                $pedParts[] = 'RTRIM(ZA4.' . $schema['pedmar4'] . ') LIKE :ped_mar';
+            }
+            $exists = $this->sc5ExistsSql($schema, 'AND RTRIM(SC5.C5_PEDMAR) LIKE :ped_mar');
+            if ($exists !== '') {
+                $pedParts[] = $exists;
+            }
+            if ($pedParts !== []) {
+                $sql .= '
+    AND (' . implode(' OR ', $pedParts) . ')';
+            }
         }
 
         if (isset($params[':texto_erro'])) {
             $erroParts = [];
             if ($schema['msg4'] !== null) {
                 $erroParts[] = 'RTRIM(ZA4.' . $schema['msg4'] . ') LIKE :texto_erro';
-            }
-            if ($schema['msg5'] !== null) {
-                $erroParts[] = 'CAST(ZA5.' . $schema['msg5'] . ' AS VARCHAR(4000)) LIKE :texto_erro';
             }
             if ($schema['status4'] !== null) {
                 $erroParts[] = 'RTRIM(ZA4.' . $schema['status4'] . ') LIKE :texto_erro';
@@ -401,6 +393,22 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
         return $sql;
     }
 
+    private function sc5ExistsSql(array $schema, string $andExtra = ''): string
+    {
+        if (!$schema['has_sc5']) {
+            return '';
+        }
+
+        return 'EXISTS (
+    SELECT 1
+    FROM ' . ProtheusSqlHelper::tbl('SC5010', 'SC5') . '
+    WHERE SC5.C5_FILIAL = ZA4.ZA4_FILIAL
+        AND ' . self::deletedFlagSql('SC5') . '
+        AND ' . $schema['sc5_match_cond'] . '
+        ' . $andExtra . '
+)';
+    }
+
     private function sqlSomenteErro(array $schema, bool $somenteErro): string
     {
         if (!$somenteErro) {
@@ -412,15 +420,8 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
             $col = $schema['status4'];
             $parts[] = "UPPER(RTRIM(ISNULL(ZA4.{$col}, ''))) IN ('E','ER','ERR','2','ERRO','F','FALHA','X')";
         }
-        if ($schema['status5'] !== null) {
-            $col = $schema['status5'];
-            $parts[] = "UPPER(RTRIM(ISNULL(ZA5.{$col}, ''))) IN ('E','ER','ERR','2','ERRO','F','FALHA','X')";
-        }
         if ($schema['msg4'] !== null) {
             $parts[] = 'RTRIM(ISNULL(ZA4.' . $schema['msg4'] . ", '')) <> ''";
-        }
-        if ($schema['msg5'] !== null) {
-            $parts[] = 'RTRIM(ISNULL(CAST(ZA5.' . $schema['msg5'] . " AS VARCHAR(4000)), '')) <> ''";
         }
 
         if ($parts === []) {
@@ -431,13 +432,34 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
     AND (' . implode(' OR ', $parts) . ')';
     }
 
-    private function orderSql(array $schema): string
+    /** Ordenacao so em colunas ZA4 (paginacao antes dos joins). */
+    private function orderSqlZa4(array $schema): string
     {
+        $parts = [];
         if ($schema['date4'] !== null) {
-            return " ORDER BY ZA4.{$schema['date4']} DESC, ZA4.{$schema['idlexo4']} DESC";
+            $parts[] = 'ZA4.' . $schema['date4'] . ' DESC';
+        }
+        if ($schema['idlexo4'] !== null) {
+            $parts[] = 'ZA4.' . $schema['idlexo4'] . ' DESC';
+        } elseif ($schema['pedmar4'] !== null) {
+            $parts[] = 'ZA4.' . $schema['pedmar4'] . ' DESC';
+        } else {
+            $parts[] = 'ZA4.' . $schema['recno'] . ' DESC';
         }
 
-        return ' ORDER BY ZA4.' . $schema['idlexo4'] . ' DESC';
+        return ' ORDER BY ' . implode(', ', $parts);
+    }
+
+    private function applyQueryTimeout(PDO $pdo): void
+    {
+        if (defined('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')) {
+            $pdo->setAttribute(PDO::SQLSRV_ATTR_QUERY_TIMEOUT, self::QUERY_TIMEOUT_SEC);
+        }
+    }
+
+    private function tblZa4(): string
+    {
+        return ProtheusSqlHelper::tbl('ZA4010', 'ZA4');
     }
 
     /**
@@ -482,18 +504,8 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
      */
     private function fetchTotal(PDO $pdo, array $schema, array $params, bool $somenteErro): int
     {
-        $sql = 'SELECT COUNT(1) AS total FROM ZA4010 ZA4
-INNER JOIN ZA5010 ZA5 ON ' . $schema['join_sql'] . ' AND ' . $this->deletedFlagSql('ZA5');
-
-        if ($schema['has_sc5']) {
-            $sql .= '
-LEFT JOIN SC5010 SC5
-    ON SC5.C5_FILIAL = ZA4.ZA4_FILIAL
-    AND RTRIM(SC5.C5_ZIDLEX) = RTRIM(ZA4.' . $schema['idlexo4'] . ')
-    AND ' . self::deletedFlagSql('SC5');
-        }
-
-        $sql .= $this->filterSql($schema, $params, $somenteErro);
+        $sql = 'SELECT COUNT(1) AS total FROM ' . $this->tblZa4()
+            . $this->za4FilterSql($schema, $params, $somenteErro);
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
@@ -515,10 +527,17 @@ LEFT JOIN SC5010 SC5
         int $offset,
         int $limit
     ): array {
-        $sql = $this->selectSql($schema)
-            . $this->filterSql($schema, $params, $somenteErro)
-            . $this->orderSql($schema)
-            . ' OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY';
+        $recno = $schema['recno'];
+        $sql = ';WITH pg AS (
+    SELECT ZA4.' . $recno . ' AS recno
+    FROM ' . $this->tblZa4()
+            . $this->za4FilterSql($schema, $params, $somenteErro)
+            . $this->orderSqlZa4($schema)
+            . '
+    OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+)
+' . $this->selectEnrichedSql($schema) . '
+INNER JOIN pg ON pg.recno = ZA4.' . $recno;
 
         $stmt = $pdo->prepare($sql);
         foreach ($params as $key => $value) {

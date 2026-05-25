@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Repositories\ProtheusSettingsRepository;
+
 $feedback = null;
 $feedbackClass = 'ok';
 $settings = $app['protheusSettingsRepository']->getSettings();
@@ -19,6 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'port' => (string) ($_POST['port'] ?? '1433'),
                 'username' => (string) ($_POST['username'] ?? ''),
                 'password' => (string) ($_POST['password'] ?? ''),
+                'data_corte' => (string) ($_POST['data_corte'] ?? ProtheusSettingsRepository::DEFAULT_DATA_CORTE),
             ]);
             $settings = $app['protheusSettingsRepository']->getSettings();
             $feedback = 'Configuracao Protheus salva.';
@@ -52,6 +55,7 @@ $host = (string) ($settings['host'] ?? '');
 $databaseName = (string) ($settings['database_name'] ?? '');
 $port = (string) ($settings['port'] ?? '1433');
 $username = (string) ($settings['username'] ?? '');
+$dataCorte = ProtheusSettingsRepository::resolveDataCorte($settings);
 ?>
 <section class="card">
     <h1>Config Protheus</h1>
@@ -81,6 +85,12 @@ $username = (string) ($settings['username'] ?? '');
 
         <label>Senha</label>
         <input type="password" name="password" value="" autocomplete="current-password" placeholder="<?= $settings ? 'Deixe em branco para manter a senha salva' : 'Obrigatoria na primeira vez' ?>">
+
+        <label>Data de corte</label>
+        <input type="date" name="data_corte" value="<?= htmlspecialchars($dataCorte) ?>" required>
+        <p class="hint" style="margin:-6px 0 14px 0;font-size:.9rem;color:#64748b;">
+            Pedidos com emissao anterior a esta data nao entram no <strong>Monitor de Pedidos</strong> (padrao: 01/04/2026).
+        </p>
 
         <button type="submit"<?= $driverAvailable ? '' : ' disabled' ?>>Salvar configuracao</button>
     </form>

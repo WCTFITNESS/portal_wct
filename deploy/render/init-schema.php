@@ -42,11 +42,14 @@ if (!is_file($schemaFile)) {
 if ($driver === 'mysql') {
     try {
         $adminDsn = sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $host, $port);
-        $adminPdo = new \PDO($adminDsn, $user, $pass, [
+        $adminOptions = [
             \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
             \PDO::ATTR_TIMEOUT => 15,
-            \PDO::MYSQL_ATTR_CONNECT_TIMEOUT => 10,
-        ]);
+        ];
+        if (defined('PDO::MYSQL_ATTR_CONNECT_TIMEOUT')) {
+            $adminOptions[\PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 10;
+        }
+        $adminPdo = new \PDO($adminDsn, $user, $pass, $adminOptions);
         $adminPdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
     } catch (\PDOException $e) {
         fwrite(STDERR, "[init-schema] Falha ao criar/verificar database: {$e->getMessage()}\n");

@@ -364,7 +364,7 @@ SQL;
       $sefazJoin = <<<SQL
 OUTER APPLY (
     SELECT TOP 1 SPED.*
-    FROM {$table} SPED
+    FROM {$table} SPED WITH (NOLOCK)
     WHERE SPED.D_E_L_E_T_ = ' '
         AND {$joinWhere}
     ORDER BY SPED.R_E_C_N_O_ DESC
@@ -377,6 +377,10 @@ SQL;
 SQL;
       $sefazJoin = '';
     }
+
+    $sf2 = ProtheusSqlHelper::tbl('SF2010', 'SF2');
+    $sc5 = ProtheusSqlHelper::tbl('SC5010', 'SC5');
+    $sa1 = ProtheusSqlHelper::tbl('SA1010', 'SA1');
 
     return <<<SQL
 SELECT
@@ -396,13 +400,13 @@ SELECT
     SC5.C5_PEDMAR AS PED_Marketplace,
     SC5.C5_ZMAKET AS Marketplace,
     SC5.C5_ZIDLEX AS IDLEXOS
-FROM SF2010 SF2
-LEFT JOIN SC5010 SC5
+FROM {$sf2}
+LEFT JOIN {$sc5}
     ON SC5.C5_FILIAL = SF2.F2_FILIAL
     AND SC5.C5_NOTA = SF2.F2_DOC
     AND SC5.C5_SERIE = SF2.F2_SERIE
     AND SC5.D_E_L_E_T_ = ' '
-LEFT JOIN SA1010 SA1
+LEFT JOIN {$sa1}
     ON RTRIM(SA1.A1_COD) = RTRIM(SF2.F2_CLIENTE)
     AND RTRIM(SA1.A1_LOJA) = RTRIM(SF2.F2_LOJA)
     AND (

@@ -16,8 +16,19 @@ Desktop.ini
 storage/exports/
 storage/repasse_mp_jobs/
 
+# Tokens OAuth gerados pelo script docs/mercado_livre_oauth.py
+ml_tokens.json
+docs/ml_tokens.json
+
 # Docker stack local (senhas / URLs)
 deploy/.env
 
 # Gerado no container (/ deploy/render/bake-db-runtime.php)
 config/db-runtime.php
+
+# Ferramentas locais (build PyInstaller / cache)
+tools/pdf_mesclador/build/
+tools/pdf_mesclador/dist/
+tools/pdf_mesclador/__pycache__/
+docs/__pycache__/
+docs.zip
