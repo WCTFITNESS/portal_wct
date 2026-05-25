@@ -16,6 +16,54 @@ class MlAdsReportService
     /** @var list<string> */
     private const CLASSICO_LISTING_TYPES = ['gold_special', 'silver', 'bronze', 'free'];
 
+    /** Colunas do Excel (ordem fixa). */
+    private const EXCEL_HEADERS = [
+        'MLB',
+        'Titulo',
+        'Data Criacao',
+        'Data Atualizacao',
+        'Data Inicio',
+        'Data Termino',
+        'Status',
+        'Substatus',
+        'Condicao',
+        'SKU',
+        'Preco De',
+        'Preco Por',
+        'Moeda',
+        'Modo Compra',
+        'Tipo Anuncio',
+        'listing_type_id',
+        'Categoria ID',
+        'Catalog Product ID',
+        'Site ID',
+        'Permalink',
+        'Full',
+        'Modo Envio',
+        'Tipo Logistica',
+        'Frete',
+        'Frete Gratis',
+        'Retira Loja',
+        'Envio Local',
+        'Estoque Disponivel',
+        'Vendidos',
+        'Qtd Inicial',
+        'Peso kg',
+        'Altura cm',
+        'Largura cm',
+        'Comprimento cm',
+        'Aceita Mercado Pago',
+        'Tags',
+        'Qtd Variacoes',
+        'Qtd Fotos',
+        'Garantia',
+        'Video ID',
+        'Item Pai',
+        'Marca',
+        'Modelo',
+        'EAN/GTIN',
+    ];
+
     public function __construct(
         private TokenService $tokenService,
         private MercadoLivreClient $client,
@@ -59,30 +107,7 @@ class MlAdsReportService
 
         $items = $this->fetchItemsInBatch($itemIds, $accessToken);
 
-        $header = [
-            'MLB',
-            'Titulo',
-            'Preco De',
-            'Preco Por',
-            'Modo',
-            'Full',
-            'Status',
-            'SKU',
-            'Custo',
-            'Frete',
-            'Frete Gratis',
-            'Estoque',
-            'Vendas',
-            'Visitas',
-            'Peso',
-            'Altura',
-            'Largura',
-            'Comprimento',
-            'tipo',
-            'listing_type_id',
-        ];
-
-        $rows = [$header];
+        $rows = [self::EXCEL_HEADERS];
         $preview = [];
         $matchedRows = 0;
         $countByTipo = ['Premium' => 0, 'Classico' => 0, 'Outros' => 0];
@@ -115,47 +140,13 @@ class MlAdsReportService
                 $countByTipo['Outros']++;
             }
 
-            $dimensions = $this->extractDimensions($item, $shipping);
-            $row = [
-                (string) ($item['id'] ?? ''),
-                (string) ($item['title'] ?? ''),
-                (string) ($item['original_price'] ?? ''),
-                (string) ($item['price'] ?? ''),
-                (string) ($shipping['mode'] ?? ''),
-                ((string) ($shipping['logistic_type'] ?? '') === 'fulfillment') ? 'SIM' : 'NAO',
-                (string) ($item['status'] ?? ''),
-                $sku,
-                '',
-                (string) ($shipping['cost'] ?? ''),
-                !empty($shipping['free_shipping']) ? 'sim' : 'nao',
-                (string) ($item['available_quantity'] ?? ''),
-                (string) ($item['sold_quantity'] ?? ''),
-                (string) ($item['initial_quantity'] ?? ''),
-                $dimensions['peso'],
-                $dimensions['altura'],
-                $dimensions['largura'],
-                $dimensions['comprimento'],
-                $typeLabel,
-                $listingTypeId,
-            ];
-            $rows[] = $row;
-            $preview[] = [
-                'mlb' => (string) ($item['id'] ?? ''),
-                'titulo' => (string) ($item['title'] ?? ''),
-                'preco_de' => (string) ($item['original_price'] ?? ''),
-                'preco_por' => (string) ($item['price'] ?? ''),
-                'status' => (string) ($item['status'] ?? ''),
-                'sku' => $sku,
-                'tipo' => $typeLabel,
-                'listing_type_id' => $listingTypeId,
-                'full' => ((string) ($shipping['logistic_type'] ?? '') === 'fulfillment') ? 'SIM' : 'NAO',
-                'estoque' => (string) ($item['available_quantity'] ?? ''),
-                'vendas' => (string) ($item['sold_quantity'] ?? ''),
-            ];
+            $fields = $this->buildItemFields($item, $shipping, $sku, $typeLabel, $listingTypeId);
+            $rows[] = $this->fieldsToExcelRow($fields);
+            $preview[] = $this->fieldsToPreview($fields);
         }
 
         return [
-            'header' => $header,
+            'header' => self::EXCEL_HEADERS,
             'rows' => $rows,
             'preview' => $preview,
             'total_ids' => count($itemIds),
@@ -311,6 +302,241 @@ class MlAdsReportService
         }
 
         return $items;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @param array<string, mixed> $shipping
+     * @return array<string, string>
+     */
+    private function buildItemFields(
+        array $item,
+        array $shipping,
+        string $sku,
+        string $typeLabel,
+        string $listingTypeId
+    ): array {
+        $dimensions = $this->extractDimensions($item, $shipping);
+        $brandModel = $this->extractAttributeValues($item, ['BRAND', 'MODEL', 'GTIN', 'EAN']);
+
+        return [
+            'MLB' => (string) ($item['id'] ?? ''),
+            'Titulo' => (string) ($item['title'] ?? ''),
+            'Data Criacao' => $this->formatApiDateTime($item['date_created'] ?? null),
+            'Data Atualizacao' => $this->formatApiDateTime($item['last_updated'] ?? null),
+            'Data Inicio' => $this->formatApiDateTime($item['start_time'] ?? null),
+            'Data Termino' => $this->formatApiDateTime($item['stop_time'] ?? null),
+            'Status' => (string) ($item['status'] ?? ''),
+            'Substatus' => $this->formatSubStatus($item['sub_status'] ?? null),
+            'Condicao' => (string) ($item['condition'] ?? ''),
+            'SKU' => $sku,
+            'Preco De' => $this->formatMoney($item['original_price'] ?? null),
+            'Preco Por' => $this->formatMoney($item['price'] ?? null),
+            'Moeda' => (string) ($item['currency_id'] ?? ''),
+            'Modo Compra' => (string) ($item['buying_mode'] ?? ''),
+            'Tipo Anuncio' => $typeLabel,
+            'listing_type_id' => $listingTypeId,
+            'Categoria ID' => (string) ($item['category_id'] ?? ''),
+            'Catalog Product ID' => (string) ($item['catalog_product_id'] ?? ''),
+            'Site ID' => (string) ($item['site_id'] ?? ''),
+            'Permalink' => (string) ($item['permalink'] ?? ''),
+            'Full' => ((string) ($shipping['logistic_type'] ?? '') === 'fulfillment') ? 'SIM' : 'NAO',
+            'Modo Envio' => (string) ($shipping['mode'] ?? ''),
+            'Tipo Logistica' => (string) ($shipping['logistic_type'] ?? ''),
+            'Frete' => $this->formatMoney($shipping['cost'] ?? null),
+            'Frete Gratis' => $this->formatBool($shipping['free_shipping'] ?? false),
+            'Retira Loja' => $this->formatBool($shipping['store_pick_up'] ?? false),
+            'Envio Local' => $this->formatBool($shipping['local_pick_up'] ?? false),
+            'Estoque Disponivel' => (string) ($item['available_quantity'] ?? ''),
+            'Vendidos' => (string) ($item['sold_quantity'] ?? ''),
+            'Qtd Inicial' => (string) ($item['initial_quantity'] ?? ''),
+            'Peso kg' => $dimensions['peso'],
+            'Altura cm' => $dimensions['altura'],
+            'Largura cm' => $dimensions['largura'],
+            'Comprimento cm' => $dimensions['comprimento'],
+            'Aceita Mercado Pago' => $this->formatBool($item['accepts_mercadopago'] ?? false),
+            'Tags' => $this->formatTags($item['tags'] ?? null),
+            'Qtd Variacoes' => (string) $this->countVariations($item),
+            'Qtd Fotos' => (string) $this->countPictures($item),
+            'Garantia' => (string) ($item['warranty'] ?? ''),
+            'Video ID' => (string) ($item['video_id'] ?? ''),
+            'Item Pai' => (string) ($item['parent_item_id'] ?? ''),
+            'Marca' => $brandModel['BRAND'] ?? '',
+            'Modelo' => $brandModel['MODEL'] ?? '',
+            'EAN/GTIN' => $brandModel['GTIN'] ?? $brandModel['EAN'] ?? '',
+        ];
+    }
+
+    /**
+     * @param array<string, string> $fields
+     * @return list<string>
+     */
+    private function fieldsToExcelRow(array $fields): array
+    {
+        $row = [];
+        foreach (self::EXCEL_HEADERS as $header) {
+            $row[] = (string) ($fields[$header] ?? '');
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<string, string> $fields
+     * @return array<string, string>
+     */
+    private function fieldsToPreview(array $fields): array
+    {
+        return [
+            'mlb' => $fields['MLB'],
+            'titulo' => $fields['Titulo'],
+            'data_criacao' => $fields['Data Criacao'],
+            'data_atualizacao' => $fields['Data Atualizacao'],
+            'data_inicio' => $fields['Data Inicio'],
+            'data_termino' => $fields['Data Termino'],
+            'status' => $fields['Status'],
+            'substatus' => $fields['Substatus'],
+            'condicao' => $fields['Condicao'],
+            'sku' => $fields['SKU'],
+            'preco_de' => $fields['Preco De'],
+            'preco_por' => $fields['Preco Por'],
+            'moeda' => $fields['Moeda'],
+            'modo_compra' => $fields['Modo Compra'],
+            'tipo' => $fields['Tipo Anuncio'],
+            'listing_type_id' => $fields['listing_type_id'],
+            'categoria_id' => $fields['Categoria ID'],
+            'catalog_product_id' => $fields['Catalog Product ID'],
+            'permalink' => $fields['Permalink'],
+            'full' => $fields['Full'],
+            'modo_envio' => $fields['Modo Envio'],
+            'tipo_logistica' => $fields['Tipo Logistica'],
+            'frete' => $fields['Frete'],
+            'frete_gratis' => $fields['Frete Gratis'],
+            'estoque' => $fields['Estoque Disponivel'],
+            'vendas' => $fields['Vendidos'],
+            'qtd_inicial' => $fields['Qtd Inicial'],
+            'tags' => $fields['Tags'],
+            'variacoes' => $fields['Qtd Variacoes'],
+            'fotos' => $fields['Qtd Fotos'],
+            'garantia' => $fields['Garantia'],
+            'marca' => $fields['Marca'],
+            'modelo' => $fields['Modelo'],
+            'ean' => $fields['EAN/GTIN'],
+        ];
+    }
+
+    private function formatApiDateTime(mixed $value): string
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return '';
+        }
+        try {
+            $dt = new \DateTimeImmutable($raw);
+        } catch (\Throwable) {
+            return $raw;
+        }
+
+        return $dt->format('d/m/Y H:i');
+    }
+
+    private function formatMoney(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+        if (is_numeric($value)) {
+            return number_format((float) $value, 2, ',', '.');
+        }
+
+        return (string) $value;
+    }
+
+    private function formatBool(mixed $value): string
+    {
+        return !empty($value) ? 'sim' : 'nao';
+    }
+
+    private function formatSubStatus(mixed $subStatus): string
+    {
+        if (!is_array($subStatus)) {
+            return '';
+        }
+        $parts = [];
+        foreach ($subStatus as $entry) {
+            if (is_string($entry) && trim($entry) !== '') {
+                $parts[] = trim($entry);
+            }
+        }
+
+        return implode(', ', $parts);
+    }
+
+    private function formatTags(mixed $tags): string
+    {
+        if (!is_array($tags)) {
+            return '';
+        }
+        $parts = [];
+        foreach ($tags as $tag) {
+            if (is_string($tag) && trim($tag) !== '') {
+                $parts[] = trim($tag);
+            }
+        }
+
+        return implode(', ', $parts);
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @param list<string> $ids
+     * @return array<string, string>
+     */
+    private function extractAttributeValues(array $item, array $ids): array
+    {
+        $wanted = [];
+        foreach ($ids as $id) {
+            $wanted[strtoupper($id)] = '';
+        }
+        $attrs = $item['attributes'] ?? [];
+        if (!is_array($attrs)) {
+            return $wanted;
+        }
+        foreach ($attrs as $attr) {
+            if (!is_array($attr)) {
+                continue;
+            }
+            $attrId = strtoupper((string) ($attr['id'] ?? ''));
+            if (!array_key_exists($attrId, $wanted)) {
+                continue;
+            }
+            $value = trim((string) ($attr['value_name'] ?? $attr['value_id'] ?? ''));
+            if ($value !== '') {
+                $wanted[$attrId] = $value;
+            }
+        }
+
+        return $wanted;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    private function countVariations(array $item): int
+    {
+        $variations = $item['variations'] ?? null;
+
+        return is_array($variations) ? count($variations) : 0;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    private function countPictures(array $item): int
+    {
+        $pictures = $item['pictures'] ?? null;
+
+        return is_array($pictures) ? count($pictures) : 0;
     }
 
     private function exportDirectory(): string

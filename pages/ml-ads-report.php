@@ -109,6 +109,9 @@ $canExport = is_array($summary) && $previewTotal > 0;
 <section class="card protheus-monitor-card">
     <h1>Relatorio de Anuncios ML</h1>
     <p>Lista anuncios da conta vendedora no Mercado Livre. Filtre, visualize na tabela e exporte para Excel.</p>
+    <p style="font-size:.85rem;color:#64748b;margin:0 0 8px;">
+        A tela mostra os principais campos; o Excel traz o relatorio completo (datas, envio, dimensoes, tags, marca, garantia, etc.).
+    </p>
 
     <div class="protheus-legend">
         <span class="legend-item legend-tipo-premium">Premium (gold_pro)</span>
@@ -187,15 +190,24 @@ $canExport = is_array($summary) && $previewTotal > 0;
                     <tr>
                         <th>MLB</th>
                         <th>Titulo</th>
-                        <th>Preco De</th>
-                        <th>Preco Por</th>
+                        <th>Criacao</th>
+                        <th>Atualizacao</th>
+                        <th>Inicio</th>
                         <th>Status</th>
+                        <th>Condicao</th>
                         <th>SKU</th>
                         <th>Tipo</th>
-                        <th>listing_type_id</th>
+                        <th>Preco De</th>
+                        <th>Preco Por</th>
+                        <th>Categoria</th>
+                        <th>Modo compra</th>
                         <th>Full</th>
+                        <th>Frete gratis</th>
                         <th>Estoque</th>
                         <th>Vendas</th>
+                        <th>Variacoes</th>
+                        <th>Marca</th>
+                        <th>Link</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -203,21 +215,35 @@ $canExport = is_array($summary) && $previewTotal > 0;
                         <?php
                         $tipoRow = (string) ($row['tipo'] ?? '');
                         $rowClass = ml_ads_row_class($tipoRow);
+                        $permalink = trim((string) ($row['permalink'] ?? ''));
                         ?>
                         <tr class="<?= ml_ads_h($rowClass) ?>">
                             <td><?= ml_ads_h($row['mlb'] ?? '') ?></td>
                             <td class="cell-titulo" title="<?= ml_ads_h($row['titulo'] ?? '') ?>">
                                 <?= ml_ads_h($row['titulo'] ?? '') ?>
                             </td>
-                            <td><?= ml_ads_h($row['preco_de'] ?? '') ?></td>
-                            <td><?= ml_ads_h($row['preco_por'] ?? '') ?></td>
+                            <td class="cell-nowrap"><?= ml_ads_h($row['data_criacao'] ?? '') ?></td>
+                            <td class="cell-nowrap"><?= ml_ads_h($row['data_atualizacao'] ?? '') ?></td>
+                            <td class="cell-nowrap"><?= ml_ads_h($row['data_inicio'] ?? '') ?></td>
                             <td><?= ml_ads_h($row['status'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['condicao'] ?? '') ?></td>
                             <td><?= ml_ads_h($row['sku'] ?? '') ?></td>
                             <td><?= ml_ads_h($tipoRow) ?></td>
-                            <td><code class="cell-code"><?= ml_ads_h($row['listing_type_id'] ?? '') ?></code></td>
+                            <td><?= ml_ads_h($row['preco_de'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['preco_por'] ?? '') ?></td>
+                            <td><code class="cell-code"><?= ml_ads_h($row['categoria_id'] ?? '') ?></code></td>
+                            <td><?= ml_ads_h($row['modo_compra'] ?? '') ?></td>
                             <td><?= ml_ads_h($row['full'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['frete_gratis'] ?? '') ?></td>
                             <td><?= ml_ads_h($row['estoque'] ?? '') ?></td>
                             <td><?= ml_ads_h($row['vendas'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['variacoes'] ?? '') ?></td>
+                            <td><?= ml_ads_h($row['marca'] ?? '') ?></td>
+                            <td class="cell-link">
+                                <?php if ($permalink !== ''): ?>
+                                    <a href="<?= ml_ads_h($permalink) ?>" target="_blank" rel="noopener">Abrir</a>
+                                <?php endif; ?>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -227,7 +253,7 @@ $canExport = is_array($summary) && $previewTotal > 0;
         <div class="table-wrap">
             <table class="protheus-table">
                 <tbody>
-                    <tr><td colspan="11">Nenhum registro com os filtros informados.</td></tr>
+                    <tr><td colspan="20">Nenhum registro com os filtros informados.</td></tr>
                 </tbody>
             </table>
         </div>
@@ -250,5 +276,18 @@ $canExport = is_array($summary) && $previewTotal > 0;
         background: #f1f5f9;
         padding: 1px 4px;
         border-radius: 3px;
+    }
+    .protheus-table .cell-nowrap {
+        white-space: nowrap;
+        font-size: .72rem;
+    }
+    .protheus-table .cell-link a {
+        color: #1d4ed8;
+        font-weight: bold;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .protheus-table .cell-link a:hover {
+        text-decoration: underline;
     }
 </style>
