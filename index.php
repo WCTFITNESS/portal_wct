@@ -738,6 +738,127 @@ if (
             margin-top: 10px;
             padding: 12px 14px;
         }
+        body.page-protheus-monitor-full .protheus-monitor-card {
+            width: 100%;
+            max-width: 100%;
+        }
+        body.page-protheus-monitor-full .protheus-monitor-card h1 {
+            font-size: 1.25rem;
+            margin-bottom: 8px;
+        }
+        body.page-protheus-monitor-full .protheus-monitor-card > p {
+            margin: 0 0 8px 0;
+            font-size: .88rem;
+        }
+        body.page-protheus-monitor-full .protheus-legend {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        body.page-protheus-monitor-full .legend-item {
+            display: inline-block;
+            padding: 5px 9px;
+            border-radius: 6px;
+            font-size: .8rem;
+            font-weight: bold;
+        }
+        body.page-protheus-monitor-full .protheus-filters .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 10px 14px;
+            margin-top: 6px;
+            align-items: end;
+        }
+        body.page-protheus-monitor-full .protheus-filters label {
+            margin-top: 0;
+            font-weight: bold;
+            font-size: .85rem;
+        }
+        body.page-protheus-monitor-full .protheus-filters input,
+        body.page-protheus-monitor-full .protheus-filters select {
+            margin-top: 4px;
+        }
+        body.page-protheus-monitor-full .protheus-filters button {
+            margin-top: 0;
+            width: 100%;
+        }
+        body.page-protheus-monitor-full .protheus-summary-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 12px 0 6px;
+        }
+        body.page-protheus-monitor-full .protheus-summary {
+            margin: 0;
+            color: var(--wct-muted);
+            font-size: .88rem;
+        }
+        body.page-protheus-monitor-full a.btn-export-xlsx,
+        body.page-protheus-monitor-full button.btn-export-xlsx-submit {
+            display: inline-block;
+            padding: 9px 14px;
+            border-radius: 6px;
+            border: 1px solid #f5b700;
+            background: #111111;
+            color: #f5b700;
+            font-weight: bold;
+            font-size: .78rem;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+            text-decoration: none;
+            white-space: nowrap;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        body.page-protheus-monitor-full a.btn-export-xlsx:hover,
+        body.page-protheus-monitor-full button.btn-export-xlsx-submit:hover:not(:disabled) {
+            background: #f5b700;
+            color: #111111;
+        }
+        body.page-protheus-monitor-full .table-wrap {
+            width: 100%;
+            max-width: 100%;
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid var(--wct-border);
+            border-radius: 6px;
+            margin-top: 6px;
+            max-height: min(70vh, 720px);
+        }
+        body.page-protheus-monitor-full .protheus-table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: collapse;
+            font-size: .78rem;
+            line-height: 1.35;
+        }
+        body.page-protheus-monitor-full .protheus-table th,
+        body.page-protheus-monitor-full .protheus-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #e8edf5;
+            text-align: left;
+            vertical-align: top;
+        }
+        body.page-protheus-monitor-full .protheus-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f1f5f9;
+            white-space: nowrap;
+            font-size: .75rem;
+            text-transform: uppercase;
+        }
+        body.page-protheus-monitor-full .protheus-table tbody tr:hover {
+            background: #f8fafc;
+        }
+        @media (max-width: 1100px) {
+            body.page-protheus-monitor-full .protheus-filters .filter-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
 
         @media (max-width: 920px) {
             .layout { display: block; }
