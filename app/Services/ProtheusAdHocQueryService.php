@@ -16,6 +16,9 @@ class ProtheusAdHocQueryService
     /** Marcador no historico para consultas coladas (SQL completo). */
     public const RAW_QUERY_MARKER = '__RAW__';
 
+    /** Marcador no historico / colunas para modo contagem no montador. */
+    public const COUNT_COLUMNS_MARKER = '__COUNT__';
+
     public const DEFAULT_TOP = 200;
 
     public const MAX_TOP = 2000;
@@ -51,16 +54,26 @@ class ProtheusAdHocQueryService
         string $columns = '*',
         int $top = self::DEFAULT_TOP,
         ?string $queryId = null,
-        string $orderBy = ''
+        string $orderBy = '',
+        bool $countOnly = false
     ): array {
         $tableSql = $this->validateTable($table);
         $whereSql = $this->validateWhereForTable($where, $tableSql);
-        $columnsSql = $this->validateColumnsForTable($columns, $tableSql);
         $orderBySql = $this->validateOrderByForTable($orderBy, $tableSql);
-        $top = max(1, min(self::MAX_TOP, $top));
+        $countOnly = $countOnly || strtoupper(trim($columns)) === self::COUNT_COLUMNS_MARKER;
+
+        if ($countOnly) {
+            $columnsSql = self::COUNT_COLUMNS_MARKER;
+            $top = 1;
+        } else {
+            $columnsSql = $this->validateColumnsForTable($columns, $tableSql);
+            $top = max(1, min(self::MAX_TOP, $top));
+        }
 
         $queryId = $this->normalizeQueryId($queryId ?? $this->newQueryId());
-        $sql = $this->buildSelectSql($tableSql, $columnsSql, $whereSql, $orderBySql, $top);
+        $sql = $countOnly
+            ? $this->buildCountSql($tableSql, $whereSql, $orderBySql)
+            : $this->buildSelectSql($tableSql, $columnsSql, $whereSql, $orderBySql, $top);
 
         $started = microtime(true);
         $pdo = $this->connectionService->connect();
@@ -89,7 +102,7 @@ class ProtheusAdHocQueryService
             'rows' => $this->normalizeRows($rows),
             'row_count' => count($rows),
             'elapsed_ms' => $elapsedMs,
-            'truncated' => count($rows) >= $top,
+            'truncated' => !$countOnly && count($rows) >= $top,
         ];
     }
 
@@ -191,9 +204,10 @@ class ProtheusAdHocQueryService
         string $where,
         string $columns = '*',
         int $top = self::DEFAULT_TOP,
-        string $orderBy = ''
+        string $orderBy = '',
+        bool $countOnly = false
     ): string {
-        $result = $this->runQuery($table, $where, $columns, $top, null, $orderBy);
+        $result = $this->runQuery($table, $where, $columns, $top, null, $orderBy, $countOnly);
         $cols = $result['columns'];
         $rows = $result['rows'];
 
@@ -959,7 +973,10 @@ class ProtheusAdHocQueryService
             }
         }
 
-        if (!preg_match('/\bTOP\s*(\(|\s+\d)/i', $normalized)) {
+        if (
+            !preg_match('/\bTOP\s*(\(|\s+\d)/i', $normalized)
+            && !$this->isAggregateOnlySelect($normalized)
+        ) {
             if (preg_match('/\bSELECT\b/i', $sql, $m, PREG_OFFSET_CAPTURE)) {
                 $pos = $m[0][1] + strlen($m[0][0]);
                 $sql = substr($sql, 0, $pos) . ' TOP (' . self::MAX_TOP . ')' . substr($sql, $pos);
@@ -967,6 +984,27 @@ class ProtheusAdHocQueryService
         }
 
         return trim($sql);
+    }
+
+    /**
+     * SELECT com unico agregado (COUNT, SUM, etc.) nao recebe TOP automatico.
+     */
+    private function isAggregateOnlySelect(string $normalized): bool
+    {
+        if (!preg_match('/^\s*(WITH\s+[\s\S]+?\s+)?SELECT\b/i', $normalized, $selectMatch, PREG_OFFSET_CAPTURE)) {
+            return false;
+        }
+
+        $afterSelect = $selectMatch[0][1] + strlen($selectMatch[0][0]);
+        if (!preg_match('/\bFROM\b/i', $normalized, $fromMatch, PREG_OFFSET_CAPTURE, $afterSelect)) {
+            return false;
+        }
+
+        $selectList = substr($normalized, $afterSelect, $fromMatch[0][1] - $afterSelect);
+        $selectList = preg_replace('/^\s*TOP\s*(\(\s*\d+\s*\)|\s+\d+)\s*/i', '', $selectList) ?? $selectList;
+        $selectList = trim($selectList);
+
+        return (bool) preg_match('/^(DISTINCT\s+)?(COUNT|SUM|AVG|MIN|MAX)\s*\(/i', $selectList);
     }
 
     private function stripSqlComments(string $sql): string
@@ -997,6 +1035,19 @@ class ProtheusAdHocQueryService
         int $top
     ): string {
         $sql = 'SELECT TOP (' . $top . ') ' . $columnsSql . '
+FROM ' . ProtheusSqlHelper::tbl($tableSql) . '
+WHERE ' . $whereSql;
+        if ($orderBySql !== '') {
+            $sql .= '
+ORDER BY ' . $orderBySql;
+        }
+
+        return $sql;
+    }
+
+    private function buildCountSql(string $tableSql, string $whereSql, string $orderBySql): string
+    {
+        $sql = 'SELECT COUNT(1) AS total
 FROM ' . ProtheusSqlHelper::tbl($tableSql) . '
 WHERE ' . $whereSql;
         if ($orderBySql !== '') {

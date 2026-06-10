@@ -34,9 +34,9 @@ python pdf_mesclador_gui.py
 2. Inclui essa nota no PDF unico.
 3. Procura **GUIA** (boleto) cujo **Nº Documento de Origem** = numero da nota (1 pagina por guia).
 4. Procura **COMPROVANTE** que casa com a guia:
-   - Na **guia**, le o **codigo de barras** / linha digitavel (numeros acima do codigo de barras grafico; remove espacos).
-   - No **comprovante**, le **Codigo de barras:** (remove espacos).
-   - Se forem iguais, inclui o comprovante. (Nao usa Chave NFe para esse vinculo.)
+   - Na **guia (GNRE/boleto)**, le a **linha digitavel** de 47–48 digitos acima do codigo de barras grafico (ex.: `85820000004 0 73790303261 2 ...`). **Ignora** a Chave NFe (44 digitos).
+   - No **comprovante**, le o campo **Codigo de barras:** (remove espacos).
+   - Se forem iguais, inclui o comprovante.
 5. Ordem no PDF: **NOTA → GUIA → COMPROVANTE**; depois a proxima nota.
 6. Tudo no **mesmo** PDF de saida.
 

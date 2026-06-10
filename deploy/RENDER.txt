@@ -46,6 +46,11 @@
    padrao "mysql". Defina PORTAL_DATABASE_URL (ou PORTAL_DB_* + PORTAL_DB_DRIVER); o
    docker-entrypoint gera config/db-runtime.php pelo PHP CLI (que sempre le as vars).
 
+   Se aparecer "SSL connection has been closed unexpectedly" no Postgres do Render:
+   o app ja usa sslmode=require por padrao. Confira se PORTAL_DATABASE_URL ou
+   DATABASE_URL apontam para o Postgres correto (credenciais/host atualizados no painel).
+   Opcional: PORTAL_DB_SSLMODE=require (padrao) ou prefer.
+
 6) Schema automatico:
    - Para PostgreSQL, o startup aplica database.pgsql.sql automaticamente.
    - Para MySQL, o startup aplica database.sql automaticamente.

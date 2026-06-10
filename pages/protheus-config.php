@@ -89,7 +89,7 @@ $dataCorte = ProtheusSettingsRepository::resolveDataCorte($settings);
         <label>Data de corte</label>
         <input type="date" name="data_corte" value="<?= htmlspecialchars($dataCorte) ?>" required>
         <p class="hint" style="margin:-6px 0 14px 0;font-size:.9rem;color:#64748b;">
-            Pedidos com emissao anterior a esta data nao entram no <strong>Monitor de Pedidos</strong> (padrao: 01/04/2026).
+            Pedidos com emissao anterior a esta data nao entram nos monitores <strong>Romaneio</strong> e <strong>Pedidos</strong> (padrao: 01/04/2026).
         </p>
 
         <button type="submit"<?= $driverAvailable ? '' : ' disabled' ?>>Salvar configuracao</button>

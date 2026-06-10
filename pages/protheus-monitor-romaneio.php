@@ -22,8 +22,12 @@ if ($emissaoDe < $dataCorte) {
 $page = max(1, (int) ($_GET['p'] ?? 1));
 $perPage = max(10, min(200, (int) ($_GET['per_page'] ?? 50)));
 $marketplace = trim((string) ($_GET['marketplace'] ?? ''));
+$filterDoc = trim((string) ($_GET['doc'] ?? ''));
+$filterPedMarketplace = trim((string) ($_GET['ped_marketplace'] ?? ''));
 
-$monitorService = $app['protheusMedidosMonitorService'];
+$monitorService = $app['protheusRomaneioMonitorService'];
+$parsedDocs = $monitorService->parseBatchFilter($filterDoc);
+$parsedPedidos = $monitorService->parseBatchFilter($filterPedMarketplace);
 $marketplaceOptions = [];
 
 if ($settings === null) {
@@ -38,13 +42,15 @@ if ($settings === null) {
         if ($marketplace !== '' && !in_array($marketplace, $marketplaceOptions, true)) {
             $marketplace = '';
         }
-        $result = $monitorService->listMedidos(
+        $result = $monitorService->listRomaneios(
             $filial,
             $emissaoDe,
             $emissaoAte,
             $page,
             $perPage,
-            $marketplace
+            $marketplace,
+            $filterDoc,
+            $filterPedMarketplace
         );
     } catch (Throwable $exception) {
         $feedback = 'Erro na consulta: ' . $exception->getMessage();
@@ -57,7 +63,7 @@ function protheus_monitor_query(array $overrides = []): string
     global $baseUrl, $filial, $emissaoDe, $emissaoAte, $perPage, $marketplace;
 
     $params = array_merge([
-        'page' => 'protheus-monitor-medidos',
+        'page' => 'protheus-monitor-romaneio',
         'filial' => $filial,
         'emissao_de' => $emissaoDe,
         'emissao_ate' => $emissaoAte,
@@ -78,7 +84,7 @@ $columns = $monitorService::exportColumns();
 $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAvailable();
 ?>
 <section class="card protheus-monitor-card">
-    <h1>Monitor de Pedidos</h1>
+    <h1>Monitor de Romaneio</h1>
     <p>Notas fiscais sem liberacao de romaneio (GW1_DTSAI / GW1_HRSAI vazios) com ID Lexos preenchido.</p>
     <p style="font-size:.9rem;color:#64748b;">
         Data de corte (config): <strong><?= htmlspecialchars(date('d/m/Y', strtotime($dataCorte))) ?></strong>
@@ -95,7 +101,7 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
     <?php endif; ?>
 
     <form method="get" class="protheus-filters">
-        <input type="hidden" name="page" value="protheus-monitor-medidos">
+        <input type="hidden" name="page" value="protheus-monitor-romaneio">
         <div class="filter-grid">
             <label>Filial
                 <input type="text" name="filial" value="<?= htmlspecialchars($filial) ?>" maxlength="4" required>
@@ -116,6 +122,14 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
                     <?php endforeach; ?>
                 </select>
             </label>
+            <label class="filter-span-2">Nº nota (Doc)
+                <input type="text" name="doc" value="<?= htmlspecialchars($filterDoc) ?>"
+                       placeholder="Ex.: 000123456, 000123457 (virgula)">
+            </label>
+            <label class="filter-span-2">Ped. marketplace
+                <input type="text" name="ped_marketplace" value="<?= htmlspecialchars($filterPedMarketplace) ?>"
+                       placeholder="Ex.: 2000016479266634, 2000016479266635">
+            </label>
             <label>Por pagina
                 <select name="per_page">
                     <?php foreach ([25, 50, 100, 200] as $opt): ?>
@@ -124,16 +138,27 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
                 </select>
             </label>
         </div>
+        <p class="filter-hint">Doc e Ped. marketplace aceitam consulta em lote: separe os valores por virgula (ate 100 por campo).</p>
         <button type="submit">Filtrar</button>
     </form>
 
     <?php if (is_array($result)): ?>
+        <?php
+        $rowsOnPage = count($result['rows']);
+        ?>
         <div class="protheus-summary-row">
             <p class="protheus-summary">
                 Total: <strong><?= (int) $result['total'] ?></strong>
+                | Nesta pagina: <strong><?= (int) $rowsOnPage ?></strong> linha(s)
                 | Pagina <strong><?= (int) $result['page'] ?></strong> de <strong><?= (int) $result['total_pages'] ?></strong>
                 <?php if ($marketplace !== ''): ?>
                     | Marketplace: <strong><?= htmlspecialchars($marketplace) ?></strong>
+                <?php endif; ?>
+                <?php if ($parsedDocs !== []): ?>
+                    | Doc: <strong><?= count($parsedDocs) ?></strong> nota(s)
+                <?php endif; ?>
+                <?php if ($parsedPedidos !== []): ?>
+                    | Ped. marketplace: <strong><?= count($parsedPedidos) ?></strong> pedido(s)
                 <?php endif; ?>
             </p>
             <?php if ($canExport): ?>
@@ -144,10 +169,33 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
             <?php endif; ?>
         </div>
 
+        <?php
+        $missingDocs = is_array($result['missing_docs'] ?? null) ? $result['missing_docs'] : [];
+        $missingPedidos = is_array($result['missing_pedidos'] ?? null) ? $result['missing_pedidos'] : [];
+        ?>
+        <?php if ($missingDocs !== [] || $missingPedidos !== []): ?>
+            <div class="batch-missing-alert">
+                <strong>Nao encontrados com os filtros atuais:</strong>
+                <?php if ($missingDocs !== []): ?>
+                    <p>
+                        <span class="batch-missing-label">Notas (<?= count($missingDocs) ?>):</span>
+                        <?= htmlspecialchars(implode(', ', $missingDocs)) ?>
+                    </p>
+                <?php endif; ?>
+                <?php if ($missingPedidos !== []): ?>
+                    <p>
+                        <span class="batch-missing-label">Pedidos marketplace (<?= count($missingPedidos) ?>):</span>
+                        <?= htmlspecialchars(implode(', ', $missingPedidos)) ?>
+                    </p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
         <div class="table-wrap">
             <table class="protheus-table">
                 <thead>
                     <tr>
+                        <th class="col-row-num" title="Linha nesta pagina">#</th>
                         <?php foreach ($columns as $label): ?>
                             <th><?= htmlspecialchars($label) ?></th>
                         <?php endforeach; ?>
@@ -155,14 +203,15 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
                 </thead>
                 <tbody>
                     <?php if ($result['rows'] === []): ?>
-                        <tr><td colspan="<?= count($columns) ?>">Nenhum registro nesta pagina.</td></tr>
+                        <tr><td colspan="<?= count($columns) + 1 ?>">Nenhum registro nesta pagina.</td></tr>
                     <?php else: ?>
-                        <?php foreach ($result['rows'] as $row): ?>
+                        <?php foreach ($result['rows'] as $rowIndex => $row): ?>
                             <?php
                             $row = is_array($row) ? $row : [];
                             $alertClass = $monitorService->rowAlertClass($row);
                             ?>
                             <tr class="<?= htmlspecialchars($alertClass) ?>">
+                                <td class="col-row-num"><?= (int) ($rowIndex + 1) ?></td>
                                 <?php foreach (array_keys($columns) as $key): ?>
                                     <td><?= $monitorService->displayCellHtml((string) $key, $row[$key] ?? null) ?></td>
                                 <?php endforeach; ?>
@@ -206,8 +255,15 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
         align-items: end;
     }
     .protheus-filters label { margin-top: 0; font-weight: bold; font-size: .85rem; }
-    .protheus-filters input, .protheus-filters select { margin-top: 4px; }
+    .protheus-filters label.filter-span-2 { grid-column: span 2; }
+    .protheus-filters input, .protheus-filters select { margin-top: 4px; width: 100%; }
     .protheus-filters button { margin-top: 0; }
+    .protheus-filters .filter-hint {
+        margin: 8px 0 0;
+        font-size: .8rem;
+        color: #64748b;
+        grid-column: 1 / -1;
+    }
     .protheus-summary-row {
         display: flex;
         flex-wrap: wrap;
@@ -217,6 +273,25 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
         margin: 12px 0 6px;
     }
     .protheus-summary { margin: 0; color: var(--wct-muted); font-size: .88rem; }
+    .batch-missing-alert {
+        margin: 10px 0 0;
+        padding: 10px 12px;
+        border-radius: 6px;
+        border: 1px solid #fca5a5;
+        background: #fef2f2;
+        color: #991b1b;
+        font-size: .85rem;
+    }
+    .batch-missing-alert p {
+        margin: 6px 0 0;
+        word-break: break-word;
+    }
+    .batch-missing-alert p:first-of-type {
+        margin-top: 8px;
+    }
+    .batch-missing-label {
+        font-weight: bold;
+    }
     a.btn-export-xlsx {
         display: inline-block;
         padding: 9px 14px;
@@ -267,6 +342,19 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
         font-size: .75rem;
         text-transform: uppercase;
         letter-spacing: .03em;
+    }
+    .protheus-table .col-row-num {
+        width: 2.5rem;
+        min-width: 2.5rem;
+        max-width: 2.5rem;
+        text-align: center;
+        color: #64748b;
+        font-weight: bold;
+        font-variant-numeric: tabular-nums;
+        background: #f8fafc;
+    }
+    .protheus-table thead th.col-row-num {
+        z-index: 3;
     }
     .protheus-table tbody tr:hover { background: #f8fafc; }
     tr.row-alert-romaneio { background: #fef9c3 !important; }

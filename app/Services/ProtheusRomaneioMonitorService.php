@@ -7,7 +7,7 @@ namespace App\Services;
 use PDO;
 use Shuchkin\SimpleXLSXGen;
 
-class ProtheusMedidosMonitorService
+class ProtheusRomaneioMonitorService
 {
     /** @var list<string> */
     private const EXCLUDED_TRANSPORTES = ['000006', '000176', '000177', '000179', '000265'];
@@ -31,6 +31,8 @@ class ProtheusMedidosMonitorService
     private const COLOR_ROW_LIBERACAO = 'FFEDD5';
     private const COLOR_CELL_ROMANEIO_EMPTY = 'FDE047';
     private const COLOR_CELL_LIBERACAO_EMPTY = 'FDBA74';
+    private const COLOR_MISSING = 'FEF2F2';
+    private const COLOR_MISSING_TEXT = '991B1B';
 
     /** @var list<string> */
     private const EXPORT_HIGHLIGHT_COLUMNS = ['ROMANEIO', 'DT_LIBERACAO', 'HR_LIBERACAO'];
@@ -49,6 +51,7 @@ class ProtheusMedidosMonitorService
             'F2_FILIAL' => 'Filial',
             'F2_DOC' => 'Doc',
             'F2_SERIE' => 'Serie',
+            'F2_CHVNFE' => 'Chave NF-e',
             'F2_CLIENTE' => 'Cliente',
             'F2_LOJA' => 'Loja',
             'CPF_CNPJ' => 'CPF/CNPJ',
@@ -72,6 +75,16 @@ class ProtheusMedidosMonitorService
         }
         if (strlen($digits) === 14) {
             return preg_replace('/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/', '$1.$2.$3/$4-$5', $digits) ?: $digits;
+        }
+
+        return trim((string) ($value ?? ''));
+    }
+
+    public static function formatChaveNfe(mixed $value): string
+    {
+        $digits = preg_replace('/\D/', '', (string) ($value ?? ''));
+        if (strlen($digits) === 44) {
+            return $digits;
         }
 
         return trim((string) ($value ?? ''));
@@ -107,9 +120,16 @@ class ProtheusMedidosMonitorService
         string $filial,
         string $emissaoDe,
         string $emissaoAte,
-        string $marketplace = ''
+        string $marketplace = '',
+        string $docsCsv = '',
+        string $pedidosCsv = ''
     ): string {
-        $rows = $this->listAllMedidos($filial, $emissaoDe, $emissaoAte, $marketplace);
+        $pdo = $this->connectionService->connect();
+        $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, $marketplace, $docsCsv, $pedidosCsv);
+        $rows = $this->fetchAll($pdo, $ctx);
+        $foundBatch = $this->fetchFoundBatchIdentifiers($pdo, $ctx);
+        $missingDocs = ProtheusSqlHelper::missingFromBatch($ctx['docs'], $foundBatch['docs']);
+        $missingPedidos = ProtheusSqlHelper::missingFromBatch($ctx['pedidos'], $foundBatch['pedidos']);
         $columns = self::exportColumns();
 
         $headerRow = [];
@@ -133,14 +153,15 @@ class ProtheusMedidosMonitorService
         $dir = $this->exportDirectory();
         $safeFilial = preg_replace('/[^0-9]/', '', $this->normalizeFilial($filial)) ?: 'filial';
         $fileName = sprintf(
-            'monitor_medidos_%s_%s.xlsx',
+            'monitor_romaneio_%s_%s.xlsx',
             $safeFilial,
             date('Ymd_His')
         );
         $fullPath = $dir . DIRECTORY_SEPARATOR . $fileName;
 
         require_once __DIR__ . '/../Lib/SimpleXLSXGen.php';
-        $xlsx = SimpleXLSXGen::fromArray($sheet, 'Medidos');
+        $xlsx = SimpleXLSXGen::fromArray($sheet, 'Romaneio');
+        $this->attachMissingExportSheet($xlsx, $missingDocs, $missingPedidos);
         if (!$xlsx->saveAs($fullPath)) {
             throw new \RuntimeException('Nao foi possivel gravar o arquivo de exportacao.');
         }
@@ -157,20 +178,21 @@ class ProtheusMedidosMonitorService
     public function listMarketplaces(string $filial, string $emissaoDe, string $emissaoAte): array
     {
         $pdo = $this->connectionService->connect();
-        $params = $this->buildParams($filial, $emissaoDe, $emissaoAte, '');
+        $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, '', '', '');
 
-        $doMonitor = $this->fetchDistinctMarketplaces($pdo, $params, true);
-        $doPeriodo = $this->fetchDistinctMarketplaces($pdo, $params, false);
+        $doMonitor = $this->fetchDistinctMarketplaces($pdo, $ctx, true);
+        $doPeriodo = $this->fetchDistinctMarketplaces($pdo, $ctx, false);
 
         return $this->mergeMarketplaceOptions($doMonitor, $doPeriodo);
     }
 
     /**
-     * @param array<string, string> $params
+     * @param array{params: array<string, string>, docs: list<string>, pedidos: list<string>} $ctx
      * @return list<string>
      */
-    private function fetchDistinctMarketplaces(PDO $pdo, array $params, bool $apenasMonitor): array
+    private function fetchDistinctMarketplaces(PDO $pdo, array $ctx, bool $apenasMonitor): array
     {
+        $params = $ctx['params'];
         $transports = implode(',', array_map(
             static fn (string $code): string => "'" . str_replace("'", "''", $code) . "'",
             self::EXCLUDED_TRANSPORTES
@@ -206,7 +228,7 @@ INNER JOIN ' . $sc5 . '
     AND SC5.C5_NOTA = SF2.F2_DOC
     AND SC5.C5_SERIE = SF2.F2_SERIE
     AND SC5.D_E_L_E_T_ = \' \'
-' . $this->baseWhereClause($params) . '
+' . $this->baseWhereClause($ctx) . '
     AND RTRIM(ISNULL(SC5.C5_ZMAKET, \'\')) <> \'\'';
         }
 
@@ -262,16 +284,18 @@ INNER JOIN ' . $sc5 . '
         return $nomes;
     }
 
-    public function listAllMedidos(
+    public function listAllRomaneios(
         string $filial,
         string $emissaoDe,
         string $emissaoAte,
-        string $marketplace = ''
+        string $marketplace = '',
+        string $docsCsv = '',
+        string $pedidosCsv = ''
     ): array {
         $pdo = $this->connectionService->connect();
-        $params = $this->buildParams($filial, $emissaoDe, $emissaoAte, $marketplace);
+        $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, $marketplace, $docsCsv, $pedidosCsv);
 
-        return $this->fetchAll($pdo, $params);
+        return $this->fetchAll($pdo, $ctx);
     }
 
     /**
@@ -280,26 +304,31 @@ INNER JOIN ' . $sc5 . '
      *   total: int,
      *   page: int,
      *   per_page: int,
-     *   total_pages: int
+     *   total_pages: int,
+     *   missing_docs: list<string>,
+     *   missing_pedidos: list<string>
      * }
      */
-    public function listMedidos(
+    public function listRomaneios(
         string $filial,
         string $emissaoDe,
         string $emissaoAte,
         int $page = 1,
         int $perPage = 50,
-        string $marketplace = ''
+        string $marketplace = '',
+        string $docsCsv = '',
+        string $pedidosCsv = ''
     ): array {
         $page = max(1, $page);
         $perPage = max(10, min(200, $perPage));
         $offset = ($page - 1) * $perPage;
 
         $pdo = $this->connectionService->connect();
-        $params = $this->buildParams($filial, $emissaoDe, $emissaoAte, $marketplace);
+        $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, $marketplace, $docsCsv, $pedidosCsv);
 
-        $total = $this->fetchTotal($pdo, $params);
-        $rows = $this->fetchPage($pdo, $params, $offset, $perPage);
+        $total = $this->fetchTotal($pdo, $ctx);
+        $rows = $this->fetchPage($pdo, $ctx, $offset, $perPage);
+        $foundBatch = $this->fetchFoundBatchIdentifiers($pdo, $ctx);
 
         $totalPages = $total > 0 ? (int) ceil($total / $perPage) : 1;
 
@@ -309,6 +338,8 @@ INNER JOIN ' . $sc5 . '
             'page' => $page,
             'per_page' => $perPage,
             'total_pages' => $totalPages,
+            'missing_docs' => ProtheusSqlHelper::missingFromBatch($ctx['docs'], $foundBatch['docs']),
+            'missing_pedidos' => ProtheusSqlHelper::missingFromBatch($ctx['pedidos'], $foundBatch['pedidos']),
         ];
     }
 
@@ -335,6 +366,43 @@ INNER JOIN ' . $sc5 . '
         $safe = htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
         return '<style bgcolor="#' . self::COLOR_HEADER . '"><b>' . $safe . '</b></style>';
+    }
+
+    /**
+     * @param list<string> $missingDocs
+     * @param list<string> $missingPedidos
+     */
+    private function attachMissingExportSheet(
+        SimpleXLSXGen $xlsx,
+        array $missingDocs,
+        array $missingPedidos
+    ): void {
+        $entries = ProtheusSqlHelper::missingExportEntries($missingDocs, $missingPedidos);
+        if ($entries === []) {
+            return;
+        }
+
+        $sheet = [
+            [
+                $this->exportHeaderCell('Tipo'),
+                $this->exportHeaderCell('Valor informado'),
+            ],
+        ];
+        foreach ($entries as $entry) {
+            $sheet[] = [
+                $this->exportMissingCell($entry['tipo']),
+                $this->exportMissingCell($entry['valor']),
+            ];
+        }
+
+        $xlsx->addSheet($sheet, 'Nao encontrados');
+    }
+
+    private function exportMissingCell(string $value): string
+    {
+        $safe = htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        return '<style bgcolor="#' . self::COLOR_MISSING . '" color="#' . self::COLOR_MISSING_TEXT . '"><b>' . $safe . '</b></style>';
     }
 
     /**
@@ -373,26 +441,26 @@ INNER JOIN ' . $sc5 . '
     }
 
     /**
-     * @param array<string, string> $params
+     * @param array{params: array<string, string>, docs: list<string>, pedidos: list<string>} $ctx
      */
-    private function fetchTotal(PDO $pdo, array $params): int
+    private function fetchTotal(PDO $pdo, array $ctx): int
     {
-        $sql = 'SELECT COUNT(1) AS total FROM (' . $this->baseSql($params) . ') AS q';
+        $sql = 'SELECT COUNT(1) AS total FROM (' . $this->baseSql($ctx) . ') AS q';
         $stmt = $pdo->prepare($sql);
-        $stmt->execute(ProtheusSqlHelper::paramsSemMarketplaceSeLike($params));
+        $stmt->execute(ProtheusSqlHelper::paramsSemMarketplaceSeLike($ctx['params']));
         $row = $stmt->fetch();
 
         return (int) ($row['total'] ?? 0);
     }
 
     /**
-     * @param array<string, string> $params
+     * @param array{params: array<string, string>, docs: list<string>, pedidos: list<string>} $ctx
      * @return list<array<string, mixed>>
      */
-    private function fetchPage(PDO $pdo, array $params, int $offset, int $limit): array
+    private function fetchPage(PDO $pdo, array $ctx, int $offset, int $limit): array
     {
-        $bind = ProtheusSqlHelper::paramsSemMarketplaceSeLike($params);
-        $sql = $this->baseSql($params)
+        $bind = ProtheusSqlHelper::paramsSemMarketplaceSeLike($ctx['params']);
+        $sql = $this->baseSql($ctx)
             . ' ORDER BY SF2.F2_EMISSAO DESC, SF2.F2_DOC, SF2.F2_SERIE'
             . ' OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY';
 
@@ -410,19 +478,66 @@ INNER JOIN ' . $sc5 . '
     }
 
     /**
-     * @param array<string, string> $params
+     * @param array{params: array<string, string>, docs: list<string>, pedidos: list<string>} $ctx
      * @return list<array<string, mixed>>
      */
-    private function fetchAll(PDO $pdo, array $params): array
+    private function fetchAll(PDO $pdo, array $ctx): array
     {
-        $sql = $this->baseSql($params)
+        $sql = $this->baseSql($ctx)
             . ' ORDER BY SF2.F2_EMISSAO DESC, SF2.F2_DOC, SF2.F2_SERIE';
 
         $stmt = $pdo->prepare($sql);
-        $stmt->execute(ProtheusSqlHelper::paramsSemMarketplaceSeLike($params));
+        $stmt->execute(ProtheusSqlHelper::paramsSemMarketplaceSeLike($ctx['params']));
         $rows = $stmt->fetchAll();
 
         return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @param array{params: array<string, string>, docs: list<string>, pedidos: list<string>} $ctx
+     * @return array{docs: list<string>, pedidos: list<string>}
+     */
+    private function fetchFoundBatchIdentifiers(PDO $pdo, array $ctx): array
+    {
+        if ($ctx['docs'] === [] && $ctx['pedidos'] === []) {
+            return ['docs' => [], 'pedidos' => []];
+        }
+
+        $sql = 'SELECT DISTINCT RTRIM(CAST(q.F2_DOC AS VARCHAR(50))) AS batch_doc, '
+            . 'RTRIM(CAST(q.PED_Marketplace AS VARCHAR(100))) AS batch_ped '
+            . 'FROM (' . $this->baseSql($ctx) . ') AS q';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(ProtheusSqlHelper::paramsSemMarketplaceSeLike($ctx['params']));
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return ['docs' => [], 'pedidos' => []];
+        }
+
+        $foundDocs = [];
+        $foundPedidos = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if ($ctx['docs'] !== []) {
+                $doc = trim((string) ($row['batch_doc'] ?? ''));
+                if ($doc !== '') {
+                    $foundDocs[strtoupper($doc)] = $doc;
+                }
+            }
+            if ($ctx['pedidos'] !== []) {
+                $ped = trim((string) ($row['batch_ped'] ?? ''));
+                if ($ped !== '') {
+                    $foundPedidos[strtoupper($ped)] = $ped;
+                }
+            }
+        }
+
+        return [
+            'docs' => array_values($foundDocs),
+            'pedidos' => array_values($foundPedidos),
+        ];
     }
 
     private function exportDirectory(): string
@@ -446,13 +561,15 @@ INNER JOIN ' . $sc5 . '
     }
 
     /**
-     * @return array<string, string>
+     * @return array{params: array<string, string>, docs: list<string>, pedidos: list<string>}
      */
-    private function buildParams(
+    private function buildFilterContext(
         string $filial,
         string $emissaoDe,
         string $emissaoAte,
-        string $marketplace
+        string $marketplace,
+        string $docsCsv = '',
+        string $pedidosCsv = ''
     ): array {
         $params = [
             ':filial' => $this->normalizeFilial($filial),
@@ -464,14 +581,60 @@ INNER JOIN ' . $sc5 . '
             $params[':marketplace'] = $marketplace;
         }
 
-        return $params;
+        $docs = $this->parseBatchFilter($docsCsv);
+        $pedidos = $this->parseBatchFilter($pedidosCsv);
+        foreach ($docs as $i => $doc) {
+            $params[':doc_' . $i] = $doc;
+        }
+        foreach ($pedidos as $i => $ped) {
+            $params[':ped_' . $i] = $ped;
+        }
+
+        return [
+            'params' => $params,
+            'docs' => $docs,
+            'pedidos' => $pedidos,
+        ];
     }
 
     /**
-     * @param array<string, string> $params
+     * @return list<string>
      */
-    private function baseWhereClause(array $params): string
+    public function parseBatchFilter(string $input, int $maxItems = 100): array
     {
+        $input = trim($input);
+        if ($input === '') {
+            return [];
+        }
+
+        $parts = preg_split('/[\s,;]+/', $input) ?: [];
+        $items = [];
+        foreach ($parts as $part) {
+            $value = trim($part);
+            if ($value !== '') {
+                $items[] = $value;
+            }
+        }
+
+        $unique = [];
+        foreach ($items as $value) {
+            $key = strtoupper($value);
+            if (!isset($unique[$key])) {
+                $unique[$key] = $value;
+            }
+        }
+
+        return array_slice(array_values($unique), 0, $maxItems);
+    }
+
+    /**
+     * @param array{params: array<string, string>, docs: list<string>, pedidos: list<string>} $ctx
+     */
+    private function baseWhereClause(array $ctx): string
+    {
+        $params = $ctx['params'];
+        $docs = $ctx['docs'];
+        $pedidos = $ctx['pedidos'];
         $transports = implode(',', array_map(
             static fn (string $code): string => "'" . str_replace("'", "''", $code) . "'",
             self::EXCLUDED_TRANSPORTES
@@ -491,10 +654,29 @@ SQL;
             $sql .= ProtheusSqlHelper::marketplaceAndSql($params[':marketplace']);
         }
 
+        if ($docs !== []) {
+            $placeholders = [];
+            foreach (array_keys($docs) as $i) {
+                $placeholders[] = ':doc_' . $i;
+            }
+            $sql .= ' AND RTRIM(SF2.F2_DOC) IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        if ($pedidos !== []) {
+            $placeholders = [];
+            foreach (array_keys($pedidos) as $i) {
+                $placeholders[] = ':ped_' . $i;
+            }
+            $sql .= ' AND RTRIM(SC5.C5_PEDMAR) IN (' . implode(', ', $placeholders) . ')';
+        }
+
         return $sql;
     }
 
-    private function baseSql(array $params): string
+    /**
+     * @param array{params: array<string, string>, docs: list<string>, pedidos: list<string>} $ctx
+     */
+    private function baseSql(array $ctx): string
     {
         $sf2 = ProtheusSqlHelper::tbl('SF2010', 'SF2');
         $gw1 = ProtheusSqlHelper::tbl('GW1010', 'GW1');
@@ -507,6 +689,7 @@ SELECT
     SF2.F2_FILIAL,
     SF2.F2_DOC,
     SF2.F2_SERIE,
+    RTRIM(ISNULL(SF2.F2_CHVNFE, '')) AS F2_CHVNFE,
     SF2.F2_CLIENTE,
     SF2.F2_LOJA,
     RTRIM(SA1.A1_CGC) AS CPF_CNPJ,
@@ -543,7 +726,7 @@ LEFT JOIN {$sa1}
 LEFT JOIN {$za4}
     ON {$this->za4JoinFromSc5Sql()}
     AND ZA4.D_E_L_E_T_ = ' '
-{$this->baseWhereClause($params)}
+{$this->baseWhereClause($ctx)}
 SQL;
     }
 
@@ -577,6 +760,9 @@ SQL;
         }
         if ($columnKey === 'CPF_CNPJ') {
             return self::formatCpfCnpj($value);
+        }
+        if ($columnKey === 'F2_CHVNFE') {
+            return self::formatChaveNfe($value);
         }
 
         $text = $this->cellText($value);

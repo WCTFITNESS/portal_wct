@@ -164,7 +164,15 @@ def _codigos_barras_batem(codigo_a: str, codigo_b: str) -> bool:
     b = _codigo_comparavel(codigo_b)
     if not a or not b:
         return False
-    return a == b
+    if a == b:
+        return True
+    # Mesma linha digitavel com pequena diferenca (DV, OCR, 47 vs 48 digitos)
+    if abs(len(a) - len(b)) <= 1 and (a.startswith(b) or b.startswith(a)):
+        return True
+    menor, maior = (a, b) if len(a) <= len(b) else (b, a)
+    if len(menor) >= 40 and menor in maior:
+        return True
+    return False
 
 
 def _normalizar_numero(valor: str) -> str:
@@ -287,6 +295,43 @@ def _chave_nfe_no_texto(texto: str) -> str | None:
     return None
 
 
+def _melhor_candidato_linha_digitavel(
+    candidatos: list[str],
+    chave_nfe: str | None,
+) -> str | None:
+    unicos = []
+    vistos: set[str] = set()
+    for cod in candidatos:
+        if not cod or cod == chave_nfe or cod in vistos:
+            continue
+        vistos.add(cod)
+        unicos.append(cod)
+    if not unicos:
+        return None
+    for alvo in (48, 47, 46, 45, 44):
+        for cod in unicos:
+            if len(cod) == alvo and cod != chave_nfe:
+                return cod
+    return max(unicos, key=len)
+
+
+def _extrair_linha_digitavel_parte_inferior(texto: str, chave_nfe: str | None) -> str | None:
+    """GNRE/boleto: linha digitavel costuma estar no rodape (acima do codigo de barras grafico)."""
+    linhas = [ln.strip() for ln in _normalizar_texto_pdf(texto).splitlines() if ln.strip()]
+    candidatos: list[str] = []
+    for linha in reversed(linhas[-30:]):
+        if _LABEL_CHAVE_NFE.search(linha):
+            continue
+        if _CHAVE_NFE.fullmatch(_codigo_comparavel(linha)):
+            continue
+        cod = _codigo_comparavel(linha)
+        if len(cod) < 44 or cod == chave_nfe:
+            continue
+        if _LINHA_DIGITAVEL_ESPACADA.search(linha) or len(re.findall(r"\s", linha)) >= 3:
+            candidatos.append(cod)
+    return _melhor_candidato_linha_digitavel(candidatos, chave_nfe)
+
+
 def _extrair_codigo_barras_de_texto(texto: str, *, ignorar_chave_nfe: bool = False) -> str | None:
     """Digitos do codigo de barras / linha digitavel, sem espacos."""
     texto_norm = _normalizar_texto_pdf(texto)
@@ -322,12 +367,7 @@ def _extrair_codigo_barras_de_texto(texto: str, *, ignorar_chave_nfe: bool = Fal
             candidatos.append((len(cod), cod, 9999))
 
     if candidatos:
-        # Linha digitavel (47-48) tem prioridade sobre chave NF-e (44)
-        for alvo_len in (48, 47, 46, 45):
-            for tam, cod, _ in candidatos:
-                if tam == alvo_len:
-                    return cod
-        return max(candidatos, key=lambda x: (x[0], x[2]))[1]
+        return _melhor_candidato_linha_digitavel([c[1] for c in candidatos], chave_nfe)
 
     return None
 
@@ -337,12 +377,45 @@ def _extrair_codigo_barras_guia(texto: str) -> str | None:
     Codigo de barras / linha digitavel na guia (GNRE, boleto).
     Nao usar Chave NFe — so a linha numerica acima do codigo de barras grafico.
     """
+    texto_norm = _normalizar_texto_pdf(texto)
+    chave_nfe = _chave_nfe_no_texto(texto_norm)
+
+    por_rodape = _extrair_linha_digitavel_parte_inferior(texto_norm, chave_nfe)
+    if por_rodape:
+        return por_rodape
+
+    candidatos: list[str] = []
+    for m in _LINHA_DIGITAVEL_ESPACADA.finditer(texto_norm):
+        cod = _codigo_comparavel(m.group(0))
+        if len(cod) >= 44 and cod != chave_nfe:
+            candidatos.append(cod)
+    melhor = _melhor_candidato_linha_digitavel(candidatos, chave_nfe)
+    if melhor:
+        return melhor
+
     return _extrair_codigo_barras_de_texto(texto, ignorar_chave_nfe=True)
 
 
 def _extrair_codigo_barras_recibo(texto: str) -> str | None:
-    """Campo 'Codigo de barras:' no comprovante."""
-    return _extrair_codigo_barras_de_texto(texto, ignorar_chave_nfe=False)
+    """Campo 'Codigo de barras:' no comprovante (nao confundir com Chave NFe de 44 digitos)."""
+    texto_norm = _normalizar_texto_pdf(texto)
+    chave_nfe = _chave_nfe_no_texto(texto_norm)
+
+    for pat in _PATTERNS_CODIGO_BARRAS:
+        m = pat.search(texto_norm)
+        if m:
+            cod = _codigo_comparavel(m.group(1))
+            if len(cod) >= 44:
+                if len(cod) == 44 and cod == chave_nfe:
+                    break
+                if len(cod) >= 47 or cod != chave_nfe:
+                    return cod
+
+    por_rotulo = _extrair_valor_apos_rotulo(texto_norm, _LABEL_CODIGO_BARRAS, min_digitos=44)
+    if por_rotulo and (len(por_rotulo) >= 47 or por_rotulo != chave_nfe):
+        return por_rotulo
+
+    return _extrair_codigo_barras_de_texto(texto, ignorar_chave_nfe=True)
 
 
 def _extrair_origem_guia(texto: str, nome_arquivo: str) -> tuple[str | None, set[str]]:
@@ -376,6 +449,12 @@ def _texto_da_pagina(page: fitz.Page) -> str:
     texto = page.get_text("text") or ""
     if len(texto.strip()) >= 30:
         return texto
+    blocos = page.get_text("blocks") or []
+    if blocos:
+        ordenados = sorted(blocos, key=lambda b: (round(b[1], 1), round(b[0], 1)))
+        partes = [str(b[4]).strip() for b in ordenados if len(b) > 4 and str(b[4]).strip()]
+        if partes:
+            return "\n".join(partes)
     palavras = page.get_text("words") or []
     if palavras:
         ordenadas = sorted(palavras, key=lambda w: (round(w[1], 1), w[0]))
@@ -863,10 +942,12 @@ def processar_pasta(
                 doc = g.documento_origem or "?"
                 cb = g.codigo_barras or "?"
                 if cb != "?" and len(cb) > 16:
-                    cb = f"...{cb[-12:]}"
+                    cb_log = f"...{cb[-16:]} ({len(cb)} dig)"
+                else:
+                    cb_log = cb
                 log(
                     f"  >> Guia pag {g.pagina + 1}: Nº Documento de Origem = {doc} | "
-                    f"Codigo barras = {cb}"
+                    f"Codigo barras = {cb_log}"
                 )
             todas_guias.extend(guias_arquivo)
 
@@ -877,9 +958,11 @@ def processar_pasta(
                 doc = r.documento_origem or "?"
                 cb = r.codigo_barras or "?"
                 if cb != "?" and len(cb) > 16:
-                    cb = f"...{cb[-12:]}"
+                    cb_log = f"...{cb[-16:]} ({len(cb)} dig)"
+                else:
+                    cb_log = cb
                 log(
-                    f"  >> Recibo pag {r.pagina + 1}: Codigo de barras = {cb} | origem = {doc}"
+                    f"  >> Recibo pag {r.pagina + 1}: Codigo de barras = {cb_log} | origem = {doc}"
                 )
             todos_recibos.extend(recibos_arquivo)
 
@@ -953,11 +1036,19 @@ def processar_pasta(
         recibo = _buscar_recibo(nota, todos_recibos, recibos_usados, guia)
         if recibo:
             recibos_usados.add((recibo.arquivo, recibo.pagina))
-            cb_guia = (guia.codigo_barras[-12:] if guia and guia.codigo_barras else "?")
-            cb_rec = (recibo.codigo_barras[-12:] if recibo.codigo_barras else "?")
+            cb_guia = guia.codigo_barras if guia and guia.codigo_barras else "?"
+            cb_rec = recibo.codigo_barras or "?"
+            if len(cb_guia) > 20:
+                cb_guia_log = f"...{cb_guia[-16:]} ({len(cb_guia)} dig)"
+            else:
+                cb_guia_log = cb_guia
+            if len(cb_rec) > 20:
+                cb_rec_log = f"...{cb_rec[-16:]} ({len(cb_rec)} dig)"
+            else:
+                cb_rec_log = cb_rec
             log(
                 f"6) COMPROVANTE encontrado: {recibo.arquivo.name} pag {recibo.pagina + 1} "
-                f"(codigo barras guia ...{cb_guia} = comprovante ...{cb_rec})"
+                f"(codigo barras guia {cb_guia_log} = comprovante {cb_rec_log})"
             )
             log("   Copiando somente esta pagina do comprovante...")
             adicionar_paginas(writer, recibo.arquivo, recibo.pagina, recibo.pagina)

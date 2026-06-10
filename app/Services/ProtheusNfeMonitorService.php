@@ -59,7 +59,7 @@ class ProtheusNfeMonitorService
 
   public static function formatCpfCnpj(mixed $value): string
   {
-    return ProtheusMedidosMonitorService::formatCpfCnpj($value);
+    return ProtheusRomaneioMonitorService::formatCpfCnpj($value);
   }
 
   public static function formatF2FimpLabel(mixed $value): string

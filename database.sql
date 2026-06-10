@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS api_settings (
     lexos_refresh_token TEXT DEFAULT NULL,
     lexos_integration_key TEXT DEFAULT NULL,
     lexos_integration_header_name VARCHAR(120) DEFAULT NULL,
+    tracking_database_url TEXT DEFAULT NULL,
+    lexos_credentials_mode VARCHAR(20) DEFAULT 'auto',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );

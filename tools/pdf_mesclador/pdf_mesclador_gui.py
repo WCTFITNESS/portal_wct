@@ -53,7 +53,8 @@ def main() -> None:
         "Fluxo:\n"
         "1) NOTA: le cada NF e grava no PDF novo\n"
         "2) GUIA: Nº Documento de Origem = numero da NF (1 pagina por guia)\n"
-        "3) COMPROVANTE: codigo de barras (guia) = codigo de barras (comprovante), sem espacos\n"
+        "3) COMPROVANTE: linha digitavel da guia (48 dig.) = Codigo de barras do comprovante\n"
+        "   (nao usa Chave NFe de 44 digitos)\n"
         "4) Ordem: NOTA -> GUIA -> COMPROVANTE | Proxima nota repete"
     )
     ttk.Label(frm, text=regras, foreground="#334155", wraplength=680).pack(anchor=tk.W, pady=(4, 8))

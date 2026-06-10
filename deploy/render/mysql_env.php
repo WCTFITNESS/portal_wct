@@ -28,7 +28,7 @@ function portal_wct_parse_database_url(string $url): ?array
     $name = $path !== '' ? explode('?', $path, 2)[0] : ($driver === 'pgsql' ? 'postgres' : 'portal_wct');
     $port = isset($parts['port']) ? (int) $parts['port'] : ($driver === 'pgsql' ? 5432 : 3306);
 
-    return [
+    $cfg = [
         'driver' => $driver,
         'host' => $parts['host'],
         'port' => $port,
@@ -37,6 +37,22 @@ function portal_wct_parse_database_url(string $url): ?array
         'pass' => $pass,
         'charset' => 'utf8mb4',
     ];
+    if ($driver === 'pgsql') {
+        $cfg['sslmode'] = portal_wct_pgsql_sslmode();
+    }
+
+    return $cfg;
+}
+
+function portal_wct_pgsql_sslmode(): string
+{
+    $raw = getenv('PORTAL_DB_SSLMODE');
+    if (is_string($raw) && trim($raw) !== '') {
+        return trim($raw);
+    }
+
+    // Render Postgres exige SSL na conexao externa.
+    return 'require';
 }
 
 /**
@@ -76,7 +92,7 @@ function portal_wct_db_from_environment(): array
     $defaultName = $driver === 'pgsql' ? 'postgres' : 'portal_wct';
     $defaultHost = $driver === 'pgsql' ? 'postgres' : 'mysql';
 
-    return [
+    $cfg = [
         'driver' => $driver,
         'host' => getenv('PORTAL_DB_HOST') ?: $defaultHost,
         'port' => (int) (getenv('PORTAL_DB_PORT') ?: $defaultPort),
@@ -85,4 +101,9 @@ function portal_wct_db_from_environment(): array
         'pass' => getenv('PORTAL_DB_PASS') !== false ? (string) getenv('PORTAL_DB_PASS') : '',
         'charset' => 'utf8mb4',
     ];
+    if ($driver === 'pgsql') {
+        $cfg['sslmode'] = portal_wct_pgsql_sslmode();
+    }
+
+    return $cfg;
 }

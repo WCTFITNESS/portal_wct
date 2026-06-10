@@ -19,9 +19,9 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
 
     <h1>Consulta SQL Protheus</h1>
     <p>
-        <strong>Query pronta:</strong> cole o SQL completo que o consultor enviou e execute.
-        Ou monte a consulta escolhendo <strong>tabela</strong>, <strong>colunas</strong>, <strong>WHERE</strong> e <strong>ORDER BY</strong>
-        (somente leitura, <code>WITH (NOLOCK)</code>).
+        <strong>Query pronta:</strong> cole o SQL completo (incluindo <code>SELECT COUNT(1)</code>) e execute.
+        Ou use o montador com tabela, WHERE e ORDER BY — marque <strong>Apenas contagem</strong> para um COUNT sem escolher colunas.
+        Somente leitura; tabelas do montador usam <code>WITH (NOLOCK)</code>.
     </p>
 
     <?php if (!$configured): ?>
@@ -39,13 +39,14 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
     <section class="sql-ready-panel" id="sql-ready-panel"<?= $configured ? '' : ' style="opacity:.6;pointer-events:none"' ?>>
         <h2>Query pronta (SQL completo)</h2>
         <p class="picker-hint" style="margin:0 0 8px;">
-            Cole o SELECT enviado pelo consultor. Apenas leitura; se nao tiver TOP, o sistema limita em 2000 linhas.
+            Cole o SELECT enviado pelo consultor (ex.: <code>SELECT COUNT(1) FROM GXL010 WHERE ...</code>).
+            Agregados COUNT/SUM/AVG nao recebem TOP automatico; demais SELECTs sem TOP sao limitados a 2000 linhas.
         </p>
         <label class="sql-ready-title-label">Titulo (ao salvar na biblioteca)
             <input type="text" id="sql-ready-title" placeholder="Ex.: EDI ocorrencias GWD — consultor Joao" maxlength="120">
         </label>
         <label>SQL
-            <textarea id="sql-ready-text" rows="12" spellcheck="false" placeholder="SELECT TOP 100&#10;    campo1,&#10;    campo2&#10;FROM tabela WITH (NOLOCK)&#10;WHERE ...&#10;ORDER BY ..."></textarea>
+            <textarea id="sql-ready-text" rows="12" spellcheck="false" placeholder="SELECT COUNT(1) FROM GXL010&#10;WHERE GXL_DTIMP &lt; '20260101'&#10;  AND D_E_L_E_T_ = ' '&#10;ORDER BY R_E_C_N_O_ DESC"></textarea>
         </label>
         <div class="sql-actions">
             <button type="button" id="sql-ready-run">Executar query pronta</button>
@@ -62,21 +63,36 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
     </div>
     <form id="protheus-sql-form" class="protheus-sql-form"<?= $configured ? '' : ' style="opacity:.6;pointer-events:none"' ?>>
         <div class="filter-grid">
-            <div class="picker-block">
-                <label for="sql-table-filter">Tabela</label>
-                <input
-                    type="search"
-                    id="sql-table-filter"
-                    placeholder="Filtrar tabelas (ex.: ZA4, SC5)…"
-                    autocomplete="off"
-                >
-                <select id="sql-table" name="table" size="8" required aria-label="Lista de tabelas">
-                    <option value="">Carregando tabelas…</option>
-                </select>
-                <span class="picker-hint" id="sql-table-hint"></span>
+            <div class="sql-table-column">
+                <div class="sql-query-options">
+                    <label id="sql-top-wrap">Limite (TOP)
+                        <select id="sql-top" name="top">
+                            <?php foreach ([50, 100, 200, 500, 1000, 2000] as $opt): ?>
+                                <option value="<?= $opt ?>"<?= $opt === 200 ? ' selected' : '' ?>><?= $opt ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label class="sql-count-only-label" id="sql-count-only-wrap">
+                        <input type="checkbox" id="sql-count-only" name="count_only" value="1">
+                        Apenas contagem (COUNT)
+                    </label>
+                </div>
+                <div class="picker-block">
+                    <label for="sql-table-filter">Tabela</label>
+                    <input
+                        type="search"
+                        id="sql-table-filter"
+                        placeholder="Filtrar tabelas (ex.: ZA4, SC5)…"
+                        autocomplete="off"
+                    >
+                    <select id="sql-table" name="table" size="8" required aria-label="Lista de tabelas">
+                        <option value="">Carregando tabelas…</option>
+                    </select>
+                    <span class="picker-hint" id="sql-table-hint"></span>
+                </div>
             </div>
 
-            <div class="picker-block">
+            <div class="picker-block sql-columns-block">
                 <label for="sql-columns-filter">Colunas</label>
                 <div class="columns-toolbar">
                     <input
@@ -92,16 +108,8 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
                 <select id="sql-columns" name="columns" size="10" multiple disabled aria-label="Lista de colunas">
                     <option value="">Selecione uma tabela</option>
                 </select>
-                <span class="picker-hint" id="sql-columns-hint">Ctrl+clique para varias colunas; duplo-clique na coluna insere no WHERE</span>
+                <span class="picker-hint" id="sql-columns-hint">Ctrl+clique para varias colunas; duplo-clique na coluna insere no WHERE. Para COUNT, marque &quot;Apenas contagem&quot; acima.</span>
             </div>
-
-            <label>Limite (TOP)
-                <select id="sql-top" name="top">
-                    <?php foreach ([50, 100, 200, 500, 1000, 2000] as $opt): ?>
-                        <option value="<?= $opt ?>"<?= $opt === 200 ? ' selected' : '' ?>><?= $opt ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
         </div>
 
         <div class="sql-clauses-grid">
@@ -492,10 +500,51 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
     }
     .protheus-sql-form .filter-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr 140px;
+        grid-template-columns: 1fr 1fr;
         gap: 14px 16px;
         margin-top: 6px;
         align-items: start;
+    }
+    .sql-table-column {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+    }
+    .sql-query-options {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 10px 18px;
+        min-height: 52px;
+    }
+    #sql-top-wrap {
+        flex: 0 0 100px;
+        margin: 0;
+    }
+    #sql-top-wrap select {
+        display: block;
+        width: 100%;
+        margin-top: 4px;
+    }
+    .sql-count-only-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: bold;
+        font-size: .85rem;
+        margin: 0;
+        padding-bottom: 6px;
+        flex: 1 1 auto;
+        min-width: 160px;
+    }
+    .sql-count-only-label input {
+        width: auto;
+        margin: 0;
+        flex-shrink: 0;
+    }
+    .sql-columns-block {
+        min-height: 0;
     }
     .protheus-sql-form label { margin-top: 0; font-weight: bold; font-size: .85rem; }
     .picker-block label { display: block; margin-bottom: 4px; }
@@ -749,6 +798,8 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
     const columnsHint = document.getElementById('sql-columns-hint');
     const btnColsAll = document.getElementById('sql-cols-all');
     const btnColsNone = document.getElementById('sql-cols-none');
+    const countOnlyInput = document.getElementById('sql-count-only');
+    const topWrap = document.getElementById('sql-top-wrap');
     const whereInput = document.getElementById('sql-where');
     const orderByInput = document.getElementById('sql-order-by');
     const autocompleteEl = document.getElementById('sql-autocomplete');
@@ -1180,6 +1231,25 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         el.addEventListener('click', function () { updateAutocomplete(el); });
     }
 
+    function syncCountOnlyUi() {
+        const on = countOnlyInput && countOnlyInput.checked;
+        if (topWrap) topWrap.style.opacity = on ? '0.45' : '';
+        if (topWrap) topWrap.style.pointerEvents = on ? 'none' : '';
+        columnsFilter.disabled = on || !tableSelect.value;
+        columnsSelect.disabled = on || !tableSelect.value;
+        btnColsAll.disabled = on || !tableSelect.value;
+        btnColsNone.disabled = on || !tableSelect.value;
+        if (columnsHint) {
+            columnsHint.textContent = on
+                ? 'Modo contagem: gera SELECT COUNT(1) AS total (colunas ignoradas).'
+                : 'Ctrl+clique para varias colunas; duplo-clique na coluna insere no WHERE. Para COUNT, marque "Apenas contagem" acima.';
+        }
+    }
+
+    if (countOnlyInput) {
+        countOnlyInput.addEventListener('change', syncCountOnlyUi);
+    }
+
     function formatHistoryDate(iso) {
         if (!iso) return '';
         const d = new Date(iso.replace(' ', 'T'));
@@ -1322,9 +1392,15 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         orderByInput.value = item.order_by || '';
         document.getElementById('sql-top').value = String(item.top || 200);
 
+        const isCount = item.is_count || item.columns === '__COUNT__';
+        if (countOnlyInput) countOnlyInput.checked = isCount;
+        syncCountOnlyUi();
+
         const cols = (item.columns || '*').trim();
         Array.from(columnsSelect.options).forEach(function (o) { o.selected = false; });
-        if (cols === '*' || cols === '') {
+        if (isCount) {
+            /* colunas ignoradas no modo COUNT */
+        } else if (cols === '*' || cols === '') {
             const star = columnsSelect.querySelector('option[value="*"]');
             if (star) star.selected = true;
         } else {
@@ -1443,6 +1519,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
 
     tableSelect.addEventListener('change', function () {
         loadColumns(tableSelect.value);
+        syncCountOnlyUi();
     });
 
     columnsFilter.addEventListener('input', function () {
@@ -1480,13 +1557,15 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         activeQueryId = queryId;
         abortController = new AbortController();
 
+        const countOnly = countOnlyInput && countOnlyInput.checked;
         const payload = {
             query_id: queryId,
             table: table,
             where: whereInput.value.trim(),
             order_by: normalizeOrderByClient(orderByInput.value),
-            columns: getSelectedColumnsValue(),
+            columns: countOnly ? '__COUNT__' : getSelectedColumnsValue(),
             top: parseInt(document.getElementById('sql-top').value, 10) || 200,
+            count_only: countOnly,
         };
 
         setRunning(true);

@@ -194,7 +194,7 @@ class ProtheusZa4PedidosErroMonitorService
     public function displayCellText(string $columnKey, mixed $value): string
     {
         if ($columnKey === 'CPF_CNPJ') {
-            return ProtheusMedidosMonitorService::formatCpfCnpj($value);
+            return ProtheusRomaneioMonitorService::formatCpfCnpj($value);
         }
         if ($value === null) {
             return '';

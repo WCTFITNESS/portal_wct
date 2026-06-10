@@ -12,23 +12,30 @@ use App\Repositories\ProtheusSettingsRepository;
 use App\Repositories\ProtheusSqlQueryHistoryRepository;
 use App\Repositories\ProtheusSqlSavedQueriesRepository;
 use App\Repositories\RepasseMpJobRepository;
+use App\Core\TrackingDatabase;
 use App\Repositories\SettingsRepository;
 use App\Repositories\TokenRepository;
+use App\Repositories\TrackingLexosTokenRepository;
 use App\Services\MercadoPagoClient;
 use App\Services\MercadoPagoPaymentService;
 use App\Services\MercadoLivreClient;
 use App\Services\MercadoLivreOAuthService;
 use App\Services\LexosDashboardService;
 use App\Services\LexosAuthService;
+use App\Services\LexosCredentialsService;
 use App\Services\LexosHubApiClient;
+use App\Services\LexosExpeditionDiagnosticService;
+use App\Services\LexosTransportadoraService;
 use App\Services\LexosOrderMonitorService;
 use App\Services\LexosOrderWebhookService;
 use App\Services\MercadoLivreOrderMonitorService;
 use App\Services\MessageService;
 use App\Services\MlAdsReportService;
+use App\Services\MlCatalogListService;
 use App\Services\OrderService;
 use App\Services\ProtheusConnectionService;
-use App\Services\ProtheusMedidosMonitorService;
+use App\Services\ProtheusRomaneioMonitorService;
+use App\Services\ProtheusPedidosMonitorService;
 use App\Services\ProtheusNfeMonitorService;
 use App\Services\ProtheusEdiConsultaService;
 use App\Services\ProtheusZa4PedidosErroMonitorService;
@@ -62,15 +69,37 @@ $repasseService = new RepasseService($orderService);
 $mercadopagoPaymentService = new MercadoPagoPaymentService($mercadopagoSettingsRepository, $mercadopagoClient);
 $repasseMpService = new RepasseMpService($mercadopagoPaymentService, $repasseMpJobRepository);
 $mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRepository);
-$lexosAuthService = new LexosAuthService($settingsRepository);
-$lexosHubApiClient = new LexosHubApiClient($settingsRepository, $lexosAuthService);
+$mlCatalogListService = new MlCatalogListService($tokenService, $client, $settingsRepository);
+$trackingDatabaseUrl = static function () use ($settingsRepository): string {
+    $cfg = $settingsRepository->getApiConfig() ?? [];
+    $url = trim((string) ($cfg['tracking_database_url'] ?? ''));
+    if ($url !== '') {
+        return $url;
+    }
+    $env = getenv('TRACKING_DATABASE_URL');
+
+    return is_string($env) ? trim($env) : '';
+};
+$trackingLexosTokenRepository = new TrackingLexosTokenRepository(
+    new TrackingDatabase($trackingDatabaseUrl())
+);
+$lexosCredentialsService = new LexosCredentialsService($settingsRepository, $trackingLexosTokenRepository);
+$lexosAuthService = new LexosAuthService(
+    $settingsRepository,
+    $lexosCredentialsService,
+    $trackingLexosTokenRepository
+);
+$lexosHubApiClient = new LexosHubApiClient($lexosCredentialsService, $lexosAuthService);
 $lexosDashboardService = new LexosDashboardService($lexosHubApiClient);
 $lexosOrderWebhookRepository = new LexosOrderWebhookRepository($pdo);
 $lexosOrderWebhookService = new LexosOrderWebhookService($lexosOrderWebhookRepository);
 $mercadoLivreOrderMonitorService = new MercadoLivreOrderMonitorService($orderService);
 $lexosOrderMonitorService = new LexosOrderMonitorService($lexosHubApiClient);
+$lexosExpeditionDiagnosticService = new LexosExpeditionDiagnosticService($lexosHubApiClient);
+$lexosTransportadoraService = new LexosTransportadoraService($lexosHubApiClient);
 $protheusConnectionService = new ProtheusConnectionService($protheusSettingsRepository);
-$protheusMedidosMonitorService = new ProtheusMedidosMonitorService($protheusConnectionService);
+$protheusRomaneioMonitorService = new ProtheusRomaneioMonitorService($protheusConnectionService);
+$protheusPedidosMonitorService = new ProtheusPedidosMonitorService($protheusConnectionService);
 $protheusNfeMonitorService = new ProtheusNfeMonitorService($protheusConnectionService);
 $protheusEdiConsultaService = new ProtheusEdiConsultaService($protheusConnectionService);
 $protheusZa4PedidosErroMonitorService = new ProtheusZa4PedidosErroMonitorService($protheusConnectionService);
@@ -91,7 +120,10 @@ return [
     'repasseService' => $repasseService,
     'repasseMpService' => $repasseMpService,
     'mlAdsReportService' => $mlAdsReportService,
+    'mlCatalogListService' => $mlCatalogListService,
     'lexosAuthService' => $lexosAuthService,
+    'lexosCredentialsService' => $lexosCredentialsService,
+    'trackingLexosTokenRepository' => $trackingLexosTokenRepository,
     'mercadopagoSettingsRepository' => $mercadopagoSettingsRepository,
     'mercadopagoClient' => $mercadopagoClient,
     'mercadopagoPaymentService' => $mercadopagoPaymentService,
@@ -99,11 +131,14 @@ return [
     'lexosOrderWebhookService' => $lexosOrderWebhookService,
     'mercadoLivreOrderMonitorService' => $mercadoLivreOrderMonitorService,
     'lexosOrderMonitorService' => $lexosOrderMonitorService,
+    'lexosExpeditionDiagnosticService' => $lexosExpeditionDiagnosticService,
+    'lexosTransportadoraService' => $lexosTransportadoraService,
     'protheusSettingsRepository' => $protheusSettingsRepository,
     'protheusSqlQueryHistoryRepository' => $protheusSqlQueryHistoryRepository,
     'protheusSqlSavedQueriesRepository' => $protheusSqlSavedQueriesRepository,
     'protheusConnectionService' => $protheusConnectionService,
-    'protheusMedidosMonitorService' => $protheusMedidosMonitorService,
+    'protheusRomaneioMonitorService' => $protheusRomaneioMonitorService,
+    'protheusPedidosMonitorService' => $protheusPedidosMonitorService,
     'protheusNfeMonitorService' => $protheusNfeMonitorService,
     'protheusEdiConsultaService' => $protheusEdiConsultaService,
     'protheusZa4PedidosErroMonitorService' => $protheusZa4PedidosErroMonitorService,

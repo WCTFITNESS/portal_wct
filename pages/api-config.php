@@ -12,7 +12,7 @@ if (!in_array($apiTab, ['ml', 'lexos', 'mp'], true)) {
     $apiTab = 'ml';
 }
 
-$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token'];
+$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test'];
 $mpFormTypes = ['mp_token'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -43,6 +43,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
                 'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
                 'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
+                'tracking_database_url' => trim((string) ($existing['tracking_database_url'] ?? '')),
+                'lexos_credentials_mode' => trim((string) ($existing['lexos_credentials_mode'] ?? 'auto')),
             ]);
             $feedback = 'Configurações da API Mercado Livre salvas.';
         }
@@ -60,8 +62,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lexos_refresh_token' => trim((string) ($_POST['lexos_refresh_token'] ?? '')),
                 'lexos_integration_key' => trim((string) ($_POST['lexos_integration_key'] ?? '')),
                 'lexos_integration_header_name' => trim((string) ($_POST['lexos_integration_header_name'] ?? '')),
+                'tracking_database_url' => trim((string) ($_POST['tracking_database_url'] ?? '')),
+                'lexos_credentials_mode' => trim((string) ($_POST['lexos_credentials_mode'] ?? 'auto')),
             ]);
             $feedback = 'Configurações da API Lexos salvas.';
+        }
+
+        if ($formType === 'lexos_tracking_test') {
+            $testUrl = trim((string) ($_POST['tracking_database_url'] ?? ''));
+            if ($testUrl === '') {
+                $existing = $app['settingsRepository']->getApiConfig() ?? [];
+                $testUrl = trim((string) ($existing['tracking_database_url'] ?? ''));
+            }
+            if ($testUrl === '') {
+                $env = getenv('TRACKING_DATABASE_URL');
+                $testUrl = is_string($env) ? trim($env) : '';
+            }
+            $repo = new \App\Repositories\TrackingLexosTokenRepository(
+                new \App\Core\TrackingDatabase($testUrl)
+            );
+            $test = $repo->testConnection();
+            if ($test['ok']) {
+                $st = $repo->getPublicStatus($test['row']);
+                $feedback = 'Conexão com o banco Tracking OK.';
+                if ($st['has_row']) {
+                    $feedback .= ' Token: ' . ($st['has_token'] ? 'sim (' . $st['token_preview'] . ')' : 'não');
+                    $feedback .= '; Chave: ' . ($st['has_chave'] ? 'sim (' . $st['chave_preview'] . ')' : 'não');
+                    if ($st['atualizado_em'] !== '') {
+                        $feedback .= '; atualizado em ' . $st['atualizado_em'];
+                    }
+                } else {
+                    $feedback .= ' Tabela lexos_tokens sem registros.';
+                }
+            } else {
+                throw new RuntimeException('Falha ao conectar no Tracking: ' . $test['error']);
+            }
         }
 
         if ($formType === 'lexos_token_from_code') {
@@ -145,6 +180,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lexos_refresh_token' => (string) ($existing['lexos_refresh_token'] ?? ''),
                 'lexos_integration_key' => (string) ($existing['lexos_integration_key'] ?? ''),
                 'lexos_integration_header_name' => (string) ($existing['lexos_integration_header_name'] ?? ''),
+                'tracking_database_url' => (string) ($existing['tracking_database_url'] ?? ''),
+                'lexos_credentials_mode' => (string) ($existing['lexos_credentials_mode'] ?? 'auto'),
             ]);
 
             $feedback = 'Tokens ML gerados e salvos. Seller ID: ' . $sellerId . '.';
@@ -185,6 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $apiConfig = $app['settingsRepository']->getApiConfig();
+$lexosCredStatus = $app['lexosCredentialsService']->getStatusSummary();
 $token = $app['tokenRepository']->getLatestToken();
 
 if ($apiConfig
@@ -377,9 +415,58 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
 
     <div class="api-config-tab-panel<?= $apiTab === 'lexos' ? ' active' : '' ?>" data-tab="lexos">
         <h2 style="margin-top:1rem;font-size:1.1rem">API Lexos</h2>
-        <form method="post">
+
+        <section class="lexos-tracking-db-panel" style="margin-bottom:1.25rem;padding:1rem;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">
+            <h3 style="margin:0 0 .5rem;font-size:1rem">Banco do Tracking (credenciais Lexos)</h3>
+            <p style="margin:0 0 .75rem;font-size:.9rem;color:#475569">
+                O portal pode ler <code>lexos_tokens</code> do PostgreSQL do Tracking WCT (mesmos token e chave usados no webhook).
+                Alternativa: variável de ambiente <code>TRACKING_DATABASE_URL</code> no Render.
+            </p>
+            <?php
+            $trk = $lexosCredStatus['tracking'];
+            $credMode = (string) ($apiConfig['lexos_credentials_mode'] ?? 'auto');
+            ?>
+            <p class="feedback <?= $lexosCredStatus['has_token'] && $lexosCredStatus['has_key'] ? 'ok' : 'err' ?>" style="margin-bottom:.75rem">
+                Credenciais efetivas:
+                <?= $lexosCredStatus['has_token'] && $lexosCredStatus['has_key'] ? 'prontas' : 'incompletas' ?>
+                (origem: <strong><?= htmlspecialchars($lexosCredStatus['source']) ?></strong>, modo: <?= htmlspecialchars($credMode) ?>)
+            </p>
+            <?php if ($trk['connected'] ?? false): ?>
+                <ul style="margin:0 0 .75rem;padding-left:1.2rem;font-size:.9rem">
+                    <li>Tracking DB: <?= ($trk['has_row'] ?? false) ? 'registro encontrado' : 'conectado, sem linha em lexos_tokens' ?></li>
+                    <?php if ($trk['has_row'] ?? false): ?>
+                        <li>Token no Tracking: <?= ($trk['has_token'] ?? false) ? htmlspecialchars((string) $trk['token_preview']) : 'ausente' ?></li>
+                        <li>Chave no Tracking: <?= ($trk['has_chave'] ?? false) ? htmlspecialchars((string) $trk['chave_preview']) : 'ausente' ?></li>
+                        <?php if (($trk['atualizado_em'] ?? '') !== ''): ?>
+                            <li>Atualizado: <?= htmlspecialchars((string) $trk['atualizado_em']) ?></li>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </ul>
+            <?php else: ?>
+                <p style="font-size:.9rem;color:#64748b;margin:0 0 .75rem">URL do Tracking não configurada ou conexão ainda não testada.</p>
+            <?php endif; ?>
+
+        </section>
+
+        <form method="post" id="lexos-api-form">
             <input type="hidden" name="api_tab" value="lexos">
             <input type="hidden" name="form_type" value="lexos_api">
+
+            <label>URL PostgreSQL do Tracking</label>
+            <input type="password" id="tracking_database_url" name="tracking_database_url" autocomplete="off"
+                   placeholder="postgresql://usuario:senha@host:5432/tracking"
+                   value="<?= htmlspecialchars((string) ($apiConfig['tracking_database_url'] ?? '')) ?>"
+                   style="width:100%;font-family:monospace;font-size:.85rem">
+
+            <label style="margin-top:.75rem">Origem das credenciais Lexos</label>
+            <select name="lexos_credentials_mode" style="max-width:320px">
+                <option value="auto" <?= $credMode === 'auto' ? 'selected' : '' ?>>Automático (Tracking se houver token/chave)</option>
+                <option value="tracking" <?= $credMode === 'tracking' ? 'selected' : '' ?>>Somente Tracking</option>
+                <option value="portal" <?= $credMode === 'portal' ? 'selected' : '' ?>>Somente portal (campos abaixo)</option>
+            </select>
+            <p style="font-size:.85rem;color:#64748b;margin:.35rem 0 1rem">
+                No modo automático, token e chave preenchidos abaixo prevalecem sobre o Tracking.
+            </p>
 
             <label>Lexos Code</label>
             <textarea name="lexos_code" rows="2" placeholder="Cole o code da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_code'] ?? '')) ?></textarea>
@@ -397,6 +484,17 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
             <input type="text" name="lexos_integration_header_name" placeholder="Ex.: x-api-key ou x-tenant-key" value="<?= htmlspecialchars((string) ($apiConfig['lexos_integration_header_name'] ?? '')) ?>">
 
             <button type="submit">Salvar Configuração Lexos</button>
+        </form>
+
+        <form method="post" class="api-config-actions" style="margin-top:.5rem">
+            <input type="hidden" name="api_tab" value="lexos">
+            <input type="hidden" name="form_type" value="lexos_tracking_test">
+            <input type="hidden" name="tracking_database_url" id="tracking_test_url"
+                   value="<?= htmlspecialchars((string) ($apiConfig['tracking_database_url'] ?? '')) ?>">
+            <button type="submit"
+                    onclick="document.getElementById('tracking_test_url').value=document.getElementById('tracking_database_url').value">
+                Testar conexão Tracking
+            </button>
         </form>
 
         <div class="api-config-actions">

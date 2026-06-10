@@ -161,15 +161,20 @@ class ProtheusSqlQueryHistoryRepository
         }
 
         $tableName = (string) ($row['table_name'] ?? '');
+        $columnsExpr = (string) ($row['columns_expr'] ?? '*');
+        $isCount = $columnsExpr === ProtheusAdHocQueryService::COUNT_COLUMNS_MARKER;
         if ($tableName === ProtheusAdHocQueryService::RAW_QUERY_MARKER) {
             $tableName = 'Query pronta';
+        } elseif ($isCount) {
+            $tableName .= ' (COUNT)';
         }
 
         return [
             'id' => (int) ($row['id'] ?? 0),
             'table' => $tableName,
             'is_raw' => ((string) ($row['table_name'] ?? '')) === ProtheusAdHocQueryService::RAW_QUERY_MARKER,
-            'columns' => (string) ($row['columns_expr'] ?? '*'),
+            'is_count' => $isCount,
+            'columns' => $columnsExpr,
             'where' => $where,
             'where_short' => $whereShort,
             'order_by' => (string) ($row['order_by_clause'] ?? ''),

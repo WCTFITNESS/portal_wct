@@ -143,17 +143,19 @@ OUTER APPLY (
     /**
      * SQL para join ZA4 em consultas que partem de SC5 (ex.: monitor de pedidos NF).
      *
-     * @return array{join_sql: string, notes: list<string>}
+     * @return array{join_sql: string, pedmar_col: string, notes: list<string>}
      */
     public static function resolveZa4JoinFromSc5(PDO $pdo): array
     {
         $za4Cols = self::tableColumns($pdo, 'ZA4010');
         $idlexo4 = self::pickLexosIdColumn($za4Cols, 'ZA4');
         $pedmar4 = self::pickColumn($za4Cols, ['ZA4_PEDMAR', 'ZA4_PEDMK', 'ZA4_PEDMARKE', 'ZA4_PEDIDO']);
+        $pedmarCol = $pedmar4 ?? 'ZA4_PEDMAR';
 
         if ($idlexo4 !== null) {
             return [
                 'join_sql' => 'SC5.C5_FILIAL = ZA4.ZA4_FILIAL AND RTRIM(ZA4.' . $idlexo4 . ') = RTRIM(SC5.C5_ZIDLEX)',
+                'pedmar_col' => $pedmarCol,
                 'notes' => [],
             ];
         }
@@ -161,12 +163,14 @@ OUTER APPLY (
         if ($pedmar4 !== null) {
             return [
                 'join_sql' => 'SC5.C5_FILIAL = ZA4.ZA4_FILIAL AND RTRIM(ZA4.' . $pedmar4 . ') = RTRIM(SC5.C5_PEDMAR)',
+                'pedmar_col' => $pedmarCol,
                 'notes' => ['ZA4: join por ' . $pedmar4 . ' (sem coluna ID Lexos em ZA4).'],
             ];
         }
 
         return [
             'join_sql' => 'SC5.C5_FILIAL = ZA4.ZA4_FILIAL',
+            'pedmar_col' => $pedmarCol,
             'notes' => ['ZA4: join apenas por filial (sem coluna ID Lexos/pedmar em ZA4).'],
         ];
     }
@@ -257,6 +261,62 @@ OUTER APPLY (
         $stmt->execute([':table' => $table]);
 
         return is_array($stmt->fetch());
+    }
+
+    /** Coluna de valor total no SC5 (nome varia por versao/customizacao). */
+    public static function resolveSc5ValorColumn(PDO $pdo): ?string
+    {
+        $cols = self::tableColumns($pdo, 'SC5010');
+        foreach (['C5_VALOR', 'C5_VALBRUT', 'C5_TOTAL', 'C5_VALMERC', 'C5_VLRTOT'] as $candidate) {
+            if (in_array($candidate, $cols, true)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /** Data de aprovacao do pedido (SC5 — campo customizado por ambiente). */
+    public static function resolveSc5DataAprovacaoColumn(PDO $pdo): ?string
+    {
+        $cols = self::tableColumns($pdo, 'SC5010');
+        foreach ([
+            'C5_ZDTAPRO', 'C5_ZDAPRO', 'C5_DAPROV', 'C5_ZAPROV', 'C5_DATAAPR', 'C5_DTAPRO',
+            'C5_ZDTAPR', 'C5_DTAPR', 'C5_ZAPROVA',
+        ] as $candidate) {
+            if (in_array($candidate, $cols, true)) {
+                return $candidate;
+            }
+        }
+
+        return self::pickColumnContaining($cols, 'APROV')
+            ?? self::pickColumnContaining($cols, 'DTAPR');
+    }
+
+    /** Data de aprovacao no cadastro ZA4 (quando o SC5 nao expõe o campo). */
+    public static function resolveZa4DataAprovacaoColumn(PDO $pdo): ?string
+    {
+        $cols = self::tableColumns($pdo, 'ZA4010');
+        foreach ([
+            'ZA4_DTAPRO', 'ZA4_ZDTAPRO', 'ZA4_DAPROV', 'ZA4_ZAPROV', 'ZA4_DATAAPR', 'ZA4_DTAPRO',
+            'ZA4_ZDTAPR', 'ZA4_DTAPR',
+        ] as $candidate) {
+            if (in_array($candidate, $cols, true)) {
+                return $candidate;
+            }
+        }
+
+        return self::pickColumnContaining($cols, 'APROV')
+            ?? self::pickColumnContaining($cols, 'DTAPR');
+    }
+
+    /** ID Hub na NF (SF2), quando existir. */
+    public static function resolveSf2IdHubColumn(PDO $pdo): ?string
+    {
+        $cols = self::tableColumns($pdo, 'SF2010');
+
+        return self::pickColumn($cols, ['F2_IDHUB', 'F2_IDHUB2', 'F2_ZIDHUB', 'F2_IDHUB2B'])
+            ?? self::pickColumnContaining($cols, 'IDHUB');
     }
 
     /**

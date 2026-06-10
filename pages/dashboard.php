@@ -52,7 +52,7 @@ $selectedYears = array_values(array_map(static fn (mixed $y): string => (string)
 $comparison = ['months' => [], 'series' => []];
 
 try {
-    if (($apiConfig['lexos_token'] ?? '') !== '') {
+    if ($app['lexosCredentialsService']->isReady()) {
         if ($activeTab === 'dashboard') {
             $metrics = $lexos->getDashboardMetrics($dStart, $dEnd);
             $channelsRaw = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
@@ -208,7 +208,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
 </style>
 
 <section class="card">
-    <?php if (($apiConfig['lexos_token'] ?? '') === ''): ?>
+    <?php if (!$app['lexosCredentialsService']->isReady()): ?>
         <div class="msg err">Configure o <strong>Token Lexos</strong> em Configuração API para habilitar esta seção.</div>
     <?php elseif ($lexosError): ?>
         <div class="msg err">Erro Lexos: <?= htmlspecialchars($lexosError) ?></div>

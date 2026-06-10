@@ -6,17 +6,27 @@ $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
+if ($page === 'protheus-monitor-medidos') {
+    $params = $_GET;
+    $params['page'] = 'protheus-monitor-romaneio';
+    header('Location: ' . portal_wct_public_path($baseUrl, 'index.php?' . http_build_query($params)), true, 301);
+    exit;
+}
 $allowedPages = [
     'dashboard',
     'api-config',
     'orders',
     'monitor-pedidos',
+    'lexos-diagnostico-expedicao',
+    'lexos-transportadoras',
     'repasse-mp',
     'message-template',
     'manual-send',
     'ml-ads-report',
+    'ml-catalogos',
     'protheus-config',
-    'protheus-monitor-medidos',
+    'protheus-monitor-romaneio',
+    'protheus-monitor-pedidos',
     'protheus-monitor-nfe',
     'protheus-consulta-edi',
     'protheus-monitor-pedidos-erro',
@@ -68,6 +78,7 @@ if ($page === 'protheus-consulta-sql' && isset($_GET['protheus_sql_action']) && 
             $columns = (string) ($body['columns'] ?? '*');
             $top = (int) ($body['top'] ?? \App\Services\ProtheusAdHocQueryService::DEFAULT_TOP);
             $orderBy = (string) ($body['order_by'] ?? '');
+            $countOnly = !empty($body['count_only']);
 
             $result = $service->runQuery(
                 $table,
@@ -75,12 +86,13 @@ if ($page === 'protheus-consulta-sql' && isset($_GET['protheus_sql_action']) && 
                 $columns,
                 $top,
                 isset($body['query_id']) ? (string) $body['query_id'] : null,
-                $orderBy
+                $orderBy,
+                $countOnly
             );
 
             $historyId = $app['protheusSqlQueryHistoryRepository']->save([
                 'table' => $table,
-                'columns' => $columns,
+                'columns' => $countOnly ? \App\Services\ProtheusAdHocQueryService::COUNT_COLUMNS_MARKER : $columns,
                 'where' => $where,
                 'order_by' => $orderBy,
                 'top' => $top,
@@ -243,15 +255,18 @@ if ($page === 'protheus-consulta-sql' && ($_GET['export'] ?? '') === 'xlsx') {
             $columns = (string) $item['columns'];
             $top = (int) $item['top'];
             $orderBy = (string) ($item['order_by'] ?? '');
+            $countOnly = ((string) ($item['columns'] ?? '')) === \App\Services\ProtheusAdHocQueryService::COUNT_COLUMNS_MARKER;
         } else {
             $table = (string) ($_GET['table'] ?? '');
             $where = (string) ($_GET['where'] ?? '');
             $columns = (string) ($_GET['columns'] ?? '*');
             $top = (int) ($_GET['top'] ?? \App\Services\ProtheusAdHocQueryService::DEFAULT_TOP);
             $orderBy = (string) ($_GET['order_by'] ?? '');
+            $countOnly = ((string) ($_GET['columns'] ?? '')) === \App\Services\ProtheusAdHocQueryService::COUNT_COLUMNS_MARKER
+                || !empty($_GET['count_only']);
         }
 
-        $filePath = $app['protheusAdHocQueryService']->exportToXlsx($table, $where, $columns, $top, $orderBy);
+        $filePath = $app['protheusAdHocQueryService']->exportToXlsx($table, $where, $columns, $top, $orderBy, $countOnly);
         $fileName = basename($filePath);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
@@ -298,11 +313,22 @@ if ($page === 'repasse-mp' && isset($_GET['repasse_action']) && $_GET['repasse_a
 
 $menuSections = [
     'Mercado Livre' => [
-        ['id' => 'dashboard', 'label' => 'Dashboard'],
         ['id' => 'api-config', 'label' => 'Configuração API'],
         ['id' => 'orders', 'label' => 'Pedidos'],
-        ['id' => 'monitor-pedidos', 'label' => 'Monitor de Pedidos'],
+        ['id' => 'ml-catalogos', 'label' => 'Catálogos'],
         ['id' => 'message-template', 'label' => 'Mensageria ML'],
+    ],
+    'Lexos' => [
+        ['id' => 'dashboard', 'label' => 'Dashboard'],
+        ['id' => 'monitor-pedidos', 'label' => 'Monitor de pedidos'],
+        ['id' => 'lexos-transportadoras', 'label' => 'Transportadoras'],
+        ['id' => 'lexos-diagnostico-expedicao', 'label' => 'Diagnóstico expedição'],
+        [
+            'id' => 'lexos-hub-expedicao',
+            'label' => 'Lexos Hub (expedição)',
+            'external' => true,
+            'href' => 'https://app-hub.lexos.com.br/#/expedicao/entrega/lista/?aba=Todos',
+        ],
     ],
     'Mercado Pago' => [
         ['id' => 'repasse-mp', 'label' => 'Repasse MP'],
@@ -312,7 +338,8 @@ $menuSections = [
     ],
     'Protheus' => [
         ['id' => 'protheus-config', 'label' => 'Config Protheus'],
-        ['id' => 'protheus-monitor-medidos', 'label' => 'Monitor de Pedidos'],
+        ['id' => 'protheus-monitor-romaneio', 'label' => 'Monitor de Romaneio'],
+        ['id' => 'protheus-monitor-pedidos', 'label' => 'Monitor de Pedidos'],
         ['id' => 'protheus-monitor-nfe', 'label' => 'Monitor NF-e SEFAZ'],
         ['id' => 'protheus-consulta-edi', 'label' => 'Monitor EDI'],
         ['id' => 'protheus-monitor-pedidos-erro', 'label' => 'Erros Pedidos ZA4'],
@@ -474,7 +501,7 @@ if ($page === 'protheus-consulta-edi' && ($_GET['export'] ?? '') === 'xlsx') {
     }
 }
 
-if ($page === 'protheus-monitor-medidos' && ($_GET['export'] ?? '') === 'xlsx') {
+if ($page === 'protheus-monitor-romaneio' && ($_GET['export'] ?? '') === 'xlsx') {
     try {
         $settings = $app['protheusSettingsRepository']->getSettings();
         if ($settings === null) {
@@ -495,12 +522,68 @@ if ($page === 'protheus-monitor-medidos' && ($_GET['export'] ?? '') === 'xlsx') 
             $emissaoDe = $dataCorte;
         }
         $marketplace = trim((string) ($_GET['marketplace'] ?? ''));
+        $filterDoc = trim((string) ($_GET['doc'] ?? ''));
+        $filterPedMarketplace = trim((string) ($_GET['ped_marketplace'] ?? ''));
 
-        $filePath = $app['protheusMedidosMonitorService']->exportToXlsx(
+        $filePath = $app['protheusRomaneioMonitorService']->exportToXlsx(
             $filial,
             $emissaoDe,
             $emissaoAte,
-            $marketplace
+            $marketplace,
+            $filterDoc,
+            $filterPedMarketplace
+        );
+        $fileName = basename($filePath);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao exportar: ' . $exception->getMessage();
+    }
+    exit;
+}
+
+if ($page === 'protheus-monitor-pedidos' && ($_GET['export'] ?? '') === 'xlsx') {
+    try {
+        $settings = $app['protheusSettingsRepository']->getSettings();
+        if ($settings === null) {
+            throw new RuntimeException('Configure o Protheus antes de exportar.');
+        }
+        if (!$app['protheusConnectionService']->isDriverAvailable()) {
+            throw new RuntimeException('Driver SQL Server nao disponivel neste PHP.');
+        }
+
+        $dataCorte = \App\Repositories\ProtheusSettingsRepository::resolveDataCorte($settings);
+        $filial = trim((string) ($_GET['filial'] ?? '0101'));
+        $emissaoDe = trim((string) ($_GET['emissao_de'] ?? $dataCorte));
+        $emissaoAte = trim((string) ($_GET['emissao_ate'] ?? date('Y-m-d')));
+        if ($emissaoDe === '') {
+            $emissaoDe = $dataCorte;
+        }
+        if ($emissaoDe < $dataCorte) {
+            $emissaoDe = $dataCorte;
+        }
+        $marketplace = trim((string) ($_GET['marketplace'] ?? ''));
+        $filterDoc = trim((string) ($_GET['doc'] ?? ''));
+        $filterPedMarketplace = trim((string) ($_GET['ped_marketplace'] ?? ''));
+        $filterCpfCnpj = trim((string) ($_GET['cpf_cnpj'] ?? ''));
+        $saidaDe = trim((string) ($_GET['saida_de'] ?? ''));
+        $saidaAte = trim((string) ($_GET['saida_ate'] ?? ''));
+
+        $filePath = $app['protheusPedidosMonitorService']->exportToXlsx(
+            $filial,
+            $emissaoDe,
+            $emissaoAte,
+            $marketplace,
+            $filterDoc,
+            $filterPedMarketplace,
+            $filterCpfCnpj,
+            $saidaDe,
+            $saidaAte
         );
         $fileName = basename($filePath);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -548,6 +631,82 @@ if ($page === 'ml-ads-report' && ($_GET['export'] ?? '') === 'xlsx') {
         header('Content-Type: text/plain; charset=utf-8');
         echo 'Erro ao exportar: ' . $exception->getMessage();
     }
+    exit;
+}
+
+if ($page === 'ml-catalogos' && ($_GET['ml_catalog_action'] ?? '') === 'detail') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['ok' => false, 'error' => 'Metodo nao permitido.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $body = json_decode((string) file_get_contents('php://input'), true);
+    if (!is_array($body)) {
+        $body = $_POST;
+    }
+
+    try {
+        $result = $app['mlCatalogListService']->fetchCatalogDetail(
+            (string) ($body['catalog_product_id'] ?? ''),
+            (string) ($body['item_mlb'] ?? '')
+        );
+        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($page === 'ml-catalogos' && ($_GET['export'] ?? '') === 'xlsx') {
+    try {
+        $limitRaw = trim((string) ($_GET['limit'] ?? '200'));
+        $limit = (int) $limitRaw;
+        if ($limit < 0) {
+            $limit = 0;
+        }
+        if ($limit > 5000) {
+            $limit = 5000;
+        }
+        $filters = [
+            'status' => trim((string) ($_GET['status'] ?? 'todos')),
+            'sku' => trim((string) ($_GET['sku'] ?? '')),
+            'catalog_product_id' => trim((string) ($_GET['catalog_product_id'] ?? '')),
+        ];
+        $result = $app['mlCatalogListService']->generateReport($limit, $filters);
+        $filePath = $app['mlCatalogListService']->getExportFilePath((string) ($result['file_name'] ?? ''));
+        if ($filePath === null) {
+            throw new RuntimeException('Arquivo de exportacao nao encontrado.');
+        }
+        $fileName = basename($filePath);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao exportar: ' . $exception->getMessage();
+    }
+    exit;
+}
+
+if ($page === 'ml-catalogos' && isset($_GET['download']) && $_GET['download'] !== '') {
+    $filePath = $app['mlCatalogListService']->getExportFilePath((string) $_GET['download']);
+    if (!$filePath) {
+        http_response_code(404);
+        echo 'Arquivo nao encontrado.';
+        exit;
+    }
+
+    $fileName = basename($filePath);
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $fileName . '"');
+    header('Content-Length: ' . (string) filesize($filePath));
+    readfile($filePath);
     exit;
 }
 
@@ -908,7 +1067,7 @@ if (
         }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-ads-report'], true) ? 'page-protheus-monitor-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-ads-report', 'ml-catalogos'], true) ? 'page-protheus-monitor-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">
@@ -945,11 +1104,22 @@ if (
                     </nav>
                 </div>
             <?php endif; ?>
-            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-medidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql'], true)): ?>
+            <?php if (in_array($page, ['dashboard', 'monitor-pedidos', 'lexos-transportadoras', 'lexos-diagnostico-expedicao'], true)): ?>
+                <div class="subnav-sticky">
+                    <nav class="subnav">
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=dashboard')) ?>" class="<?= $page === 'dashboard' ? 'active' : '' ?>">Dashboard</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=monitor-pedidos')) ?>" class="<?= $page === 'monitor-pedidos' ? 'active' : '' ?>">Monitor de pedidos</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=lexos-transportadoras')) ?>" class="<?= $page === 'lexos-transportadoras' ? 'active' : '' ?>">Transportadoras</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=lexos-diagnostico-expedicao')) ?>" class="<?= $page === 'lexos-diagnostico-expedicao' ? 'active' : '' ?>">Diagnóstico expedição</a>
+                    </nav>
+                </div>
+            <?php endif; ?>
+            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql'], true)): ?>
                 <div class="subnav-sticky">
                     <nav class="subnav">
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-config')) ?>" class="<?= $page === 'protheus-config' ? 'active' : '' ?>">Config Protheus</a>
-                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-medidos')) ?>" class="<?= $page === 'protheus-monitor-medidos' ? 'active' : '' ?>">Monitor de Pedidos</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-romaneio')) ?>" class="<?= $page === 'protheus-monitor-romaneio' ? 'active' : '' ?>">Monitor de Romaneio</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-pedidos')) ?>" class="<?= $page === 'protheus-monitor-pedidos' ? 'active' : '' ?>">Monitor de Pedidos</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-nfe')) ?>" class="<?= $page === 'protheus-monitor-nfe' ? 'active' : '' ?>">Monitor NF-e SEFAZ</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-edi')) ?>" class="<?= $page === 'protheus-consulta-edi' ? 'active' : '' ?>">Monitor EDI</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-pedidos-erro')) ?>" class="<?= $page === 'protheus-monitor-pedidos-erro' ? 'active' : '' ?>">Erros Pedidos ZA4</a>

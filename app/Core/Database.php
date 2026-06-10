@@ -32,12 +32,18 @@ class Database
     private function buildDsn(array $dbConfig): string
     {
         if ($this->driver === 'pgsql') {
-            return sprintf(
+            $dsn = sprintf(
                 'pgsql:host=%s;port=%d;dbname=%s',
                 $dbConfig['host'],
                 $dbConfig['port'],
                 $dbConfig['name']
             );
+            $sslmode = trim((string) ($dbConfig['sslmode'] ?? ''));
+            if ($sslmode !== '') {
+                $dsn .= ';sslmode=' . $sslmode;
+            }
+
+            return $dsn;
         }
 
         return sprintf(

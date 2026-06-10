@@ -89,7 +89,8 @@ class ProtheusConnectionService
         if (extension_loaded('pdo_sqlsrv')) {
             return 'sqlsrv:Server=' . $host . ',' . $port
                 . ';Database=' . $database
-                . ';TrustServerCertificate=yes;Encrypt=no';
+                . ';TrustServerCertificate=yes;Encrypt=no'
+                . ';LoginTimeout=15';
         }
 
         return 'dblib:host=' . $host . ':' . $port . ';dbname=' . $database . ';charset=UTF-8';

@@ -4,28 +4,27 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Repositories\SettingsRepository;
 use RuntimeException;
 use Throwable;
 
 class LexosHubApiClient
 {
     public function __construct(
-        private SettingsRepository $settingsRepository,
+        private LexosCredentialsService $lexosCredentialsService,
         private LexosAuthService $lexosAuthService,
     ) {
     }
 
     /**
-     * @param array<string, mixed> $payload
-     * @return array<string, mixed>
+     * @param array<string, mixed>|null $payload
+     * @return array{ok: bool, status: int, body: mixed, error: string, auth: string}
      */
-    public function postJson(string $url, array $payload): array
+    public function request(string $method, string $url, ?array $payload = null): array
     {
         $this->assertLexosCredentials();
 
         try {
-            return $this->executePost($url, $payload);
+            return $this->executeRequest($method, $url, $payload);
         } catch (RuntimeException $exception) {
             if (!$this->isUnauthorized($exception)) {
                 throw $this->wrapFailure($exception);
@@ -38,27 +37,10 @@ class LexosHubApiClient
             }
 
             try {
-                return $this->executePost($url, $payload);
+                return $this->executeRequest($method, $url, $payload);
             } catch (RuntimeException $retryException) {
                 throw $this->wrapFailure($retryException);
             }
-        }
-    }
-
-    private function assertLexosCredentials(): void
-    {
-        $cfg = $this->settingsRepository->getApiConfig() ?? [];
-        $token = trim((string) ($cfg['lexos_token'] ?? ''));
-        $integrationKey = trim((string) ($cfg['lexos_integration_key'] ?? ''));
-
-        if ($token === '') {
-            throw new RuntimeException('Token Lexos não configurado em Configuração API.');
-        }
-
-        if ($integrationKey === '') {
-            throw new RuntimeException(
-                'Chave segura da integração Lexos não configurada em Configuração API. A Lexos exige o header Chave em todas as requisições.'
-            );
         }
     }
 
@@ -66,46 +48,95 @@ class LexosHubApiClient
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    private function executePost(string $url, array $payload): array
+    public function postJson(string $url, array $payload): array
+    {
+        $result = $this->request('POST', $url, $payload);
+        if (!$result['ok']) {
+            throw new RuntimeException(
+                'Falha consulta Lexos WebAPI. HTTP: ' . $result['status']
+                . ($result['error'] !== '' ? ' ' . $result['error'] : '')
+            );
+        }
+
+        return is_array($result['body']) ? $result['body'] : [];
+    }
+
+    private function assertLexosCredentials(): void
+    {
+        if ($this->lexosCredentialsService->isReady()) {
+            return;
+        }
+
+        $status = $this->lexosCredentialsService->getStatusSummary();
+        $tracking = $status['tracking'];
+        if (($tracking['connected'] ?? false) && !($tracking['has_row'] ?? false)) {
+            throw new RuntimeException(
+                'Banco Tracking conectado, mas não há registro em lexos_tokens. Configure as credenciais no Tracking ou preencha Token e Chave na aba Lexos.'
+            );
+        }
+
+        throw new RuntimeException(
+            'Credenciais Lexos incompletas. Configure Token e chave de integração (header Chave) na aba Lexos ou conecte o banco do Tracking com tokens salvos.'
+        );
+    }
+
+    /**
+     * @param array<string, mixed>|null $payload
+     * @return array{ok: bool, status: int, body: mixed, error: string, auth: string}
+     */
+    private function executeRequest(string $method, string $url, ?array $payload): array
     {
         $token = $this->getLexosToken();
-        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        $body = $payload !== null ? json_encode($payload, JSON_THROW_ON_ERROR) : '';
         $baseHeaders = $this->buildIntegrationHeaders();
         $authVariants = [
             ['Authorization: Bearer ' . $token, 'authorization_bearer'],
             ['Authorization: ' . $token, 'authorization_raw'],
         ];
 
-        $lastError = null;
+        $last = [
+            'ok' => false,
+            'status' => 0,
+            'body' => null,
+            'error' => 'Erro desconhecido',
+            'auth' => '',
+        ];
+
         foreach ($authVariants as [$authHeader, $label]) {
-            [$status, $err, $raw] = $this->curlPost($url, $body, array_merge($baseHeaders, [$authHeader]));
-            if ($raw !== false && $status >= 200 && $status < 300) {
-                $decoded = json_decode((string) $raw, true);
-
-                return is_array($decoded) ? $decoded : [];
-            }
-
-            $extra = '';
+            [$status, $err, $raw] = $this->curlRequest($method, $url, $body, array_merge($baseHeaders, [$authHeader]));
+            $decoded = null;
             if (is_string($raw) && $raw !== '') {
-                $extra = ' Resposta: ' . substr($raw, 0, 400);
+                $decoded = json_decode($raw, true);
+                if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
+                    $decoded = $raw;
+                }
             }
 
-            $lastError = new RuntimeException(
-                'Falha consulta Lexos WebAPI. HTTP: ' . $status
-                . ' Tentativa: ' . $label
-                . ($err !== '' ? ' ' . $err : '')
-                . $extra
-            );
+            $last = [
+                'ok' => $raw !== false && $status >= 200 && $status < 300,
+                'status' => $status,
+                'body' => $decoded,
+                'error' => $err,
+                'auth' => $label,
+            ];
+
+            if ($last['ok']) {
+                return $last;
+            }
+
             if ($status !== 401) {
-                throw $lastError;
+                $extra = is_string($raw) && $raw !== '' ? ' Resposta: ' . substr($raw, 0, 400) : '';
+
+                throw new RuntimeException(
+                    'Falha consulta Lexos WebAPI. HTTP: ' . $status
+                    . ' Tentativa: ' . $label
+                    . ($err !== '' ? ' ' . $err : '')
+                    . $extra
+                );
             }
         }
 
-        if ($lastError !== null) {
-            throw $lastError;
-        }
-
-        throw new RuntimeException('Falha consulta Lexos WebAPI. Erro desconhecido.');
+        return $last;
     }
 
     /**
@@ -137,16 +168,21 @@ class LexosHubApiClient
      * @param list<string> $headers
      * @return array{int,string,string|false}
      */
-    private function curlPost(string $url, string $body, array $headers): array
+    private function curlRequest(string $method, string $url, string $body, array $headers): array
     {
+        $method = strtoupper($method);
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CUSTOMREQUEST => 'POST',
-            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 60,
-        ]);
+        ];
+        if ($body !== '' && $method !== 'GET') {
+            $opts[CURLOPT_POSTFIELDS] = $body;
+        }
+
+        curl_setopt_array($ch, $opts);
 
         $raw = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -158,15 +194,15 @@ class LexosHubApiClient
 
     private function renewLexosAccessToken(): void
     {
-        $cfg = $this->settingsRepository->getApiConfig() ?? [];
-        $refreshToken = trim((string) ($cfg['lexos_refresh_token'] ?? ''));
+        $creds = $this->lexosCredentialsService->resolve();
+        $refreshToken = trim((string) ($creds['refresh_token'] ?? ''));
         if ($refreshToken !== '') {
             $this->lexosAuthService->refreshLexosToken($refreshToken);
 
             return;
         }
 
-        $code = trim((string) ($cfg['lexos_code'] ?? ''));
+        $code = trim((string) ($creds['lexos_code'] ?? ''));
         if ($code !== '') {
             $this->lexosAuthService->exchangeCodeForToken($code);
 
@@ -178,11 +214,9 @@ class LexosHubApiClient
 
     private function getLexosToken(): string
     {
-        $cfg = $this->settingsRepository->getApiConfig();
-        $token = trim((string) ($cfg['lexos_token'] ?? ''));
-        $token = preg_replace('/^\s*Bearer\s+/i', '', $token) ?? $token;
+        $token = trim((string) ($this->lexosCredentialsService->resolve()['token'] ?? ''));
         if ($token === '') {
-            throw new RuntimeException('Token Lexos não configurado em Configuração API.');
+            throw new RuntimeException('Token Lexos não configurado.');
         }
 
         return $token;
@@ -190,16 +224,12 @@ class LexosHubApiClient
 
     private function getLexosIntegrationKey(): string
     {
-        $cfg = $this->settingsRepository->getApiConfig();
-
-        return trim((string) ($cfg['lexos_integration_key'] ?? ''));
+        return trim((string) ($this->lexosCredentialsService->resolve()['integration_key'] ?? ''));
     }
 
     private function getLexosIntegrationHeaderName(): string
     {
-        $cfg = $this->settingsRepository->getApiConfig();
-
-        return trim((string) ($cfg['lexos_integration_header_name'] ?? ''));
+        return trim((string) ($this->lexosCredentialsService->resolve()['integration_header_name'] ?? ''));
     }
 
     private function isUnauthorized(RuntimeException $exception): bool
@@ -211,7 +241,7 @@ class LexosHubApiClient
     {
         $message = $exception->getMessage();
         if ($this->isUnauthorized($exception)) {
-            $message .= ' Verifique em Configuração API o Token Lexos, a chave segura (header Chave) e execute Refresh Token Lexos.';
+            $message .= ' Verifique Token Lexos, chave de integração (header Chave) e execute Refresh Token Lexos em Configuração API.';
             if ($refreshException !== null) {
                 $message .= ' Falha ao renovar token automaticamente: ' . $refreshException->getMessage();
             }

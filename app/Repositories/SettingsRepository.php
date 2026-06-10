@@ -14,6 +14,8 @@ class SettingsRepository
     private ?bool $hasLexosRefreshTokenColumn = null;
     private ?bool $hasLexosIntegrationKeyColumn = null;
     private ?bool $hasLexosIntegrationHeaderNameColumn = null;
+    private ?bool $hasTrackingDatabaseUrlColumn = null;
+    private ?bool $hasLexosCredentialsModeColumn = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -38,6 +40,8 @@ class SettingsRepository
         $this->ensureLexosRefreshTokenColumnExists();
         $this->ensureLexosIntegrationKeyColumnExists();
         $this->ensureLexosIntegrationHeaderNameColumnExists();
+        $this->ensureTrackingDatabaseUrlColumnExists();
+        $this->ensureLexosCredentialsModeColumnExists();
         $existing = $this->getApiConfig();
 
         if ($existing) {
@@ -53,6 +57,8 @@ class SettingsRepository
                      lexos_refresh_token = :lexos_refresh_token,
                      lexos_integration_key = :lexos_integration_key,
                      lexos_integration_header_name = :lexos_integration_header_name,
+                     tracking_database_url = :tracking_database_url,
+                     lexos_credentials_mode = :lexos_credentials_mode,
                      updated_at = NOW()
                  WHERE id = :id'
             );
@@ -67,6 +73,8 @@ class SettingsRepository
                 ':lexos_refresh_token' => (($data['lexos_refresh_token'] ?? '') !== '') ? (string) $data['lexos_refresh_token'] : null,
                 ':lexos_integration_key' => (($data['lexos_integration_key'] ?? '') !== '') ? (string) $data['lexos_integration_key'] : null,
                 ':lexos_integration_header_name' => (($data['lexos_integration_header_name'] ?? '') !== '') ? (string) $data['lexos_integration_header_name'] : null,
+                ':tracking_database_url' => (($data['tracking_database_url'] ?? '') !== '') ? (string) $data['tracking_database_url'] : null,
+                ':lexos_credentials_mode' => (($data['lexos_credentials_mode'] ?? '') !== '') ? (string) $data['lexos_credentials_mode'] : null,
                 ':id' => $existing['id'],
             ]);
 
@@ -75,9 +83,9 @@ class SettingsRepository
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO api_settings (
-                app_id, client_secret, redirect_uri, seller_id, oauth_code, lexos_code, lexos_token, lexos_refresh_token, lexos_integration_key, lexos_integration_header_name, created_at, updated_at
+                app_id, client_secret, redirect_uri, seller_id, oauth_code, lexos_code, lexos_token, lexos_refresh_token, lexos_integration_key, lexos_integration_header_name, tracking_database_url, lexos_credentials_mode, created_at, updated_at
              ) VALUES (
-                :app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, :lexos_code, :lexos_token, :lexos_refresh_token, :lexos_integration_key, :lexos_integration_header_name, NOW(), NOW()
+                :app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, :lexos_code, :lexos_token, :lexos_refresh_token, :lexos_integration_key, :lexos_integration_header_name, :tracking_database_url, :lexos_credentials_mode, NOW(), NOW()
              )'
         );
         $stmt->execute([
@@ -91,6 +99,8 @@ class SettingsRepository
             ':lexos_refresh_token' => (($data['lexos_refresh_token'] ?? '') !== '') ? (string) $data['lexos_refresh_token'] : null,
             ':lexos_integration_key' => (($data['lexos_integration_key'] ?? '') !== '') ? (string) $data['lexos_integration_key'] : null,
             ':lexos_integration_header_name' => (($data['lexos_integration_header_name'] ?? '') !== '') ? (string) $data['lexos_integration_header_name'] : null,
+            ':tracking_database_url' => (($data['tracking_database_url'] ?? '') !== '') ? (string) $data['tracking_database_url'] : null,
+            ':lexos_credentials_mode' => (($data['lexos_credentials_mode'] ?? '') !== '') ? (string) $data['lexos_credentials_mode'] : null,
         ]);
     }
 
@@ -351,5 +361,87 @@ class SettingsRepository
         $normalized = preg_replace('/^\s*Bearer\s+/i', '', $normalized) ?? $normalized;
 
         return trim($normalized);
+    }
+
+    private function ensureTrackingDatabaseUrlColumnExists(): void
+    {
+        if ($this->hasTrackingDatabaseUrlColumn()) {
+            return;
+        }
+
+        if ($this->isPgsql()) {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN tracking_database_url TEXT DEFAULT NULL');
+        } else {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN tracking_database_url TEXT NULL');
+        }
+        $this->hasTrackingDatabaseUrlColumn = true;
+    }
+
+    private function hasTrackingDatabaseUrlColumn(): bool
+    {
+        if ($this->hasTrackingDatabaseUrlColumn !== null) {
+            return $this->hasTrackingDatabaseUrlColumn;
+        }
+
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'tracking_database_url'"
+            );
+        } else {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'tracking_database_url'"
+            );
+        }
+
+        $this->hasTrackingDatabaseUrlColumn = ((int) $stmt->fetchColumn()) > 0;
+
+        return $this->hasTrackingDatabaseUrlColumn;
+    }
+
+    private function ensureLexosCredentialsModeColumnExists(): void
+    {
+        if ($this->hasLexosCredentialsModeColumn()) {
+            return;
+        }
+
+        if ($this->isPgsql()) {
+            $this->pdo->exec("ALTER TABLE api_settings ADD COLUMN lexos_credentials_mode VARCHAR(20) DEFAULT 'auto'");
+        } else {
+            $this->pdo->exec("ALTER TABLE api_settings ADD COLUMN lexos_credentials_mode VARCHAR(20) NULL DEFAULT 'auto'");
+        }
+        $this->hasLexosCredentialsModeColumn = true;
+    }
+
+    private function hasLexosCredentialsModeColumn(): bool
+    {
+        if ($this->hasLexosCredentialsModeColumn !== null) {
+            return $this->hasLexosCredentialsModeColumn;
+        }
+
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_credentials_mode'"
+            );
+        } else {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_credentials_mode'"
+            );
+        }
+
+        $this->hasLexosCredentialsModeColumn = ((int) $stmt->fetchColumn()) > 0;
+
+        return $this->hasLexosCredentialsModeColumn;
     }
 }

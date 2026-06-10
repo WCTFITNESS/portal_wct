@@ -25,9 +25,7 @@ $usedRecentExample = (($_GET['use_recent_example'] ?? '') === '1');
 $webhookService = $app['lexosOrderWebhookService'];
 $mercadoLivreMonitorService = $app['mercadoLivreOrderMonitorService'];
 $lexosOrderMonitorService = $app['lexosOrderMonitorService'];
-$apiCfg = $app['settingsRepository']->getApiConfig();
-$lexosApiReady = trim((string) ($apiCfg['lexos_token'] ?? '')) !== ''
-    && trim((string) ($apiCfg['lexos_integration_key'] ?? '')) !== '';
+$lexosApiReady = $app['lexosCredentialsService']->isReady();
 $webhookUrl = portal_wct_absolute_url($baseUrl, 'webhooks/lexos-pedidos.php');
 $storedEvents = $webhookService->countStoredEvents();
 $deliveryStats = $webhookService->getDeliveryStats();

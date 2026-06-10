@@ -5,24 +5,27 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Repositories\SettingsRepository;
+use App\Repositories\TrackingLexosTokenRepository;
 use RuntimeException;
 
 class LexosAuthService
 {
-    public function __construct(private SettingsRepository $settingsRepository)
-    {
+    public function __construct(
+        private SettingsRepository $settingsRepository,
+        private LexosCredentialsService $lexosCredentialsService,
+        private TrackingLexosTokenRepository $trackingLexosTokenRepository,
+    ) {
     }
 
     public function exchangeCodeForToken(?string $code = null): array
     {
-        $cfg = $this->settingsRepository->getApiConfig() ?? [];
-        $codeValue = $this->normalizeCodeInput((string) ($code ?? ($cfg['lexos_code'] ?? '')));
+        $creds = $this->lexosCredentialsService->resolve();
+        $codeValue = $this->normalizeCodeInput((string) ($code ?? ($creds['lexos_code'] ?? '')));
         if ($codeValue === '') {
             throw new RuntimeException('Lexos Code não informado.');
         }
-        $refreshFromCfg = trim((string) ($cfg['lexos_refresh_token'] ?? ''));
+        $refreshFromCfg = trim((string) ($creds['refresh_token'] ?? ''));
 
-        // Prioridade: exatamente como a documentação da Lexos descreve.
         $response = $this->postWithPayloadFallbacks(
             'https://api.lexos.com.br/Autenticacao/token',
             [
@@ -45,7 +48,8 @@ class LexosAuthService
             throw new RuntimeException('Resposta da Lexos sem access token.');
         }
 
-        $this->saveLexosCredentials($codeValue, $accessToken, $refreshToken !== '' ? $refreshToken : null);
+        $expiresIn = $this->extractExpiresIn($response);
+        $this->saveLexosCredentials($codeValue, $accessToken, $refreshToken !== '' ? $refreshToken : null, $expiresIn);
 
         return [
             'access_token' => $accessToken,
@@ -56,8 +60,8 @@ class LexosAuthService
 
     public function refreshLexosToken(?string $refreshToken = null): array
     {
-        $cfg = $this->settingsRepository->getApiConfig() ?? [];
-        $refresh = trim((string) ($refreshToken ?? ($cfg['lexos_refresh_token'] ?? '')));
+        $creds = $this->lexosCredentialsService->resolve();
+        $refresh = trim((string) ($refreshToken ?? ($creds['refresh_token'] ?? '')));
         if ($refresh === '') {
             throw new RuntimeException('Refresh token Lexos não informado.');
         }
@@ -77,10 +81,12 @@ class LexosAuthService
             throw new RuntimeException('Resposta da Lexos sem access token.');
         }
 
+        $expiresIn = $this->extractExpiresIn($response);
         $this->saveLexosCredentials(
-            (string) ($cfg['lexos_code'] ?? ''),
+            (string) ($creds['lexos_code'] ?? ''),
             $accessToken,
-            $newRefreshToken !== '' ? $newRefreshToken : $refresh
+            $newRefreshToken !== '' ? $newRefreshToken : $refresh,
+            $expiresIn
         );
 
         return [
@@ -183,7 +189,18 @@ class LexosAuthService
         return '';
     }
 
-    private function saveLexosCredentials(string $code, string $accessToken, ?string $refreshToken): void
+    private function extractExpiresIn(array $data): int
+    {
+        foreach (['expires_in', 'expiresIn', 'ExpiresIn'] as $key) {
+            if (isset($data[$key]) && is_numeric($data[$key])) {
+                return max(60, (int) $data[$key]);
+            }
+        }
+
+        return 21600;
+    }
+
+    private function saveLexosCredentials(string $code, string $accessToken, ?string $refreshToken, int $expiresIn = 21600): void
     {
         $existing = $this->settingsRepository->getApiConfig() ?? [];
         $this->settingsRepository->saveApiConfig([
@@ -197,12 +214,17 @@ class LexosAuthService
             'lexos_refresh_token' => trim((string) ($refreshToken ?? '')),
             'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
             'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
+            'tracking_database_url' => trim((string) ($existing['tracking_database_url'] ?? '')),
+            'lexos_credentials_mode' => trim((string) ($existing['lexos_credentials_mode'] ?? LexosCredentialsService::MODE_AUTO)),
         ]);
+
+        if ($refreshToken !== null && $refreshToken !== '') {
+            $this->trackingLexosTokenRepository->updateTokens($accessToken, $expiresIn, $refreshToken);
+        }
     }
 
     /**
-     * A doc da Lexos cita envio da chave segura em header, mas pode variar o nome.
-     * Enviamos em múltiplos nomes comuns para maximizar compatibilidade.
+     * @return list<string>
      */
     private function buildAuthHeaders(string $contentType): array
     {
@@ -211,10 +233,9 @@ class LexosAuthService
             'Content-Type: ' . $contentType,
         ];
 
-        $cfg = $this->settingsRepository->getApiConfig() ?? [];
-        $integrationKey = trim((string) ($cfg['lexos_integration_key'] ?? ''));
+        $integrationKey = trim((string) ($this->lexosCredentialsService->resolve()['integration_key'] ?? ''));
         if ($integrationKey !== '') {
-            $customHeaderName = trim((string) ($cfg['lexos_integration_header_name'] ?? ''));
+            $customHeaderName = trim((string) ($this->lexosCredentialsService->resolve()['integration_header_name'] ?? ''));
             if ($customHeaderName !== '' && strcasecmp($customHeaderName, 'Chave') !== 0) {
                 $headers[] = $customHeaderName . ': ' . $integrationKey;
             }
@@ -235,7 +256,6 @@ class LexosAuthService
             return '';
         }
 
-        // Se o usuário colar URL completa do callback, extrai o parâmetro code.
         if (str_contains($value, 'code=')) {
             $parts = parse_url($value);
             if (is_array($parts) && isset($parts['query'])) {
