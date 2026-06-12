@@ -390,6 +390,8 @@ if ($page === 'protheus-monitor-nfe' && ($_GET['export'] ?? '') === 'xlsx') {
         $emissaoDe = trim((string) ($_GET['emissao_de'] ?? $dataCorte));
         $emissaoAte = trim((string) ($_GET['emissao_ate'] ?? date('Y-m-d')));
         $statusFilter = strtolower(trim((string) ($_GET['status_sefaz'] ?? '')));
+        $marketplace = trim((string) ($_GET['marketplace'] ?? ''));
+        $filterPedMarketplace = trim((string) ($_GET['ped_marketplace'] ?? ''));
         if ($emissaoDe === '') {
             $emissaoDe = $dataCorte;
         }
@@ -397,7 +399,14 @@ if ($page === 'protheus-monitor-nfe' && ($_GET['export'] ?? '') === 'xlsx') {
             $emissaoDe = $dataCorte;
         }
 
-        $filePath = $app['protheusNfeMonitorService']->exportToXlsx($filial, $emissaoDe, $emissaoAte, $statusFilter);
+        $filePath = $app['protheusNfeMonitorService']->exportToXlsx(
+            $filial,
+            $emissaoDe,
+            $emissaoAte,
+            $statusFilter,
+            $marketplace,
+            $filterPedMarketplace
+        );
         $fileName = basename($filePath);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
@@ -439,7 +448,8 @@ if ($page === 'protheus-monitor-pedidos-erro' && ($_GET['export'] ?? '') === 'xl
             ($_GET['somente_erro'] ?? '1') !== '0',
             trim((string) ($_GET['idlexo'] ?? '')),
             trim((string) ($_GET['ped_mar'] ?? '')),
-            trim((string) ($_GET['texto_erro'] ?? ''))
+            trim((string) ($_GET['texto_erro'] ?? '')),
+            trim((string) ($_GET['marketplace'] ?? ''))
         );
         $fileName = basename($filePath);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

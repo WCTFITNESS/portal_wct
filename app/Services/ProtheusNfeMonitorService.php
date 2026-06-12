@@ -9,6 +9,19 @@ use Shuchkin\SimpleXLSXGen;
 
 class ProtheusNfeMonitorService
 {
+  /**
+   * Canais exibidos no filtro mesmo sem registro no recorte do monitor.
+   *
+   * @var list<string>
+   */
+  private const MARKETPLACES_PADRAO = [
+    'AMAZON',
+    'DECATHLON',
+    'LEXOS ERP',
+    'MERCADO LIVRE',
+    'WEB CONTINENTAL',
+  ];
+
   private const COLOR_HEADER = 'F1F5F9';
   private const COLOR_ROW_AUTORIZADA = 'DCFCE7';
   private const COLOR_ROW_REJEITADA = 'FEE2E2';
@@ -130,9 +143,15 @@ class ProtheusNfeMonitorService
     };
   }
 
-  public function exportToXlsx(string $filial, string $emissaoDe, string $emissaoAte, string $statusFilter = ''): string
-  {
-    $rows = $this->listAll($filial, $emissaoDe, $emissaoAte, $statusFilter);
+  public function exportToXlsx(
+    string $filial,
+    string $emissaoDe,
+    string $emissaoAte,
+    string $statusFilter = '',
+    string $marketplace = '',
+    string $pedidosCsv = ''
+  ): string {
+    $rows = $this->listAll($filial, $emissaoDe, $emissaoAte, $statusFilter, $marketplace, $pedidosCsv);
     $columns = self::exportColumns();
 
     $headerRow = [];
@@ -171,17 +190,24 @@ class ProtheusNfeMonitorService
   /**
    * @return list<array<string, mixed>>
    */
-  public function listAll(string $filial, string $emissaoDe, string $emissaoAte, string $statusFilter = ''): array
-  {
+  public function listAll(
+    string $filial,
+    string $emissaoDe,
+    string $emissaoAte,
+    string $statusFilter = '',
+    string $marketplace = '',
+    string $pedidosCsv = ''
+  ): array {
     $pdo = $this->connectionService->connect();
-    $params = $this->baseParams($filial, $emissaoDe, $emissaoAte);
+    $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, $marketplace, $pedidosCsv);
 
     $sql = $this->baseSql($pdo)
       . $this->statusWhereSql($pdo, $statusFilter)
+      . $this->marketplacePedidoWhereSql($ctx)
       . ' ORDER BY SF2.F2_EMISSAO DESC, SF2.F2_DOC, SF2.F2_SERIE';
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
+    $stmt->execute(ProtheusSqlHelper::paramsForSql($sql, $ctx['params']));
     $rows = $stmt->fetchAll();
 
     return is_array($rows) ? $rows : [];
@@ -204,29 +230,34 @@ class ProtheusNfeMonitorService
     string $emissaoAte,
     string $statusFilter = '',
     int $page = 1,
-    int $perPage = 50
+    int $perPage = 50,
+    string $marketplace = '',
+    string $pedidosCsv = ''
   ): array {
     $page = max(1, $page);
     $perPage = max(10, min(200, $perPage));
     $offset = ($page - 1) * $perPage;
 
     $pdo = $this->connectionService->connect();
-    $params = $this->baseParams($filial, $emissaoDe, $emissaoAte);
+    $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, $marketplace, $pedidosCsv);
+    $params = $ctx['params'];
     $statusWhere = $this->statusWhereSql($pdo, $statusFilter);
+    $extraWhere = $this->marketplacePedidoWhereSql($ctx);
     $logConfig = $this->resolveSefazLogConfig($pdo);
 
-    $countSql = 'SELECT COUNT(1) AS total FROM (' . $this->baseSql($pdo) . $statusWhere . ') AS q';
+    $countSql = 'SELECT COUNT(1) AS total FROM (' . $this->baseSql($pdo) . $statusWhere . $extraWhere . ') AS q';
     $countStmt = $pdo->prepare($countSql);
-    $countStmt->execute($params);
+    $countStmt->execute(ProtheusSqlHelper::paramsForSql($countSql, $params));
     $total = (int) ($countStmt->fetch()['total'] ?? 0);
 
     $sql = $this->baseSql($pdo)
       . $statusWhere
+      . $extraWhere
       . ' ORDER BY SF2.F2_EMISSAO DESC, SF2.F2_DOC, SF2.F2_SERIE'
       . ' OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY';
 
     $stmt = $pdo->prepare($sql);
-    foreach ($params as $key => $value) {
+    foreach (ProtheusSqlHelper::paramsForSql($sql, $params) as $key => $value) {
       $stmt->bindValue($key, $value);
     }
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -335,15 +366,160 @@ class ProtheusNfeMonitorService
   }
 
   /**
-   * @return array<string, string>
+   * @return list<string>
    */
-  private function baseParams(string $filial, string $emissaoDe, string $emissaoAte): array
+  public function listMarketplaces(string $filial, string $emissaoDe, string $emissaoAte): array
   {
-    return [
+    $pdo = $this->connectionService->connect();
+    $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, '', '');
+
+    $sf2 = ProtheusSqlHelper::tbl('SF2010', 'SF2');
+    $sc5 = ProtheusSqlHelper::tbl('SC5010', 'SC5');
+
+    $sql = 'SELECT DISTINCT RTRIM(SC5.C5_ZMAKET) AS marketplace
+FROM ' . $sf2 . '
+INNER JOIN ' . $sc5 . '
+    ON SC5.C5_FILIAL = SF2.F2_FILIAL
+    AND SC5.C5_NOTA = SF2.F2_DOC
+    AND SC5.C5_SERIE = SF2.F2_SERIE
+    AND SC5.D_E_L_E_T_ = \' \'
+WHERE SF2.D_E_L_E_T_ = \' \'
+    AND SF2.F2_FILIAL = :filial
+    AND SF2.F2_EMISSAO BETWEEN :emissao_de AND :emissao_ate
+    AND UPPER(RTRIM(ISNULL(SF2.F2_FIMP, \'\'))) IN (\'S\', \'N\', \'D\')
+    AND RTRIM(ISNULL(SC5.C5_ZMAKET, \'\')) <> \'\'
+ORDER BY marketplace';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(ProtheusSqlHelper::paramsForSql($sql, $ctx['params']));
+    $rows = $stmt->fetchAll();
+
+    $lista = [];
+    if (is_array($rows)) {
+      foreach ($rows as $row) {
+        if (!is_array($row)) {
+          continue;
+        }
+        $nome = trim((string) ($row['marketplace'] ?? ''));
+        if ($nome !== '') {
+          $lista[] = $nome;
+        }
+      }
+    }
+
+    return $this->mergeMarketplaceOptions($lista);
+  }
+
+  /**
+   * @return list<string>
+   */
+  public function parseBatchFilter(string $input, int $maxItems = 100): array
+  {
+    $input = trim($input);
+    if ($input === '') {
+      return [];
+    }
+
+    $parts = preg_split('/[\s,;]+/', $input) ?: [];
+    $items = [];
+    foreach ($parts as $part) {
+      $value = trim($part);
+      if ($value !== '') {
+        $items[] = $value;
+      }
+    }
+
+    $unique = [];
+    foreach ($items as $value) {
+      $key = strtoupper($value);
+      if (!isset($unique[$key])) {
+        $unique[$key] = $value;
+      }
+    }
+
+    return array_slice(array_values($unique), 0, $maxItems);
+  }
+
+  /**
+   * @return array{params: array<string, string>, pedidos: list<string>}
+   */
+  private function buildFilterContext(
+    string $filial,
+    string $emissaoDe,
+    string $emissaoAte,
+    string $marketplace = '',
+    string $pedidosCsv = ''
+  ): array {
+    $params = [
       ':filial' => $this->normalizeFilial($filial),
       ':emissao_de' => $this->normalizeProtheusDate($emissaoDe, '20260101'),
       ':emissao_ate' => $this->normalizeProtheusDate($emissaoAte, date('Ymd')),
     ];
+    $marketplace = trim($marketplace);
+    if ($marketplace !== '') {
+      $params[':marketplace'] = $marketplace;
+    }
+
+    $pedidos = $this->parseBatchFilter($pedidosCsv);
+    foreach ($pedidos as $i => $ped) {
+      $params[':ped_' . $i] = $ped;
+    }
+
+    return [
+      'params' => $params,
+      'pedidos' => $pedidos,
+    ];
+  }
+
+  /**
+   * @param array{params: array<string, string>, pedidos: list<string>} $ctx
+   */
+  private function marketplacePedidoWhereSql(array $ctx): string
+  {
+    $sql = '';
+    if (isset($ctx['params'][':marketplace'])) {
+      $sql .= ProtheusSqlHelper::marketplaceAndSql($ctx['params'][':marketplace']);
+    }
+
+    $pedidos = $ctx['pedidos'];
+    if ($pedidos !== []) {
+      $placeholders = [];
+      foreach (array_keys($pedidos) as $i) {
+        $placeholders[] = ':ped_' . $i;
+      }
+      $sql .= ' AND RTRIM(SC5.C5_PEDMAR) IN (' . implode(', ', $placeholders) . ')';
+    }
+
+    return $sql;
+  }
+
+  /**
+   * @param list<string> ...$listas
+   * @return list<string>
+   */
+  private function mergeMarketplaceOptions(array ...$listas): array
+  {
+    $porChave = [];
+    $temWebContinental = false;
+    foreach (array_merge(self::MARKETPLACES_PADRAO, ...$listas) as $nome) {
+      $nome = trim($nome);
+      if ($nome === '') {
+        continue;
+      }
+      if (ProtheusSqlHelper::isWebContinentalFilter($nome)) {
+        $temWebContinental = true;
+        continue;
+      }
+      $porChave[strtoupper($nome)] = $nome;
+    }
+    if ($temWebContinental) {
+      $porChave['WEB CONTINENTAL'] = 'WEB CONTINENTAL';
+    }
+
+    $nomes = array_values($porChave);
+    usort($nomes, static fn (string $a, string $b): int => strcasecmp($a, $b));
+
+    return $nomes;
   }
 
   private function baseSql(PDO $pdo): string

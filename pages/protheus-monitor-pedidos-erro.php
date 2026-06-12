@@ -18,9 +18,13 @@ $dataAte = trim((string) ($_GET['data_ate'] ?? date('Y-m-d')));
 $somenteErro = ($_GET['somente_erro'] ?? '1') !== '0';
 $idlexo = trim((string) ($_GET['idlexo'] ?? ''));
 $pedMar = trim((string) ($_GET['ped_mar'] ?? ''));
+$marketplace = trim((string) ($_GET['marketplace'] ?? ''));
 $textoErro = trim((string) ($_GET['texto_erro'] ?? ''));
 $page = max(1, (int) ($_GET['p'] ?? 1));
 $perPage = max(10, min(200, (int) ($_GET['per_page'] ?? 50)));
+
+$parsedPedidos = [];
+$marketplaceOptions = [];
 
 if ($dataDe === '') {
     $dataDe = $dataCorte;
@@ -39,6 +43,8 @@ if ($settings === null) {
     $feedbackClass = 'err';
 } else {
     try {
+        $parsedPedidos = $monitorService->parseBatchFilter($pedMar);
+        $marketplaceOptions = $monitorService->defaultMarketplaceOptions();
         $result = $monitorService->listPedidos(
             $filial,
             $dataDe,
@@ -48,7 +54,8 @@ if ($settings === null) {
             $pedMar,
             $textoErro,
             $page,
-            $perPage
+            $perPage,
+            $marketplace
         );
         $schemaNotes = $result['schema_notes'] ?? [];
     } catch (Throwable $exception) {
@@ -59,7 +66,7 @@ if ($settings === null) {
 
 function protheus_za4_query(array $overrides = []): string
 {
-    global $baseUrl, $filial, $dataDe, $dataAte, $somenteErro, $idlexo, $pedMar, $textoErro, $perPage;
+    global $baseUrl, $filial, $dataDe, $dataAte, $somenteErro, $idlexo, $pedMar, $marketplace, $textoErro, $perPage;
 
     $params = array_merge([
         'page' => 'protheus-monitor-pedidos-erro',
@@ -69,6 +76,7 @@ function protheus_za4_query(array $overrides = []): string
         'somente_erro' => $somenteErro ? '1' : '0',
         'idlexo' => $idlexo,
         'ped_mar' => $pedMar,
+        'marketplace' => $marketplace,
         'texto_erro' => $textoErro,
         'per_page' => (string) $perPage,
     ], $overrides);
@@ -96,7 +104,8 @@ $deletedHint = ProtheusZa4PedidosErroMonitorService::deletedFlagSql('ZA4');
     <p style="font-size:.9rem;color:#64748b;">
         Exclusao logica: <code><?= htmlspecialchars($deletedHint) ?></code> (um espaco — padrao Protheus no portal).
         Consulta paginada: no maximo <strong>200</strong> linhas por pagina; contagem e lista filtram so em ZA4
-        (joins SC5/ZA5 apenas nas linhas da pagina). Timeout SQL: 45s.
+        (joins SC5/ZA5 apenas nas linhas da pagina). Timeout SQL: <strong>45s</strong>.
+        Para consultas rapidas, informe <strong>pedido marketplace</strong>, <strong>ID Lexos</strong> ou <strong>marketplace</strong>.
     </p>
 
     <?php if ($schemaNotes !== []): ?>
@@ -123,11 +132,22 @@ $deletedHint = ProtheusZa4PedidosErroMonitorService::deletedFlagSql('ZA4');
             <label>Data ate
                 <input type="date" name="data_ate" value="<?= htmlspecialchars($dataAte) ?>">
             </label>
+            <label>Marketplace
+                <select name="marketplace">
+                    <option value="">Todos</option>
+                    <?php foreach ($marketplaceOptions as $opt): ?>
+                        <option value="<?= htmlspecialchars($opt) ?>"<?= $marketplace === $opt ? ' selected' : '' ?>>
+                            <?= htmlspecialchars($opt) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>ID Lexos (contem)
                 <input type="text" name="idlexo" value="<?= htmlspecialchars($idlexo) ?>" placeholder="Ex.: 12345">
             </label>
-            <label>Ped. marketplace (contem)
-                <input type="text" name="ped_mar" value="<?= htmlspecialchars($pedMar) ?>" placeholder="Ex.: 2000016...">
+            <label class="filter-span-2">Nº pedido marketplace
+                <input type="text" name="ped_mar" value="<?= htmlspecialchars($pedMar) ?>"
+                       placeholder="Ex.: A001335992393, W0011635941348106 (virgula)">
             </label>
             <label>Texto do erro (contem)
                 <input type="text" name="texto_erro" value="<?= htmlspecialchars($textoErro) ?>" placeholder="Trecho da mensagem">
@@ -151,9 +171,15 @@ $deletedHint = ProtheusZa4PedidosErroMonitorService::deletedFlagSql('ZA4');
     <?php if (is_array($result)): ?>
         <div class="protheus-summary-row">
             <p class="protheus-summary">
-                Total: <strong><?= (int) $result['total'] ?></strong>
+                Total: <strong><?= (int) ($result['total'] ?? 0) < 0 ? 'nao calculado (consulta ampla)' : (string) (int) $result['total'] ?></strong>
                 | Pagina <strong><?= (int) $result['page'] ?></strong> de <strong><?= (int) $result['total_pages'] ?></strong>
                 <?= $somenteErro ? '| Filtro: <strong>somente erro</strong>' : '| Filtro: <strong>todos</strong>' ?>
+                <?php if ($marketplace !== ''): ?>
+                    | Marketplace: <strong><?= htmlspecialchars($marketplace) ?></strong>
+                <?php endif; ?>
+                <?php if ($parsedPedidos !== []): ?>
+                    | Ped. marketplace: <strong><?= count($parsedPedidos) ?></strong> pedido(s)
+                <?php endif; ?>
             </p>
             <?php if ($canExport): ?>
                 <a class="btn-export-xlsx" href="<?= htmlspecialchars(protheus_za4_query(['export' => 'xlsx', 'p' => null])) ?>">Exportar Excel</a>
@@ -189,7 +215,13 @@ $deletedHint = ProtheusZa4PedidosErroMonitorService::deletedFlagSql('ZA4');
             </table>
         </div>
 
-        <?php if ((int) $result['total_pages'] > 1): ?>
+        <?php if (($result['query_hint'] ?? '') === 'broad_pagination'): ?>
+            <p class="msg err" style="margin-top:10px;">
+                Paginacao indisponivel em consulta ampla. Informe pedido marketplace, ID Lexos ou marketplace e filtre novamente.
+            </p>
+        <?php endif; ?>
+
+        <?php if ((int) $result['total_pages'] > 1 && (int) ($result['total'] ?? 0) >= 0): ?>
             <nav class="pagination">
                 <?php if ($page > 1): ?>
                     <a href="<?= htmlspecialchars(protheus_za4_query(['p' => (string) ($page - 1)])) ?>">&laquo; Anterior</a>
@@ -214,6 +246,7 @@ $deletedHint = ProtheusZa4PedidosErroMonitorService::deletedFlagSql('ZA4');
         align-items: end;
     }
     .protheus-filters label { margin-top: 0; font-weight: bold; font-size: .85rem; }
+    .protheus-filters .filter-span-2 { grid-column: span 2; }
     .filter-check { display: flex; align-items: center; gap: 8px; font-weight: normal; min-height: 38px; }
     .filter-check input { width: auto; margin: 0; }
     .protheus-summary-row {

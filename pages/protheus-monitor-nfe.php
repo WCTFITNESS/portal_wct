@@ -23,8 +23,12 @@ if ($emissaoDe < $dataCorte) {
 }
 $page = max(1, (int) ($_GET['p'] ?? 1));
 $perPage = max(10, min(200, (int) ($_GET['per_page'] ?? 50)));
+$marketplace = trim((string) ($_GET['marketplace'] ?? ''));
+$filterPedMarketplace = trim((string) ($_GET['ped_marketplace'] ?? ''));
 
 $monitorService = $app['protheusNfeMonitorService'];
+$parsedPedidos = $monitorService->parseBatchFilter($filterPedMarketplace);
+$marketplaceOptions = [];
 
 if ($settings === null) {
     $feedback = 'Configure o Protheus em Config Protheus antes de consultar.';
@@ -34,7 +38,20 @@ if ($settings === null) {
     $feedbackClass = 'err';
 } else {
     try {
-        $result = $monitorService->listNotas($filial, $emissaoDe, $emissaoAte, $statusFilter, $page, $perPage);
+        $marketplaceOptions = $monitorService->listMarketplaces($filial, $emissaoDe, $emissaoAte);
+        if ($marketplace !== '' && !in_array($marketplace, $marketplaceOptions, true)) {
+            $marketplace = '';
+        }
+        $result = $monitorService->listNotas(
+            $filial,
+            $emissaoDe,
+            $emissaoAte,
+            $statusFilter,
+            $page,
+            $perPage,
+            $marketplace,
+            $filterPedMarketplace
+        );
     } catch (Throwable $exception) {
         $feedback = 'Erro na consulta: ' . $exception->getMessage();
         $feedbackClass = 'err';
@@ -43,7 +60,7 @@ if ($settings === null) {
 
 function protheus_nfe_query(array $overrides = []): string
 {
-    global $baseUrl, $filial, $emissaoDe, $emissaoAte, $perPage, $statusFilter;
+    global $baseUrl, $filial, $emissaoDe, $emissaoAte, $perPage, $statusFilter, $marketplace, $filterPedMarketplace;
 
     $params = array_merge([
         'page' => 'protheus-monitor-nfe',
@@ -51,6 +68,8 @@ function protheus_nfe_query(array $overrides = []): string
         'emissao_de' => $emissaoDe,
         'emissao_ate' => $emissaoAte,
         'status_sefaz' => $statusFilter,
+        'marketplace' => $marketplace,
+        'ped_marketplace' => $filterPedMarketplace,
         'per_page' => (string) $perPage,
     ], $overrides);
 
@@ -107,6 +126,20 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
                     <option value="rejeitada"<?= $statusFilter === 'rejeitada' ? ' selected' : '' ?>>Rejeitada</option>
                 </select>
             </label>
+            <label>Marketplace
+                <select name="marketplace">
+                    <option value="">Todos</option>
+                    <?php foreach ($marketplaceOptions as $opt): ?>
+                        <option value="<?= htmlspecialchars($opt) ?>"<?= $marketplace === $opt ? ' selected' : '' ?>>
+                            <?= htmlspecialchars($opt) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label class="filter-span-2">Nº pedido marketplace
+                <input type="text" name="ped_marketplace" value="<?= htmlspecialchars($filterPedMarketplace) ?>"
+                       placeholder="Ex.: A001335992393, W0011635941348106 (virgula)">
+            </label>
             <label>Por pagina
                 <select name="per_page">
                     <?php foreach ([25, 50, 100, 200] as $opt): ?>
@@ -123,6 +156,12 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
             <p class="protheus-summary">
                 Total: <strong><?= (int) $result['total'] ?></strong>
                 | Pagina <strong><?= (int) $result['page'] ?></strong> de <strong><?= (int) $result['total_pages'] ?></strong>
+                <?php if ($marketplace !== ''): ?>
+                    | Marketplace: <strong><?= htmlspecialchars($marketplace) ?></strong>
+                <?php endif; ?>
+                <?php if ($parsedPedidos !== []): ?>
+                    | Ped. marketplace: <strong><?= count($parsedPedidos) ?></strong> pedido(s)
+                <?php endif; ?>
             </p>
             <?php if ($canExport): ?>
                 <a
@@ -191,6 +230,7 @@ $canExport = $settings !== null && $app['protheusConnectionService']->isDriverAv
         margin-top: 6px;
         align-items: end;
     }
+    .protheus-filters .filter-span-2 { grid-column: span 2; }
     .protheus-filters label { margin-top: 0; font-weight: bold; font-size: .85rem; }
     .protheus-filters input, .protheus-filters select { margin-top: 4px; }
     .protheus-filters button { margin-top: 0; }

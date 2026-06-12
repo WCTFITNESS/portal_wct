@@ -14,6 +14,19 @@ use Shuchkin\SimpleXLSXGen;
  */
 class ProtheusZa4PedidosErroMonitorService
 {
+    /**
+     * Canais exibidos no filtro mesmo sem registro no recorte do monitor.
+     *
+     * @var list<string>
+     */
+    private const MARKETPLACES_PADRAO = [
+        'AMAZON',
+        'DECATHLON',
+        'LEXOS ERP',
+        'MERCADO LIVRE',
+        'WEB CONTINENTAL',
+    ];
+
     /** Registro nao excluido no Protheus (padrao confirmado nas demais consultas do portal). */
     private const DELETED_ACTIVE = ' ';
 
@@ -76,7 +89,8 @@ class ProtheusZa4PedidosErroMonitorService
         string $pedMar = '',
         string $textoErro = '',
         int $page = 1,
-        int $perPage = 50
+        int $perPage = 50,
+        string $marketplace = ''
     ): array {
         $filial = $this->normalizeFilial($filial);
         $dataDe = $this->normalizeProtheusDate($dataDe, '20260101');
@@ -88,11 +102,37 @@ class ProtheusZa4PedidosErroMonitorService
         $pdo = $this->connectionService->connect();
         $this->applyQueryTimeout($pdo);
         $schema = $this->resolveSchema($pdo);
-        $params = $this->buildParams($filial, $dataDe, $dataAte, $idlexo, $pedMar, $textoErro, $schema);
+        $ctx = $this->buildFilterContext($filial, $dataDe, $dataAte, $idlexo, $pedMar, $textoErro, $marketplace, $schema);
+        $broad = $this->isBroadQuery($ctx);
+        $notes = $schema['notes'];
 
-        $total = $this->fetchTotal($pdo, $schema, $params, $somenteErro);
-        $rows = $this->fetchPage($pdo, $schema, $params, $somenteErro, $offset, $perPage);
-        $totalPages = $total > 0 ? (int) ceil($total / $perPage) : 1;
+        if ($broad && $page > 1) {
+            $notes[] = 'Consulta ampla: use pedido marketplace, ID Lexos ou marketplace para paginar.';
+
+            return [
+                'rows' => [],
+                'total' => -1,
+                'page' => $page,
+                'per_page' => $perPage,
+                'total_pages' => 1,
+                'schema_notes' => $notes,
+                'query_hint' => 'broad_pagination',
+            ];
+        }
+
+        try {
+            $total = $broad ? -1 : $this->fetchTotal($pdo, $schema, $ctx, $somenteErro);
+            $rows = $this->fetchPage($pdo, $schema, $ctx, $somenteErro, $broad ? 0 : $offset, $perPage, $broad);
+        } catch (\PDOException $exception) {
+            throw new \RuntimeException($this->formatQueryException($exception, $broad), 0, $exception);
+        }
+
+        if ($broad) {
+            $notes[] = 'Total nao calculado (consulta ampla). Informe pedido, ID Lexos ou marketplace para resposta mais rapida.';
+            $totalPages = 1;
+        } else {
+            $totalPages = $total > 0 ? (int) ceil($total / $perPage) : 1;
+        }
 
         return [
             'rows' => $rows,
@@ -100,8 +140,15 @@ class ProtheusZa4PedidosErroMonitorService
             'page' => $page,
             'per_page' => $perPage,
             'total_pages' => $totalPages,
-            'schema_notes' => $schema['notes'],
+            'schema_notes' => $notes,
+            'query_hint' => $broad ? 'broad_list' : null,
         ];
+    }
+
+    /** @return list<string> */
+    public function defaultMarketplaceOptions(): array
+    {
+        return $this->mergeMarketplaceOptions([]);
     }
 
     /**
@@ -114,22 +161,24 @@ class ProtheusZa4PedidosErroMonitorService
         bool $somenteErro = true,
         string $idlexo = '',
         string $pedMar = '',
-        string $textoErro = ''
+        string $textoErro = '',
+        string $marketplace = ''
     ): array {
         $pdo = $this->connectionService->connect();
         $this->applyQueryTimeout($pdo);
         $schema = $this->resolveSchema($pdo);
-        $params = $this->buildParams(
+        $ctx = $this->buildFilterContext(
             $this->normalizeFilial($filial),
             $this->normalizeProtheusDate($dataDe, '20260101'),
             $this->normalizeProtheusDate($dataAte, date('Ymd')),
             $idlexo,
             $pedMar,
             $textoErro,
+            $marketplace,
             $schema
         );
 
-        return $this->fetchPage($pdo, $schema, $params, $somenteErro, 0, self::EXPORT_MAX_ROWS);
+        return $this->fetchPage($pdo, $schema, $ctx, $somenteErro, 0, self::EXPORT_MAX_ROWS);
     }
 
     public function exportToXlsx(
@@ -139,9 +188,19 @@ class ProtheusZa4PedidosErroMonitorService
         bool $somenteErro = true,
         string $idlexo = '',
         string $pedMar = '',
-        string $textoErro = ''
+        string $textoErro = '',
+        string $marketplace = ''
     ): string {
-        $rows = $this->listAllForExport($filial, $dataDe, $dataAte, $somenteErro, $idlexo, $pedMar, $textoErro);
+        $rows = $this->listAllForExport(
+            $filial,
+            $dataDe,
+            $dataAte,
+            $somenteErro,
+            $idlexo,
+            $pedMar,
+            $textoErro,
+            $marketplace
+        );
         $columns = self::exportColumns();
 
         $headerRow = [];
@@ -328,13 +387,126 @@ SQL;
     }
 
     /**
+     * @return list<string>
+     */
+    public function listMarketplaces(string $filial, string $dataDe, string $dataAte): array
+    {
+        $pdo = $this->connectionService->connect();
+        $this->applyQueryTimeout($pdo);
+        $schema = $this->resolveSchema($pdo);
+        $ctx = $this->buildFilterContext(
+            $this->normalizeFilial($filial),
+            $this->normalizeProtheusDate($dataDe, '20260101'),
+            $this->normalizeProtheusDate($dataAte, date('Ymd')),
+            '',
+            '',
+            '',
+            '',
+            $schema
+        );
+
+        if ($schema['mkt4'] !== null) {
+            $sql = 'SELECT DISTINCT RTRIM(ZA4.' . $schema['mkt4'] . ') AS marketplace
+FROM ' . $this->tblZa4() . '
+WHERE ' . $this->deletedFlagSql('ZA4') . '
+    AND ZA4.ZA4_FILIAL = :filial';
+            if ($schema['date4'] !== null) {
+                $sql .= "
+    AND ZA4.{$schema['date4']} BETWEEN :data_de AND :data_ate";
+            }
+            $sql .= "
+    AND RTRIM(ISNULL(ZA4.{$schema['mkt4']}, '')) <> ''
+ORDER BY marketplace";
+        } elseif ($schema['has_sc5']) {
+            $sql = 'SELECT DISTINCT RTRIM(SC5.C5_ZMAKET) AS marketplace
+FROM ' . ProtheusSqlHelper::tbl('SC5010', 'SC5') . '
+WHERE ' . self::deletedFlagSql('SC5') . '
+    AND SC5.C5_FILIAL = :filial
+    AND RTRIM(ISNULL(SC5.C5_ZMAKET, \'\')) <> \'\'';
+            if ($schema['date4'] !== null) {
+                $sql .= '
+    AND EXISTS (
+        SELECT 1
+        FROM ' . $this->tblZa4() . '
+        WHERE ZA4.ZA4_FILIAL = SC5.C5_FILIAL
+            AND ' . $this->deletedFlagSql('ZA4') . '
+            AND ZA4.' . $schema['date4'] . ' BETWEEN :data_de AND :data_ate
+            AND (
+                ' . ($schema['pedmar4'] !== null
+                    ? 'RTRIM(SC5.C5_PEDMAR) = RTRIM(ZA4.' . $schema['pedmar4'] . ')'
+                    : ($schema['idlexo4'] !== null
+                        ? 'RTRIM(SC5.C5_ZIDLEX) = RTRIM(ZA4.' . $schema['idlexo4'] . ')'
+                        : '1 = 1')) . '
+            )
+    )';
+            }
+            $sql .= '
+ORDER BY marketplace';
+        } else {
+            return $this->defaultMarketplaceOptions();
+        }
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(ProtheusSqlHelper::paramsForSql($sql, $ctx['params']));
+        $rows = $stmt->fetchAll();
+
+        $lista = [];
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $nome = trim((string) ($row['marketplace'] ?? ''));
+                if ($nome !== '') {
+                    $lista[] = $nome;
+                }
+            }
+        }
+
+        return $this->mergeMarketplaceOptions($lista);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function parseBatchFilter(string $input, int $maxItems = 100): array
+    {
+        $input = trim($input);
+        if ($input === '') {
+            return [];
+        }
+
+        $parts = preg_split('/[\s,;]+/', $input) ?: [];
+        $items = [];
+        foreach ($parts as $part) {
+            $value = trim($part);
+            if ($value !== '') {
+                $items[] = $value;
+            }
+        }
+
+        $unique = [];
+        foreach ($items as $value) {
+            $key = strtoupper($value);
+            if (!isset($unique[$key])) {
+                $unique[$key] = $value;
+            }
+        }
+
+        return array_slice(array_values($unique), 0, $maxItems);
+    }
+
+    /**
      * Filtros apenas em ZA4 (+ EXISTS em SC5 quando necessario). Sem JOIN/APPLY — rapido para COUNT e paginacao.
      *
      * @param array<string, mixed> $schema
-     * @param array<string, mixed> $params
+     * @param array{params: array<string, string>, pedidos: list<string>} $ctx
      */
-    private function za4FilterSql(array $schema, array $params, bool $somenteErro): string
+    private function za4FilterSql(array $schema, array $ctx, bool $somenteErro): string
     {
+        $params = $ctx['params'];
+        $pedidos = $ctx['pedidos'];
+
         $sql = '
 WHERE ' . $this->deletedFlagSql('ZA4') . '
     AND ZA4.ZA4_FILIAL = :filial';
@@ -344,12 +516,16 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
     AND ZA4.{$schema['date4']} BETWEEN :data_de AND :data_ate";
         }
 
+        if (isset($params[':marketplace'])) {
+            $sql .= $this->marketplaceWhereSql($schema, $params[':marketplace']);
+        }
+
         if (isset($params[':idlexo'])) {
             $idlexoParts = [];
             if ($schema['idlexo4'] !== null) {
                 $idlexoParts[] = 'RTRIM(ZA4.' . $schema['idlexo4'] . ') LIKE :idlexo';
             }
-            $exists = $this->sc5ExistsSql($schema, 'AND RTRIM(SC5.C5_ZIDLEX) LIKE :idlexo');
+            $exists = $this->sc5ExistsFilterSql('AND RTRIM(SC5.C5_ZIDLEX) LIKE :idlexo');
             if ($exists !== '') {
                 $idlexoParts[] = $exists;
             }
@@ -359,18 +535,21 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
             }
         }
 
-        if (isset($params[':ped_mar'])) {
-            $pedParts = [];
+        if ($pedidos !== []) {
+            $placeholders = [];
+            foreach (array_keys($pedidos) as $i) {
+                $placeholders[] = ':ped_' . $i;
+            }
+            $inList = implode(', ', $placeholders);
             if ($schema['pedmar4'] !== null) {
-                $pedParts[] = 'RTRIM(ZA4.' . $schema['pedmar4'] . ') LIKE :ped_mar';
-            }
-            $exists = $this->sc5ExistsSql($schema, 'AND RTRIM(SC5.C5_PEDMAR) LIKE :ped_mar');
-            if ($exists !== '') {
-                $pedParts[] = $exists;
-            }
-            if ($pedParts !== []) {
                 $sql .= '
-    AND (' . implode(' OR ', $pedParts) . ')';
+    AND RTRIM(ZA4.' . $schema['pedmar4'] . ') IN (' . $inList . ')';
+            } else {
+                $exists = $this->sc5ExistsFilterSql('AND RTRIM(SC5.C5_PEDMAR) IN (' . $inList . ')');
+                if ($exists !== '') {
+                    $sql .= '
+    AND ' . $exists;
+                }
             }
         }
 
@@ -393,18 +572,13 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
         return $sql;
     }
 
-    private function sc5ExistsSql(array $schema, string $andExtra = ''): string
+    private function sc5ExistsFilterSql(string $andExtra = ''): string
     {
-        if (!$schema['has_sc5']) {
-            return '';
-        }
-
         return 'EXISTS (
     SELECT 1
     FROM ' . ProtheusSqlHelper::tbl('SC5010', 'SC5') . '
     WHERE SC5.C5_FILIAL = ZA4.ZA4_FILIAL
         AND ' . self::deletedFlagSql('SC5') . '
-        AND ' . $schema['sc5_match_cond'] . '
         ' . $andExtra . '
 )';
     }
@@ -463,16 +637,16 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
     }
 
     /**
-     * @param array<string, mixed> $schema
-     * @param array<string, mixed> $params
+     * @return array{params: array<string, string>, pedidos: list<string>}
      */
-    private function buildParams(
+    private function buildFilterContext(
         string $filial,
         string $dataDe,
         string $dataAte,
         string $idlexo,
         string $pedMar,
         string $textoErro,
+        string $marketplace,
         array $schema
     ): array {
         $params = [
@@ -481,34 +655,144 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
             ':data_ate' => $dataAte,
         ];
 
+        $marketplace = trim($marketplace);
+        if ($marketplace !== '') {
+            $params[':marketplace'] = $marketplace;
+        }
+
         if (trim($idlexo) !== '') {
             $params[':idlexo'] = '%' . trim($idlexo) . '%';
         }
-        if (trim($pedMar) !== '') {
-            $params[':ped_mar'] = '%' . trim($pedMar) . '%';
-        }
         if (trim($textoErro) !== '') {
             $params[':texto_erro'] = '%' . trim($textoErro) . '%';
+        }
+
+        $pedidos = $this->parseBatchFilter($pedMar);
+        foreach ($pedidos as $i => $ped) {
+            $params[':ped_' . $i] = $ped;
         }
 
         if ($schema['date4'] === null) {
             unset($params[':data_de'], $params[':data_ate']);
         }
 
-        return $params;
+        return [
+            'params' => $params,
+            'pedidos' => $pedidos,
+        ];
+    }
+
+    private function marketplaceExpr(array $schema): string
+    {
+        if ($schema['mkt4'] !== null) {
+            if ($schema['has_sc5']) {
+                return 'COALESCE(NULLIF(RTRIM(ZA4.' . $schema['mkt4'] . "), ''), NULLIF(RTRIM(SC5.C5_ZMAKET), ''))";
+            }
+
+            return "NULLIF(RTRIM(ZA4.{$schema['mkt4']}), '')";
+        }
+
+        if ($schema['has_sc5']) {
+            return "NULLIF(RTRIM(SC5.C5_ZMAKET), '')";
+        }
+
+        return "''";
+    }
+
+    private function marketplaceWhereSql(array $schema, string $marketplace): string
+    {
+        if ($schema['mkt4'] !== null) {
+            if (ProtheusSqlHelper::isWebContinentalFilter($marketplace)) {
+                return '
+    AND (' . ProtheusSqlHelper::webContinentalMatchSql('ZA4.' . $schema['mkt4']) . ')';
+            }
+
+            return '
+    AND RTRIM(ZA4.' . $schema['mkt4'] . ') = :marketplace';
+        }
+
+        if (!$schema['has_sc5']) {
+            return '';
+        }
+
+        $sc5Cond = ProtheusSqlHelper::isWebContinentalFilter($marketplace)
+            ? ' AND (' . ProtheusSqlHelper::webContinentalMatchSql('SC5.C5_ZMAKET') . ')'
+            : ' AND RTRIM(SC5.C5_ZMAKET) = :marketplace';
+
+        return '
+    AND ' . $this->sc5ExistsFilterSql($sc5Cond);
+    }
+
+    /**
+     * @param array{params: array<string, string>, pedidos: list<string>} $ctx
+     */
+    private function isBroadQuery(array $ctx): bool
+    {
+        $params = $ctx['params'];
+
+        return $ctx['pedidos'] === []
+            && !isset($params[':idlexo'])
+            && !isset($params[':texto_erro'])
+            && !isset($params[':marketplace']);
+    }
+
+    private function formatQueryException(\PDOException $exception, bool $broad): string
+    {
+        $message = $exception->getMessage();
+        if (stripos($message, 'HYT00') !== false || stripos($message, 'tempo limite') !== false) {
+            if ($broad) {
+                return 'A consulta ampla (somente filial e periodo) excedeu o tempo limite de '
+                    . self::QUERY_TIMEOUT_SEC
+                    . 's. Informe pedido marketplace, ID Lexos ou marketplace para filtrar e acelerar.';
+            }
+
+            return 'A consulta excedeu o tempo limite de ' . self::QUERY_TIMEOUT_SEC
+                . 's. Reduza o periodo, informe menos pedidos ou refine o texto do erro.';
+        }
+
+        return 'Erro SQL: ' . $message;
+    }
+
+    /**
+     * @param list<string> ...$listas
+     * @return list<string>
+     */
+    private function mergeMarketplaceOptions(array ...$listas): array
+    {
+        $porChave = [];
+        $temWebContinental = false;
+        foreach (array_merge(self::MARKETPLACES_PADRAO, ...$listas) as $nome) {
+            $nome = trim($nome);
+            if ($nome === '') {
+                continue;
+            }
+            if (ProtheusSqlHelper::isWebContinentalFilter($nome)) {
+                $temWebContinental = true;
+                continue;
+            }
+            $porChave[strtoupper($nome)] = $nome;
+        }
+        if ($temWebContinental) {
+            $porChave['WEB CONTINENTAL'] = 'WEB CONTINENTAL';
+        }
+
+        $nomes = array_values($porChave);
+        usort($nomes, static fn (string $a, string $b): int => strcasecmp($a, $b));
+
+        return $nomes;
     }
 
     /**
      * @param array<string, mixed> $schema
-     * @param array<string, mixed> $params
+     * @param array{params: array<string, string>, pedidos: list<string>} $ctx
      */
-    private function fetchTotal(PDO $pdo, array $schema, array $params, bool $somenteErro): int
+    private function fetchTotal(PDO $pdo, array $schema, array $ctx, bool $somenteErro): int
     {
         $sql = 'SELECT COUNT(1) AS total FROM ' . $this->tblZa4()
-            . $this->za4FilterSql($schema, $params, $somenteErro);
+            . $this->za4FilterSql($schema, $ctx, $somenteErro);
 
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
+        $stmt->execute(ProtheusSqlHelper::paramsForSql($sql, $ctx['params']));
         $row = $stmt->fetch();
 
         return is_array($row) ? (int) ($row['total'] ?? 0) : 0;
@@ -516,34 +800,44 @@ WHERE ' . $this->deletedFlagSql('ZA4') . '
 
     /**
      * @param array<string, mixed> $schema
-     * @param array<string, mixed> $params
+     * @param array{params: array<string, string>, pedidos: list<string>} $ctx
      * @return list<array<string, mixed>>
      */
     private function fetchPage(
         PDO $pdo,
         array $schema,
-        array $params,
+        array $ctx,
         bool $somenteErro,
         int $offset,
-        int $limit
+        int $limit,
+        bool $broadTopOnly = false
     ): array {
         $recno = $schema['recno'];
+        $pageSelect = $broadTopOnly
+            ? 'SELECT TOP (:limit) ZA4.' . $recno . ' AS recno'
+            : 'SELECT ZA4.' . $recno . ' AS recno';
+        $pageTail = $broadTopOnly
+            ? ''
+            : '
+    OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY';
+
         $sql = ';WITH pg AS (
-    SELECT ZA4.' . $recno . ' AS recno
+    ' . $pageSelect . '
     FROM ' . $this->tblZa4()
-            . $this->za4FilterSql($schema, $params, $somenteErro)
+            . $this->za4FilterSql($schema, $ctx, $somenteErro)
             . $this->orderSqlZa4($schema)
-            . '
-    OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+            . $pageTail . '
 )
 ' . $this->selectEnrichedSql($schema) . '
 INNER JOIN pg ON pg.recno = ZA4.' . $recno;
 
         $stmt = $pdo->prepare($sql);
-        foreach ($params as $key => $value) {
+        foreach (ProtheusSqlHelper::paramsForSql($sql, $ctx['params']) as $key => $value) {
             $stmt->bindValue($key, $value);
         }
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        if (!$broadTopOnly) {
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        }
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
         $rows = $stmt->fetchAll();
