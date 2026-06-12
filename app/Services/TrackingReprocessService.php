@@ -31,9 +31,7 @@ final class TrackingReprocessService
         }
 
         if (!$this->trackingDatabase->isConfigured()) {
-            throw new RuntimeException(
-                'URL do banco Tracking não configurada. Preencha em Configuração API → Lexos ou defina TRACKING_DATABASE_URL no Render.'
-            );
+            return $this->reprocessViaTrackingApi($codigo);
         }
 
         $existente = $this->findPedidoIndexado($codigo);
@@ -213,6 +211,54 @@ final class TrackingReprocessService
         }
 
         return [];
+    }
+
+    /**
+     * Fallback: Portal sem TRACKING_DATABASE_URL delega ao Tracking (que já tem DATABASE_URL no Render).
+     *
+     * @return array<string, mixed>
+     */
+    private function reprocessViaTrackingApi(string $codigo): array
+    {
+        $base = rtrim($this->trackingApiBaseUrl, '/');
+        $url = $base . '/api/webhook/reprocess-codigo';
+        $payload = json_encode(['codigo' => $codigo], JSON_THROW_ON_ERROR);
+
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new RuntimeException('Falha ao iniciar requisição para o Tracking.');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_TIMEOUT => 180,
+        ]);
+
+        $raw = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($raw === false) {
+            throw new RuntimeException('Falha ao chamar Tracking: ' . $error);
+        }
+
+        $decoded = json_decode($raw, true);
+        if ($status < 200 || $status >= 300) {
+            $msg = is_array($decoded) ? (string) ($decoded['error'] ?? $raw) : (string) $raw;
+            throw new RuntimeException('Tracking retornou HTTP ' . $status . ': ' . $msg);
+        }
+
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Resposta inválida do Tracking.');
+        }
+
+        $decoded['via'] = 'tracking_api';
+
+        return $decoded;
     }
 
     /**

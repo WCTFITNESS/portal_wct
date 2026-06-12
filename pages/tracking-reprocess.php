@@ -30,8 +30,10 @@ if ($shouldRun) {
         $result = $trackingReprocessService->reprocessByCodigo($codigo);
         if (($result['action'] ?? '') === 'already_indexed') {
             $feedback = 'Pedido já estava indexado no Tracking.';
-        } elseif (($result['indexado'] ?? false) === true) {
+        } elseif (($result['indexado'] ?? false) === true || isset($result['pedido']['id'])) {
             $feedback = 'Pedido reprocessado e indexado com sucesso no Tracking.';
+        } elseif (($result['action'] ?? '') === 'reprocessed' && !empty($result['results'])) {
+            $feedback = 'Reprocessamento enviado ao Tracking. Confira no Dashboard.';
         } else {
             $feedback = 'Webhook enviado ao Tracking, mas o pedido ainda não apareceu na verificação. Veja os detalhes abaixo.';
             $feedbackClass = 'err';
