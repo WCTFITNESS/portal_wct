@@ -127,9 +127,8 @@ final class TrackingReprocessService
             'SELECT DISTINCT pedido_id_lexos
              FROM webhook_logs
              WHERE pedido_id_lexos IS NOT NULL
-               AND pedido_id_lexos <> \'\'
                AND (
-                 pedido_id_lexos ILIKE :term
+                 pedido_id_lexos::text ILIKE :term
                  OR payload::text ILIKE :term
                  OR payload::text ILIKE :term_no_dash
                )
