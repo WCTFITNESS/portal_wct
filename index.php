@@ -6,6 +6,33 @@ $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
+
+if ($page === 'repasse-mp-sync-config') {
+    header('Content-Type: application/json; charset=utf-8');
+    $expected = getenv('REPASSE_MP_DESKTOP_KEY') ?: '';
+    $provided = trim((string) ($_GET['key'] ?? ''));
+    if ($expected === '' || $provided === '' || !hash_equals($expected, $provided)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Chave invalida'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    try {
+        $token = $app['mercadopagoSettingsRepository']->getAccessToken();
+        if ($token === '') {
+            throw new \RuntimeException('Token MP nao configurado no portal.');
+        }
+        echo json_encode([
+            'access_token' => $token,
+            'MP_BASE' => 'https://api.mercadopago.com',
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $exception) {
+        http_response_code(503);
+        echo json_encode(['error' => $exception->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if ($page === 'protheus-monitor-medidos') {
     $params = $_GET;
     $params['page'] = 'protheus-monitor-romaneio';

@@ -101,6 +101,20 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
     .legend-item { display: inline-block; padding: 5px 9px; border-radius: 6px; font-size: .8rem; font-weight: bold; }
     .legend-romaneio { background: #fef9c3; color: #713f12; border: 1px solid #fde047; }
     .legend-liberacao { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
+    .legend-sefaz { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .status-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: .72rem;
+        font-weight: bold;
+        white-space: nowrap;
+    }
+    .status-sim { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .status-nao { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+    .status-erro { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .status-pendente { background: #fef9c3; color: #713f12; border: 1px solid #fde047; }
+    .status-neutro { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
     .protheus-filters .filter-grid {
         display: grid;
         grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -220,6 +234,7 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
     .protheus-table tbody tr:hover { background: #f8fafc; }
     tr.row-alert-romaneio { background: #fef9c3 !important; }
     tr.row-alert-liberacao { background: #ffedd5 !important; }
+    tr.row-alert-sefaz { background: #fef2f2 !important; }
     .cell-empty-alert {
         color: #dc2626;
         font-weight: bold;
@@ -237,15 +252,18 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
     }
 </style>
     <h1>Monitor de Pedidos</h1>
-    <p>Visao completa de notas fiscais marketplace: CPF/CNPJ, romaneio, transportadora e data de saida.</p>
+    <p>Visao completa de notas fiscais marketplace: romaneio, EDI, SEFAZ, transportadora e data de saida.</p>
     <p style="font-size:.9rem;color:#64748b;">
         Data de corte (config): <strong><?= htmlspecialchars(date('d/m/Y', strtotime($dataCorte))) ?></strong>
         — emissao anterior nao e listada.
     </p>
 
     <div class="protheus-legend">
-        <span class="legend-item legend-romaneio">Sem romaneio (GW1_NRROM)</span>
-        <span class="legend-item legend-liberacao">Sem data saida (GW1_DTSAI)</span>
+        <span class="legend-item legend-romaneio">Sem romaneio</span>
+        <span class="legend-item legend-liberacao">Sem data saida</span>
+        <span class="legend-item legend-sefaz">SEFAZ rejeitada</span>
+        <span class="legend-item status-sim">Romaneio / EDI = Sim</span>
+        <span class="legend-item status-pendente">SEFAZ pendente</span>
     </div>
 
     <?php if ($feedback !== null && !$shouldQuery): ?>

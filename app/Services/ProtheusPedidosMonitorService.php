@@ -74,7 +74,10 @@ class ProtheusPedidosMonitorService
             'CPF_CNPJ' => 'CPF/CNPJ',
             'F2_EMISSAO' => 'Emissao NF',
             'F2_VALBRUT' => 'Valor bruto',
-            'ROMANEIO' => 'Romaneio',
+            'ROMANEIO' => 'Nº romaneio',
+            'TEM_ROMANEIO' => 'Romaneio',
+            'TEM_EDI' => 'EDI',
+            'SEFAZ_STATUS' => 'SEFAZ',
             'DT_SAIDA' => 'Data saida',
             'HR_SAIDA' => 'Hora saida',
             'TRANSP_COD' => 'Transp. cod.',
@@ -184,6 +187,7 @@ class ProtheusPedidosMonitorService
             if (!is_array($row)) {
                 continue;
             }
+            $row = $this->enrichRowWithStatuses($row);
             $line = [];
             foreach (array_keys($columns) as $key) {
                 $text = $this->displayCellText((string) $key, $row[$key] ?? null);
@@ -395,7 +399,7 @@ WHERE SF2.D_E_L_E_T_ = \' \'
         $totalPages = $total > 0 ? (int) ceil($total / $perPage) : 1;
 
         return [
-            'rows' => $rows,
+            'rows' => $this->enrichRowsWithStatuses($rows),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -437,7 +441,7 @@ WHERE SF2.D_E_L_E_T_ = \' \'
         $missingPedidos = ProtheusSqlHelper::missingFromBatch($ctx['pedidos'], $foundBatch['pedidos']);
 
         return [
-            'rows' => $rows,
+            'rows' => $this->enrichRowsWithStatuses($rows),
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -475,6 +479,11 @@ WHERE SF2.D_E_L_E_T_ = \' \'
      */
     public function rowAlertClass(array $row): string
     {
+        $sefaz = ProtheusNfeMonitorService::resolveSefazStatus($row);
+        if ($sefaz === 'rejeitada') {
+            return 'row-alert-sefaz';
+        }
+
         $romaneio = $this->cellText($row['ROMANEIO'] ?? null);
         $saida = $this->cellText($row['DT_SAIDA'] ?? null);
 
@@ -486,6 +495,89 @@ WHERE SF2.D_E_L_E_T_ = \' \'
         }
 
         return '';
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function enrichRowsWithStatuses(array $rows): array
+    {
+        return array_map(fn (array $row): array => $this->enrichRowWithStatuses($row), $rows);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function enrichRowWithStatuses(array $row): array
+    {
+        $row['TEM_ROMANEIO'] = $this->resolveTemRomaneioLabel($row);
+        $row['TEM_EDI'] = $this->resolveTemEdiLabel($row);
+        $row['SEFAZ_STATUS'] = $this->resolveSefazLabel($row);
+
+        return $row;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function resolveTemRomaneioLabel(array $row): string
+    {
+        if (!$this->rowHasNotaFiscal($row)) {
+            return '—';
+        }
+
+        return trim((string) ($row['ROMANEIO'] ?? '')) !== '' ? 'Sim' : 'Não';
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function resolveTemEdiLabel(array $row): string
+    {
+        if (!$this->rowHasNotaFiscal($row)) {
+            return '—';
+        }
+
+        $sit = trim((string) ($row['GW1_SITINT'] ?? ''));
+        if ($sit === '' || $sit === '0') {
+            return 'Não';
+        }
+
+        if ($sit === '1' || (is_numeric($sit) && (int) round((float) $sit) === 1)) {
+            return 'Sim';
+        }
+
+        if ($sit === '2' || (is_numeric($sit) && (int) round((float) $sit) === 2)) {
+            return 'Erro';
+        }
+
+        return $sit;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function resolveSefazLabel(array $row): string
+    {
+        if (!$this->rowHasNotaFiscal($row)) {
+            return '—';
+        }
+
+        return ProtheusNfeMonitorService::formatSefazStatusLabel(
+            ProtheusNfeMonitorService::resolveSefazStatus($row)
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function rowHasNotaFiscal(array $row): bool
+    {
+        $doc = trim((string) ($row['F2_DOC'] ?? ''));
+
+        return $doc !== '' && $doc !== '0';
     }
 
     private function exportHeaderCell(string $label): string
@@ -977,6 +1069,7 @@ ORDER BY SC5.C5_NUM DESC';
             'F2_DOC' => '',
             'F2_SERIE' => '',
             'F2_CHVNFE' => '',
+            'F2_FIMP' => '',
             'CPF_CNPJ' => '',
             'F2_EMISSAO' => '',
             'F2_VALBRUT' => $row['valbrut'] ?? null,
@@ -1201,6 +1294,7 @@ WHERE ZA4.ZA4_FILIAL = :filial
     SF2.F2_DOC,
     SF2.F2_SERIE,
     RTRIM(ISNULL(SF2.F2_CHVNFE, \'\')) AS F2_CHVNFE,
+    RTRIM(ISNULL(SF2.F2_FIMP, \'\')) AS F2_FIMP,
     RTRIM(ISNULL(SA1.A1_CGC, \'\')) AS CPF_CNPJ,
     SUBSTRING(SF2.F2_EMISSAO, 7, 2) + \'/\' +
         SUBSTRING(SF2.F2_EMISSAO, 5, 2) + \'/\' +
@@ -2186,6 +2280,7 @@ SELECT
     SF2.F2_DOC,
     SF2.F2_SERIE,
     RTRIM(ISNULL(SF2.F2_CHVNFE, '')) AS F2_CHVNFE,
+    RTRIM(ISNULL(SF2.F2_FIMP, '')) AS F2_FIMP,
     RTRIM(SA1.A1_CGC) AS CPF_CNPJ,
     SUBSTRING(SF2.F2_EMISSAO, 7, 2) + '/' +
         SUBSTRING(SF2.F2_EMISSAO, 5, 2) + '/' +
@@ -2320,6 +2415,9 @@ SQL;
         if ($columnKey === 'DT_APROVACAO') {
             return self::formatDataAprovacao($value);
         }
+        if ($columnKey === 'TEM_ROMANEIO' || $columnKey === 'TEM_EDI' || $columnKey === 'SEFAZ_STATUS') {
+            return $this->cellText($value);
+        }
 
         $text = $this->cellText($value);
 
@@ -2337,6 +2435,27 @@ SQL;
     {
         $raw = $this->cellText($value);
 
+        if ($columnKey === 'TEM_ROMANEIO') {
+            return $this->statusBadgeHtml($raw, [
+                'Sim' => 'status-sim',
+                'Não' => 'status-nao',
+            ], 'status-neutro');
+        }
+        if ($columnKey === 'TEM_EDI') {
+            return $this->statusBadgeHtml($raw, [
+                'Sim' => 'status-sim',
+                'Não' => 'status-nao',
+                'Erro' => 'status-erro',
+            ], 'status-neutro');
+        }
+        if ($columnKey === 'SEFAZ_STATUS') {
+            return $this->statusBadgeHtml($raw, [
+                'Autorizada' => 'status-sim',
+                'Rejeitada' => 'status-erro',
+                'Pendente' => 'status-pendente',
+            ], 'status-neutro');
+        }
+
         if ($columnKey === 'ROMANEIO' && $raw === '') {
             return '<span class="cell-empty-alert">SEM Nº ROMANEIO</span>';
         }
@@ -2345,6 +2464,18 @@ SQL;
         }
 
         return htmlspecialchars($this->displayCellText($columnKey, $value), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    /**
+     * @param array<string, string> $map
+     */
+    private function statusBadgeHtml(string $label, array $map, string $fallbackClass): string
+    {
+        $class = $map[$label] ?? $fallbackClass;
+
+        return '<span class="status-badge ' . $class . '">'
+            . htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+            . '</span>';
     }
 
     private function isEmptyAlertCell(string $columnKey, string $displayText): bool

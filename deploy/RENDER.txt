@@ -65,6 +65,10 @@
    MERCADOPAGO_PARALLEL_CHUNK=64
    MERCADOPAGO_LOG_BULK_REQUESTS=false
 
+   Repasse MP desktop (.exe para usuario leigo):
+   REPASSE_MP_DESKTOP_KEY=wct-repasse-desktop-2026
+   (mesma chave embutida no RepasseMercadoPago.exe; altere em producao se necessario)
+
 8) Opcional: use o arquivo render.yaml na raiz como Blueprint (ajuste nome/regiao).
 
 ================================================================================
