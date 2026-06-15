@@ -447,6 +447,13 @@ $renderJsonDetails = static function (array $row, string $label = 'Ver JSON'): s
     <?php if ($feedback): ?>
         <div class="msg <?= $feedbackClass ?>"><?= htmlspecialchars($feedback) ?></div>
     <?php endif; ?>
+    <?php if ($isOrderFilterActive && $monitor && (int) ($monitor['summary']['total_pedidos'] ?? 0) === 0): ?>
+        <p style="margin:0.75rem 0">
+            <a class="btn-secondary" href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=tracking-reprocess&codigo=' . rawurlencode($orderQuery))) ?>">
+                Forçar integração no Tracking (<?= htmlspecialchars($orderQuery) ?>)
+            </a>
+        </p>
+    <?php endif; ?>
 
     <form method="get">
         <input type="hidden" name="page" value="monitor-pedidos">

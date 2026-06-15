@@ -20,7 +20,6 @@ $allowedPages = [
     'lexos-diagnostico-expedicao',
     'lexos-transportadoras',
     'tracking-reprocess',
-    'tracking-reprocess',
     'repasse-mp',
     'message-template',
     'manual-send',
@@ -354,7 +353,7 @@ $menuSections = [
             'external' => true,
             'href' => $trackingWctUrl,
         ],
-        ['id' => 'tracking-reprocess', 'label' => 'Reprocessar Tracking'],
+        ['id' => 'tracking-reprocess', 'label' => 'Forçar integração Tracking'],
     ],
 ];
 
