@@ -12,7 +12,7 @@ if (!in_array($apiTab, ['ml', 'lexos', 'mp'], true)) {
     $apiTab = 'ml';
 }
 
-$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test', 'lexos_sync_tracking'];
+$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test', 'lexos_sync_tracking', 'lexos_import_tracking_key'];
 $mpFormTypes = ['mp_token'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -142,7 +142,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $st = $syncResult['tracking'];
                 $feedback .= ' Token: ' . (($st['has_token'] ?? false) ? 'sim' : 'não');
                 $feedback .= '; Chave: ' . (($st['has_chave'] ?? false) ? 'sim' : 'não');
+                if (($st['has_refresh'] ?? false)) {
+                    $feedback .= '; Refresh: sim';
+                }
             }
+        }
+
+        if ($formType === 'lexos_import_tracking_key') {
+            $testUrl = trim((string) ($_POST['tracking_database_url'] ?? ''));
+            if ($testUrl === '') {
+                $existing = $app['settingsRepository']->getApiConfig() ?? [];
+                $testUrl = trim((string) ($existing['tracking_database_url'] ?? ''));
+            }
+            if ($testUrl === '') {
+                $env = getenv('TRACKING_DATABASE_URL');
+                $testUrl = is_string($env) ? trim($env) : '';
+            }
+            $repo = new \App\Repositories\TrackingLexosTokenRepository(
+                new \App\Core\TrackingDatabase($testUrl)
+            );
+            $test = $repo->testConnection();
+            if (!$test['ok'] || $test['row'] === null) {
+                throw new RuntimeException(
+                    'Não foi possível ler o Tracking. Configure TRACKING_DATABASE_URL no Render do Portal ou cole a URL PostgreSQL acima.'
+                );
+            }
+            $chave = trim((string) ($test['row']['chave'] ?? ''));
+            if ($chave === '') {
+                throw new RuntimeException('O Tracking não possui chave salva em lexos_tokens.');
+            }
+            $existing = $app['settingsRepository']->getApiConfig() ?? [];
+            $app['settingsRepository']->saveApiConfig([
+                'app_id' => trim((string) ($existing['app_id'] ?? '')),
+                'client_secret' => trim((string) ($existing['client_secret'] ?? '')),
+                'redirect_uri' => trim((string) ($existing['redirect_uri'] ?? '')),
+                'seller_id' => trim((string) ($existing['seller_id'] ?? '')),
+                'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
+                'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
+                'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
+                'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
+                'lexos_integration_key' => $chave,
+                'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
+                'tracking_database_url' => $testUrl !== '' ? $testUrl : trim((string) ($existing['tracking_database_url'] ?? '')),
+                'lexos_credentials_mode' => trim((string) ($existing['lexos_credentials_mode'] ?? 'auto')),
+            ]);
+            $feedback = 'Chave Lexos importada do Tracking para o Portal. Salve ou envie ao Tracking quando quiser.';
+            $apiConfig = $app['settingsRepository']->getApiConfig();
         }
 
         if ($formType === 'token') {
@@ -472,7 +517,18 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
                     <?php endif; ?>
                 </ul>
             <?php else: ?>
-                <p style="font-size:.9rem;color:#64748b;margin:0 0 .75rem">URL do Tracking não configurada ou conexão ainda não testada.</p>
+                <p style="font-size:.9rem;color:#64748b;margin:0 0 .75rem">
+                    URL do Tracking não configurada no formulário.
+                    <?php
+                    $envTrk = getenv('TRACKING_DATABASE_URL');
+                    $hasEnvTrk = is_string($envTrk) && trim($envTrk) !== '';
+                    ?>
+                    <?php if ($hasEnvTrk): ?>
+                        Variável <code>TRACKING_DATABASE_URL</code> detectada no servidor — use <strong>Testar conexão Tracking</strong>.
+                    <?php else: ?>
+                        Configure <code>TRACKING_DATABASE_URL</code> no Render do Portal (mesmo Postgres do Tracking) ou cole a URL acima.
+                    <?php endif; ?>
+                </p>
             <?php endif; ?>
 
         </section>
@@ -533,6 +589,16 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
                 <input type="hidden" name="api_tab" value="lexos">
                 <input type="hidden" name="form_type" value="lexos_sync_tracking">
                 <button type="submit">Enviar credenciais ao Tracking</button>
+            </form>
+            <form method="post" class="api-config-actions" style="margin-top:.5rem">
+                <input type="hidden" name="api_tab" value="lexos">
+                <input type="hidden" name="form_type" value="lexos_import_tracking_key">
+                <input type="hidden" name="tracking_database_url" id="tracking_import_url"
+                       value="<?= htmlspecialchars((string) ($apiConfig['tracking_database_url'] ?? '')) ?>">
+                <button type="submit"
+                        onclick="document.getElementById('tracking_import_url').value=document.getElementById('tracking_database_url').value">
+                    Importar Key do Tracking
+                </button>
             </form>
             <form method="post">
                 <input type="hidden" name="api_tab" value="lexos">

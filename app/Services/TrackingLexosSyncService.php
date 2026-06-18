@@ -36,8 +36,17 @@ final class TrackingLexosSyncService
                 'Portal sem token Lexos. Preencha Refresh Token (ou Token) em Configuração API → Lexos.'
             );
         }
+
+        $keyFromTracking = $this->resolveKeyFromTracking();
+        if ($key === '' && $keyFromTracking !== '') {
+            $key = $keyFromTracking;
+        }
+
         if ($key === '') {
-            throw new RuntimeException('Portal sem Chave Lexos (header Chave).');
+            throw new RuntimeException(
+                'Portal sem Chave Lexos (header Chave). Cole a Key do Tracking (Configurações → Credenciais API Lexos) '
+                . 'ou configure TRACKING_DATABASE_URL no Render do Portal para reutilizar a chave já salva no Tracking.'
+            );
         }
 
         if ($this->trackingLexosTokenRepository->isAvailable()) {
@@ -48,15 +57,31 @@ final class TrackingLexosSyncService
                 $code !== '' ? $code : null
             );
 
+            $message = 'Credenciais enviadas ao Tracking via banco PostgreSQL.';
+            if ($keyFromTracking !== '' && trim((string) ($cfg['lexos_integration_key'] ?? '')) === '') {
+                $message .= ' Key reutilizada do registro já existente no Tracking.';
+            }
+
             return [
                 'mode' => 'database',
                 'ok' => true,
-                'message' => 'Credenciais enviadas ao Tracking via banco PostgreSQL.',
+                'message' => $message,
                 'tracking' => $this->trackingLexosTokenRepository->getPublicStatus($row),
             ];
         }
 
         return $this->syncViaWebhook($access, $refresh, $key, $code);
+    }
+
+    private function resolveKeyFromTracking(): string
+    {
+        if (!$this->trackingLexosTokenRepository->isAvailable()) {
+            return '';
+        }
+
+        $row = $this->trackingLexosTokenRepository->findLatest();
+
+        return trim((string) ($row['chave'] ?? ''));
     }
 
     /**
