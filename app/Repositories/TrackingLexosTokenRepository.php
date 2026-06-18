@@ -94,6 +94,96 @@ final class TrackingLexosTokenRepository
     }
 
     /**
+     * Grava token, refresh e chave no Tracking (insert ou update).
+     *
+     * @return array<string, mixed>
+     */
+    public function syncFullCredentials(
+        string $accessToken,
+        string $refreshToken,
+        string $chave,
+        ?string $lexosCode = null,
+        int $expiresIn = 21600,
+        ?int $refreshTokenExpiresIn = null
+    ): array {
+        if (!$this->isAvailable()) {
+            throw new \RuntimeException('Banco do Tracking não configurado.');
+        }
+
+        $accessToken = trim($accessToken);
+        $refreshToken = trim($refreshToken);
+        $chave = trim($chave);
+
+        if ($accessToken === '' && $refreshToken === '') {
+            throw new \RuntimeException('Informe access token ou refresh token.');
+        }
+        if ($chave === '') {
+            throw new \RuntimeException('Informe a chave Lexos.');
+        }
+
+        if ($accessToken === '') {
+            $expiresIn = 1;
+            $accessToken = trim((string) ($existing['access_token'] ?? ''));
+            if ($accessToken === '') {
+                $accessToken = 'expired';
+            }
+        }
+
+        $existing = $this->findLatest();
+        $pdo = $this->trackingDatabase->pdo();
+
+        if ($existing === null) {
+            $stmt = $pdo->prepare(
+                'INSERT INTO lexos_tokens (
+                    access_token, token_type, expires_in, refresh_token,
+                    refresh_token_expires_in, chave, lexos_code, atualizado_em, refresh_token_updated_at
+                 ) VALUES (
+                    :access_token, :token_type, :expires_in, :refresh_token,
+                    :refresh_expires, :chave, :lexos_code, NOW(), NOW()
+                 ) RETURNING *'
+            );
+            $stmt->execute([
+                ':access_token' => $accessToken,
+                ':token_type' => 'Bearer',
+                ':expires_in' => $expiresIn,
+                ':refresh_token' => $refreshToken,
+                ':refresh_expires' => $refreshTokenExpiresIn,
+                ':chave' => $chave,
+                ':lexos_code' => $lexosCode,
+            ]);
+            $row = $stmt->fetch();
+
+            return is_array($row) ? $row : [];
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE lexos_tokens SET
+                access_token = :access_token,
+                expires_in = :expires_in,
+                refresh_token = :refresh_token,
+                refresh_token_expires_in = COALESCE(:refresh_expires, refresh_token_expires_in),
+                chave = :chave,
+                lexos_code = COALESCE(:lexos_code, lexos_code),
+                atualizado_em = NOW(),
+                refresh_token_updated_at = NOW()
+             WHERE id = :id
+             RETURNING *'
+        );
+        $stmt->execute([
+            ':access_token' => $accessToken,
+            ':expires_in' => $expiresIn,
+            ':refresh_token' => $refreshToken,
+            ':refresh_expires' => $refreshTokenExpiresIn,
+            ':chave' => $chave,
+            ':lexos_code' => $lexosCode,
+            ':id' => $existing['id'],
+        ]);
+        $row = $stmt->fetch();
+
+        return is_array($row) ? $row : [];
+    }
+
+    /**
      * Status sem expor segredos completos.
      *
      * @return array<string, mixed>

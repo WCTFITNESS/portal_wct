@@ -12,7 +12,7 @@ if (!in_array($apiTab, ['ml', 'lexos', 'mp'], true)) {
     $apiTab = 'ml';
 }
 
-$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test'];
+$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test', 'lexos_sync_tracking'];
 $mpFormTypes = ['mp_token'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -114,6 +114,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $app['lexosAuthService']->refreshLexosToken($refreshToken);
             $feedback = 'Refresh token Lexos executado e tokens salvos.';
             $apiConfig = $app['settingsRepository']->getApiConfig();
+            try {
+                $trackingApiBase = preg_replace('#/admin/dashboard$#', '', (string) ($trackingWctUrl ?? '')) ?: 'http://localhost:3001';
+                $sync = new \App\Services\TrackingLexosSyncService(
+                    $app['settingsRepository'],
+                    $app['trackingLexosTokenRepository'],
+                    $trackingApiBase
+                );
+                $syncResult = $sync->syncFromPortalConfig();
+                $feedback .= ' Tracking: ' . ($syncResult['message'] ?? 'sincronizado.');
+            } catch (Throwable $syncErr) {
+                $feedback .= ' Aviso Tracking: ' . $syncErr->getMessage();
+                $feedbackClass = 'err';
+            }
+        }
+
+        if ($formType === 'lexos_sync_tracking') {
+            $trackingApiBase = preg_replace('#/admin/dashboard$#', '', (string) ($trackingWctUrl ?? '')) ?: 'http://localhost:3001';
+            $sync = new \App\Services\TrackingLexosSyncService(
+                $app['settingsRepository'],
+                $app['trackingLexosTokenRepository'],
+                $trackingApiBase
+            );
+            $syncResult = $sync->syncFromPortalConfig();
+            $feedback = $syncResult['message'] ?? 'Credenciais enviadas ao Tracking.';
+            if (($syncResult['mode'] ?? '') === 'database' && isset($syncResult['tracking'])) {
+                $st = $syncResult['tracking'];
+                $feedback .= ' Token: ' . (($st['has_token'] ?? false) ? 'sim' : 'não');
+                $feedback .= '; Chave: ' . (($st['has_chave'] ?? false) ? 'sim' : 'não');
+            }
         }
 
         if ($formType === 'token') {
@@ -466,6 +495,8 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
             </select>
             <p style="font-size:.85rem;color:#64748b;margin:.35rem 0 1rem">
                 No modo automático, token e chave preenchidos abaixo prevalecem sobre o Tracking.
+                O <strong>webhook Lexos</strong> envia eventos de pedido — <strong>não envia o Code OAuth</strong>.
+                Para o Tracking, use <strong>Refresh Token + Chave</strong> ou o botão &quot;Enviar credenciais ao Tracking&quot;.
             </p>
 
             <label>Lexos Code</label>
@@ -498,6 +529,11 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
         </form>
 
         <div class="api-config-actions">
+            <form method="post">
+                <input type="hidden" name="api_tab" value="lexos">
+                <input type="hidden" name="form_type" value="lexos_sync_tracking">
+                <button type="submit">Enviar credenciais ao Tracking</button>
+            </form>
             <form method="post">
                 <input type="hidden" name="api_tab" value="lexos">
                 <input type="hidden" name="form_type" value="lexos_token_from_code">
