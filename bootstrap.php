@@ -51,6 +51,26 @@ function portal_wct_absolute_url(string $baseUrl, string $relative): string
     return $origin . $path;
 }
 
+function portal_wct_echo_json(mixed $payload, int $status = 200): void
+{
+    if ($status !== 200) {
+        http_response_code($status);
+    }
+
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($json === false) {
+        http_response_code(500);
+        echo json_encode([
+            'ok' => false,
+            'error' => 'Erro ao serializar resposta JSON: ' . json_last_error_msg(),
+        ], JSON_UNESCAPED_UNICODE);
+
+        return;
+    }
+
+    echo $json;
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'App\\';
     $baseDir = __DIR__ . '/app/';

@@ -909,18 +909,54 @@ class ProtheusAdHocQueryService
         foreach ($rows as $row) {
             $line = [];
             foreach ($row as $key => $value) {
-                if ($value === null) {
-                    $line[(string) $key] = '';
-                } elseif (is_string($value) || is_numeric($value)) {
-                    $line[(string) $key] = (string) $value;
-                } else {
-                    $line[(string) $key] = json_encode($value, JSON_UNESCAPED_UNICODE) ?: '';
-                }
+                $line[(string) $key] = $this->normalizeCellValue($value);
             }
             $out[] = $line;
         }
 
         return $out;
+    }
+
+    private function normalizeCellValue(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
+        }
+
+        if (is_string($value)) {
+            if ($value === '' || mb_check_encoding($value, 'UTF-8')) {
+                if (strlen($value) > 50000) {
+                    return substr($value, 0, 50000) . '… [truncado]';
+                }
+
+                return $value;
+            }
+
+            $len = strlen($value);
+            if ($len > 65536) {
+                return sprintf('[varbinary %d bytes — omitido na tela]', $len);
+            }
+
+            $hex = bin2hex(substr($value, 0, 48));
+
+            return sprintf('[varbinary %d bytes] 0x%s%s', $len, $hex, $len > 48 ? '…' : '');
+        }
+
+        if (is_resource($value)) {
+            return '[stream]';
+        }
+
+        $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+
+        return $encoded !== false ? $encoded : '[valor nao serializavel]';
     }
 
     /**
@@ -1034,7 +1070,8 @@ class ProtheusAdHocQueryService
         string $orderBySql,
         int $top
     ): string {
-        $sql = 'SELECT TOP (' . $top . ') ' . $columnsSql . '
+        $selectList = $this->resolveSelectList($tableSql, $columnsSql);
+        $sql = 'SELECT TOP (' . $top . ') ' . $selectList . '
 FROM ' . ProtheusSqlHelper::tbl($tableSql) . '
 WHERE ' . $whereSql;
         if ($orderBySql !== '') {
@@ -1043,6 +1080,77 @@ ORDER BY ' . $orderBySql;
         }
 
         return $sql;
+    }
+
+    private function resolveSelectList(string $tableSql, string $columnsSql): string
+    {
+        if ($columnsSql === '*') {
+            return $this->expandStarColumns($tableSql);
+        }
+
+        $typeMap = $this->fetchColumnTypeMap($tableSql);
+        $parts = [];
+
+        foreach (array_map('trim', explode(',', $columnsSql)) as $col) {
+            if ($col === '') {
+                continue;
+            }
+
+            $type = $typeMap[strtoupper($col)] ?? '';
+            if ($this->isBinarySqlType($type)) {
+                $parts[] = $this->sqlBinaryPreviewExpression($col);
+                continue;
+            }
+
+            $parts[] = $col;
+        }
+
+        return $parts === [] ? $columnsSql : implode(', ', $parts);
+    }
+
+    /**
+     * @return array<string, string> coluna (upper) => data_type
+     */
+    private function fetchColumnTypeMap(string $table): array
+    {
+        return $this->fetchColumnTypes($table);
+    }
+
+    private function isBinarySqlType(string $dataType): bool
+    {
+        return in_array($dataType, ['varbinary', 'binary', 'image', 'timestamp', 'rowversion'], true);
+    }
+
+    private function expandStarColumns(string $tableSql): string
+    {
+        $result = $this->listTableColumns($tableSql);
+        $parts = [];
+
+        foreach ($result['columns'] as $col) {
+            $name = trim((string) ($col['name'] ?? ''));
+            if ($name === '' || !preg_match('/^[A-Za-z0-9_]+$/', $name)) {
+                continue;
+            }
+
+            $type = strtolower((string) ($col['data_type'] ?? ''));
+            if (in_array($type, ['varbinary', 'binary', 'image', 'timestamp', 'rowversion'], true)) {
+                $parts[] = $this->sqlBinaryPreviewExpression($name);
+                continue;
+            }
+
+            $parts[] = $name;
+        }
+
+        return $parts === [] ? '*' : implode(', ', $parts);
+    }
+
+    private function sqlBinaryPreviewExpression(string $columnName): string
+    {
+        return 'CASE WHEN ' . $columnName . ' IS NULL THEN \'\' '
+            . 'WHEN DATALENGTH(' . $columnName . ') = 0 THEN \'\' '
+            . 'ELSE \'[bin \' + CAST(DATALENGTH(' . $columnName . ') AS VARCHAR(20)) + \' bytes] 0x\' '
+            . '+ CONVERT(VARCHAR(128), LEFT(' . $columnName . ', 64), 2) '
+            . '+ CASE WHEN DATALENGTH(' . $columnName . ') > 64 THEN \'…\' ELSE \'\' END END AS ' . $columnName;
     }
 
     private function buildCountSql(string $tableSql, string $whereSql, string $orderBySql): string

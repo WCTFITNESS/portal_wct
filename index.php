@@ -95,7 +95,7 @@ if ($page === 'protheus-consulta-sql' && isset($_GET['protheus_sql_action']) && 
             ]);
             $result['history_id'] = $historyId;
 
-            echo json_encode($result, JSON_UNESCAPED_UNICODE);
+            portal_wct_echo_json($result);
 
             exit;
         }
@@ -130,7 +130,7 @@ if ($page === 'protheus-consulta-sql' && isset($_GET['protheus_sql_action']) && 
             ]);
             $result['history_id'] = $historyId;
 
-            echo json_encode($result, JSON_UNESCAPED_UNICODE);
+            portal_wct_echo_json($result);
 
             exit;
         }

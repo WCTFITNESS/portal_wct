@@ -919,7 +919,16 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
 
     async function fetchJson(url) {
         const res = await fetch(url);
-        const data = await res.json();
+        const text = await res.text();
+        if (!text || !text.trim()) {
+            throw new Error('Resposta vazia do servidor (HTTP ' + res.status + ').');
+        }
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseErr) {
+            throw new Error('Resposta invalida do servidor (nao e JSON). HTTP ' + res.status);
+        }
         if (!res.ok || !data.ok) {
             throw new Error(data.error || ('HTTP ' + res.status));
         }
@@ -1584,7 +1593,16 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
                 body: JSON.stringify(payload),
                 signal: abortController.signal,
             });
-            const data = await res.json();
+            const text = await res.text();
+            let data;
+            try {
+                data = text && text.trim() ? JSON.parse(text) : null;
+            } catch (parseErr) {
+                throw new Error('Resposta invalida do servidor (nao e JSON).');
+            }
+            if (!data) {
+                throw new Error('Resposta vazia do servidor (HTTP ' + res.status + ').');
+            }
             if (!res.ok || !data.ok) {
                 throw new Error(data.error || ('HTTP ' + res.status));
             }
@@ -1716,7 +1734,16 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
                 body: JSON.stringify({ query_id: queryId, sql: sql }),
                 signal: abortController.signal,
             });
-            const data = await res.json();
+            const text = await res.text();
+            let data;
+            try {
+                data = text && text.trim() ? JSON.parse(text) : null;
+            } catch (parseErr) {
+                throw new Error('Resposta invalida do servidor (nao e JSON).');
+            }
+            if (!data) {
+                throw new Error('Resposta vazia do servidor (HTTP ' + res.status + ').');
+            }
             if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
             previewEl.textContent = data.sql || '';
             previewEl.hidden = false;
