@@ -32,6 +32,9 @@ use App\Services\MercadoLivreOrderMonitorService;
 use App\Services\MessageService;
 use App\Services\MlAdsReportService;
 use App\Services\MlCatalogListService;
+use App\Services\MlPromotionsService;
+use App\Services\MlInactiveAdsService;
+use App\Services\MlImageResizeService;
 use App\Services\OrderService;
 use App\Services\ProtheusConnectionService;
 use App\Services\ProtheusRomaneioMonitorService;
@@ -70,6 +73,9 @@ $mercadopagoPaymentService = new MercadoPagoPaymentService($mercadopagoSettingsR
 $repasseMpService = new RepasseMpService($mercadopagoPaymentService, $repasseMpJobRepository);
 $mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRepository);
 $mlCatalogListService = new MlCatalogListService($tokenService, $client, $settingsRepository);
+$mlPromotionsService = new MlPromotionsService($tokenService, $client, $settingsRepository);
+$mlInactiveAdsService = new MlInactiveAdsService($tokenService, $client, $settingsRepository);
+$mlImageResizeService = new MlImageResizeService();
 $trackingDatabaseUrl = static function () use ($settingsRepository): string {
     $cfg = $settingsRepository->getApiConfig() ?? [];
     $url = trim((string) ($cfg['tracking_database_url'] ?? ''));
@@ -121,6 +127,9 @@ return [
     'repasseMpService' => $repasseMpService,
     'mlAdsReportService' => $mlAdsReportService,
     'mlCatalogListService' => $mlCatalogListService,
+    'mlPromotionsService' => $mlPromotionsService,
+    'mlInactiveAdsService' => $mlInactiveAdsService,
+    'mlImageResizeService' => $mlImageResizeService,
     'lexosAuthService' => $lexosAuthService,
     'lexosCredentialsService' => $lexosCredentialsService,
     'trackingLexosTokenRepository' => $trackingLexosTokenRepository,

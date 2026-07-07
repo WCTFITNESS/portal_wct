@@ -52,6 +52,11 @@ $allowedPages = [
     'manual-send',
     'ml-ads-report',
     'ml-catalogos',
+    'ml-campanhas',
+    'ml-campanhas-pendentes',
+    'ml-campanhas-ativas',
+    'ml-anuncios-inativos',
+    'ml-redimensionar',
     'protheus-config',
     'protheus-monitor-romaneio',
     'protheus-monitor-pedidos',
@@ -344,6 +349,12 @@ $menuSections = [
         ['id' => 'api-config', 'label' => 'Configuração API'],
         ['id' => 'orders', 'label' => 'Pedidos'],
         ['id' => 'ml-catalogos', 'label' => 'Catálogos'],
+        ['id' => 'ml-campanhas', 'label' => 'Campanhas'],
+        ['id' => 'ml-campanhas-pendentes', 'label' => 'Campanhas pendentes'],
+        ['id' => 'ml-campanhas-ativas', 'label' => 'Campanhas ativas'],
+        ['id' => 'ml-anuncios-inativos', 'label' => 'Anúncios inativos'],
+        ['id' => 'ml-ads-report', 'label' => 'Relatório de anúncios'],
+        ['id' => 'ml-redimensionar', 'label' => 'Redimensionar imagens'],
         ['id' => 'message-template', 'label' => 'Mensageria ML'],
     ],
     'Lexos' => [
@@ -360,9 +371,6 @@ $menuSections = [
     ],
     'Mercado Pago' => [
         ['id' => 'repasse-mp', 'label' => 'Repasse MP'],
-    ],
-    'Relatórios ML' => [
-        ['id' => 'ml-ads-report', 'label' => 'Relatório de anúncios'],
     ],
     'Protheus' => [
         ['id' => 'protheus-config', 'label' => 'Config Protheus'],
@@ -765,6 +773,76 @@ if ($page === 'ml-ads-report' && isset($_GET['download']) && $_GET['download'] !
     exit;
 }
 
+$mlCampanhasPages = ['ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas'];
+if (in_array($page, $mlCampanhasPages, true) && ($_GET['ml_campanhas_action'] ?? '') === 'export') {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Metodo nao permitido.';
+        exit;
+    }
+
+    $body = json_decode((string) file_get_contents('php://input'), true);
+    if (!is_array($body)) {
+        $body = [];
+    }
+
+    $selected = is_array($body['selected'] ?? null) ? $body['selected'] : [];
+    $itemStatus = (string) ($body['item_status'] ?? match ($page) {
+        'ml-campanhas-pendentes' => 'pending',
+        'ml-campanhas-ativas' => 'started',
+        default => 'candidate',
+    });
+
+    try {
+        $filePath = $app['mlPromotionsService']->exportCampaignAnalytics($selected, $itemStatus);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="campanha.xlsx"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao exportar campanhas: ' . $exception->getMessage();
+    }
+    exit;
+}
+
+if ($page === 'ml-anuncios-inativos' && ($_GET['export'] ?? '') === 'xlsx') {
+    try {
+        $filePath = $app['mlInactiveAdsService']->exportAllInactiveAds();
+        $fileName = basename($filePath);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao exportar: ' . $exception->getMessage();
+    }
+    exit;
+}
+
+if ($page === 'ml-redimensionar' && isset($_GET['download']) && $_GET['download'] !== '') {
+    $filePath = $app['mlImageResizeService']->getZipPath((string) $_GET['download']);
+    if (!$filePath) {
+        http_response_code(404);
+        echo 'Arquivo nao encontrado.';
+        exit;
+    }
+
+    $fileName = basename($filePath);
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="' . $fileName . '"');
+    header('Content-Length: ' . (string) filesize($filePath));
+    readfile($filePath);
+    @unlink($filePath);
+    exit;
+}
+
 // Upload Repasse MP precisa redirecionar antes de qualquer output HTML (evita "headers already sent").
 if (
     $page === 'repasse-mp'
@@ -1106,7 +1184,7 @@ if (
         }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-ads-report', 'ml-catalogos'], true) ? 'page-protheus-monitor-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar'], true) ? 'page-protheus-monitor-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">
