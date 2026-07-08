@@ -14,10 +14,11 @@ use Shuchkin\SimpleXLSXGen;
 class MlPromotionsService
 {
     /** @var list<string> */
+    /** Colunas identicas ao relatorio Campanha_ML.xlsx (WCT Code). */
     private const EXPORT_HEADERS = [
         'SKU',
         'MLB',
-        'SKU_2',
+        'SKU',
         'VERDADEIRO',
         'Preço de',
         'Estoque',
@@ -39,11 +40,14 @@ class MlPromotionsService
         'Anúncio Status',
         'CODE',
         'ID',
-        'TYPE',
+        'Type',
     ];
 
-    /** @var list<string> */
-    private const HIDDEN_CAMPAIGN_TYPES = ['DEAL', 'SELLER_CAMPAIGN'];
+    /** @var list<string> Tipos criados pelo vendedor — ocultar da lista ML. */
+    private const HIDDEN_CAMPAIGN_TYPES = ['SELLER_CAMPAIGN'];
+
+    /** @var list<string> Status de campanha encerrada (nao exibir). */
+    private const CLOSED_CAMPAIGN_STATUSES = ['finished', 'expired'];
 
     public function __construct(
         private TokenService $tokenService,
@@ -53,7 +57,7 @@ class MlPromotionsService
     }
 
     /**
-     * @return list<array{data: array<string, mixed>, total: int|null}>
+     * @return array{summaries: list<array{data: array<string, mixed>, total: int|null}>, meta: array<string, int|string>}
      */
     public function listCampaignSummaries(string $itemStatus): array
     {
@@ -61,39 +65,68 @@ class MlPromotionsService
         $accessToken = $this->tokenService->getValidAccessToken();
         $sellerId = $this->resolveSellerId();
 
-        $res = $this->client->get(
-            '/seller-promotions/users/' . rawurlencode($sellerId) . '?app_version=v2',
-            $accessToken
-        );
-        if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
-            throw new RuntimeException(
-                'Falha ao listar promocoes ML. HTTP ' . (string) ($res['status'] ?? 0)
-            );
-        }
-
-        $results = $res['body']['results'] ?? [];
-        if (!is_array($results)) {
-            return [];
-        }
-
+        $allRows = $this->fetchAllUserPromotions($accessToken, $sellerId);
         $summaries = [];
-        foreach ($results as $row) {
-            if (!is_array($row) || empty($row['id']) || empty($row['type'])) {
+        $skippedType = 0;
+        $skippedClosed = 0;
+
+        foreach ($allRows as $row) {
+            if (!is_array($row)) {
                 continue;
             }
-            $type = (string) $row['type'];
+            $id = trim((string) ($row['id'] ?? ''));
+            $type = trim((string) ($row['type'] ?? ''));
+            if ($id === '' || $type === '') {
+                continue;
+            }
             if (in_array($type, self::HIDDEN_CAMPAIGN_TYPES, true)) {
+                $skippedType++;
                 continue;
             }
+
+            $campaignStatus = strtolower(trim((string) ($row['status'] ?? '')));
+            if ($campaignStatus !== '' && in_array($campaignStatus, self::CLOSED_CAMPAIGN_STATUSES, true)) {
+                $skippedClosed++;
+                continue;
+            }
+
+            $itemTotal = $this->fetchPromotionItemTotal($accessToken, $id, $type, $itemStatus);
 
             $data = $this->normalizeCampaignDates($row);
+            $data['status'] = $campaignStatus !== '' ? $campaignStatus : (string) ($row['status'] ?? '');
             $summaries[] = [
                 'data' => $data,
-                'total' => null,
+                'total' => $itemTotal,
             ];
         }
 
-        return $summaries;
+        usort($summaries, static function (array $a, array $b): int {
+            $ta = $a['total'] ?? -1;
+            $tb = $b['total'] ?? -1;
+            if ($ta === $tb) {
+                return strcmp((string) ($a['data']['name'] ?? ''), (string) ($b['data']['name'] ?? ''));
+            }
+            if ($ta === null) {
+                return 1;
+            }
+            if ($tb === null) {
+                return -1;
+            }
+
+            return $tb <=> $ta;
+        });
+
+        return [
+            'summaries' => $summaries,
+            'meta' => [
+                'seller_id' => $sellerId,
+                'raw_total' => count($allRows),
+                'shown' => count($summaries),
+                'skipped_type' => $skippedType,
+                'skipped_closed' => $skippedClosed,
+                'item_status' => $itemStatus,
+            ],
+        ];
     }
 
     /**
@@ -155,7 +188,7 @@ class MlPromotionsService
         $filePath = $this->exportDirectory() . DIRECTORY_SEPARATOR . $fileName;
 
         require_once __DIR__ . '/../Lib/SimpleXLSXGen.php';
-        $xlsx = SimpleXLSXGen::fromArray($rows, 'Campanhas');
+        $xlsx = SimpleXLSXGen::fromArray($rows, 'Vendas');
         if (!$xlsx->saveAs($filePath)) {
             throw new RuntimeException('Nao foi possivel salvar o relatorio de campanhas.');
         }
@@ -203,7 +236,7 @@ class MlPromotionsService
             }
 
             $mlb = trim((string) ($row[$headerIndex['MLB'] ?? -1] ?? ''));
-            $type = trim((string) ($row[$headerIndex['TYPE'] ?? -1] ?? ''));
+            $type = trim((string) ($row[$headerIndex['TYPE'] ?? $headerIndex['Type'] ?? -1] ?? ''));
             $code = trim((string) ($row[$headerIndex['CODE'] ?? -1] ?? ''));
             $id = trim((string) ($row[$headerIndex['ID'] ?? -1] ?? ''));
             $price = trim((string) ($row[$headerIndex['PREÇO FINAL'] ?? $headerIndex['PRECO FINAL'] ?? -1] ?? ''));
@@ -282,17 +315,74 @@ class MlPromotionsService
     private function fetchAllCampaigns(string $accessToken): array
     {
         $sellerId = $this->resolveSellerId();
-        $res = $this->client->get(
-            '/seller-promotions/users/' . rawurlencode($sellerId) . '?app_version=v2',
-            $accessToken
-        );
+
+        return $this->fetchAllUserPromotions($accessToken, $sellerId);
+    }
+
+    /**
+     * Lista todas as promocoes do vendedor (com paginacao offset/limit).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fetchAllUserPromotions(string $accessToken, string $sellerId): array
+    {
+        $all = [];
+        $offset = 0;
+        $limit = 50;
+        $total = null;
+
+        do {
+            $path = '/seller-promotions/users/' . rawurlencode($sellerId)
+                . '?app_version=v2&limit=' . $limit . '&offset=' . $offset;
+            $res = $this->client->get($path, $accessToken);
+            if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
+                $msg = is_array($res['body'] ?? null)
+                    ? (string) (($res['body']['message'] ?? $res['body']['error'] ?? '') ?: json_encode($res['body']))
+                    : (string) ($res['raw'] ?? '');
+                throw new RuntimeException(
+                    'Falha ao listar promocoes ML. HTTP ' . (string) ($res['status'] ?? 0)
+                    . ($msg !== '' ? ' — ' . $msg : '')
+                );
+            }
+
+            $body = is_array($res['body'] ?? null) ? $res['body'] : [];
+            $chunk = $body['results'] ?? [];
+            if (!is_array($chunk) || $chunk === []) {
+                break;
+            }
+
+            foreach ($chunk as $row) {
+                if (is_array($row)) {
+                    $all[] = $row;
+                }
+            }
+
+            $paging = is_array($body['paging'] ?? null) ? $body['paging'] : [];
+            $total = (int) ($paging['total'] ?? count($all));
+            $offset += $limit;
+        } while ($offset < $total);
+
+        return $all;
+    }
+
+    private function fetchPromotionItemTotal(
+        string $accessToken,
+        string $promotionId,
+        string $promotionType,
+        string $itemStatus
+    ): ?int {
+        $path = '/seller-promotions/promotions/' . rawurlencode($promotionId)
+            . '/items?promotion_type=' . rawurlencode($promotionType)
+            . '&app_version=v2&limit=1&status=' . rawurlencode($itemStatus);
+
+        $res = $this->client->get($path, $accessToken);
         if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
-            throw new RuntimeException('Falha ao buscar campanhas.');
+            return null;
         }
 
-        $results = $res['body']['results'] ?? [];
+        $paging = is_array($res['body']['paging'] ?? null) ? $res['body']['paging'] : [];
 
-        return is_array($results) ? $results : [];
+        return (int) ($paging['total'] ?? 0);
     }
 
     /**
@@ -313,7 +403,7 @@ class MlPromotionsService
             . '/items?promotion_type=' . rawurlencode($promotionType)
             . '&app_version=v2&limit=100&status=' . rawurlencode($status);
         if ($searchAfter !== null && $searchAfter !== '') {
-            $path .= '&searchAfter=' . rawurlencode($searchAfter);
+            $path .= '&search_after=' . rawurlencode($searchAfter);
         }
 
         $res = $this->client->get($path, $accessToken);
@@ -350,6 +440,9 @@ class MlPromotionsService
                 $result['meli_percentage'] = 0;
                 $result['seller_percentage'] = 0;
             }
+
+            $this->applyPromotionItemPercentages($result);
+
             if ($promotionCode === 'C-MLB1522238') {
                 $result['seller_percentage'] = 5;
             }
@@ -363,7 +456,7 @@ class MlPromotionsService
             $items[] = $result;
         }
 
-        $next = (string) ($paging['searchAfter'] ?? '');
+        $next = (string) ($paging['searchAfter'] ?? $paging['search_after'] ?? '');
         if ($next !== '') {
             $items = array_merge(
                 $items,
@@ -392,74 +485,215 @@ class MlPromotionsService
     {
         $rows = [];
         foreach ($items as $item) {
-            $mlb = (string) ($item['id'] ?? '');
-            if ($mlb === '') {
-                continue;
+            $row = $this->buildExportRow($item, $accessToken);
+            if ($row !== null) {
+                $rows[] = $row;
             }
-
-            $ads = $this->fetchItem($mlb, $accessToken);
-            if ($ads === null) {
-                continue;
-            }
-
-            $sku = $this->extractSku($ads);
-            $meliMoeda = 0.0;
-            $vendedorMoeda = 0.0;
-            $meliPct = (float) ($item['meli_percentage'] ?? 0);
-            $sellerPct = (float) ($item['seller_percentage'] ?? 0);
-            $originalPrice = (float) ($item['original_price'] ?? $item['price'] ?? 0);
-            $price = (float) ($item['price'] ?? 0);
-            $type = (string) ($item['type'] ?? '');
-
-            if ($meliPct > 0) {
-                $meliMoeda = round($price * (ceil($meliPct) / 100), 2);
-            }
-            if ($sellerPct > 0) {
-                $vendedorMoeda = round($originalPrice * ($sellerPct / 100), 2);
-            }
-
-            $finalPrice = (string) $price;
-            if ($type === 'SELLER_CAMPAIGN') {
-                $finalPrice = number_format($originalPrice - $vendedorMoeda, 2, ',', '');
-            }
-            if ($type === 'VOLUME') {
-                $discountPct = (float) ($item['discount_percentage'] ?? 0);
-                $vendedorMoeda = $originalPrice * ($discountPct / 100);
-            }
-            if (in_array($type, ['DOD', 'LIGHTNING'], true)) {
-                $finalPrice = '';
-            }
-
-            $rows[] = [
-                $sku,
-                $mlb,
-                '-',
-                'verdadeiro',
-                $originalPrice,
-                (int) ($ads['available_quantity'] ?? 0),
-                (string) ($item['title'] ?? ''),
-                $meliMoeda,
-                $meliPct > 0 ? (int) ceil($meliPct) : 0,
-                $vendedorMoeda,
-                $sellerPct,
-                '',
-                '',
-                '',
-                '',
-                $finalPrice,
-                $this->formatDate((string) ($item['start_date'] ?? '')),
-                $this->formatDate((string) ($item['end_date'] ?? '')),
-                (string) ($item['status'] ?? ''),
-                (string) ($item['status_campaing'] ?? ''),
-                (int) ($ads['sold_quantity'] ?? 0),
-                (string) ($ads['status'] ?? ''),
-                (string) ($item['offer_id'] ?? ''),
-                (string) ($item['id_campaign'] ?? ''),
-                $type,
-            ];
         }
 
         return $rows;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @return list<string|int|float>|null
+     */
+    private function buildExportRow(array $item, string $accessToken): ?array
+    {
+        $mlb = (string) ($item['id'] ?? '');
+        if ($mlb === '') {
+            return null;
+        }
+
+        $ads = $this->fetchItem($mlb, $accessToken);
+        if ($ads === null) {
+            return null;
+        }
+
+        $sku = $this->extractExportSku($ads, $accessToken);
+        $meliPct = $this->readPercentage($item, 'meli');
+        $sellerPct = $this->readPercentage($item, 'seller');
+        $originalPrice = (float) ($item['original_price'] ?? 0);
+        if ($originalPrice <= 0) {
+            $originalPrice = (float) ($item['price'] ?? 0);
+        }
+        $price = (float) ($item['price'] ?? 0);
+        $type = (string) ($item['type'] ?? '');
+
+        $meliMoeda = 0.0;
+        $vendedorMoeda = 0.0;
+
+        if ($meliPct > 0 && $price > 0) {
+            $meliMoeda = round($price * (ceil($meliPct) / 100), 2);
+        }
+        if ($sellerPct > 0 && $originalPrice > 0) {
+            $vendedorMoeda = round($originalPrice * ($sellerPct / 100), 2);
+        }
+
+        if ($type === 'VOLUME') {
+            $discountPct = (float) ($item['discount_percentage'] ?? 0);
+            if ($discountPct > 0) {
+                $vendedorMoeda = round($originalPrice * ($discountPct / 100), 2);
+            }
+        }
+
+        $finalPrice = '';
+        if (in_array($type, ['DOD', 'LIGHTNING'], true)) {
+            $finalPrice = '';
+        } elseif ($type === 'SELLER_CAMPAIGN') {
+            $finalPrice = number_format($originalPrice - $vendedorMoeda, 2, ',', '');
+        } elseif ($price > 0) {
+            $finalPrice = $this->formatExportNumber($price);
+        }
+
+        return [
+            $sku ?? '',
+            $mlb,
+            '',
+            '',
+            $this->formatExportNumber($originalPrice),
+            (int) ($ads['available_quantity'] ?? 0),
+            (string) ($item['title'] ?? ''),
+            $meliMoeda > 0 ? $this->formatExportNumber($meliMoeda) : '',
+            $meliPct > 0 ? (string) (int) ceil($meliPct) : '',
+            $vendedorMoeda > 0 ? $this->formatExportNumber($vendedorMoeda) : '',
+            $sellerPct > 0 ? $this->formatExportNumber($sellerPct) : '',
+            '',
+            '',
+            '',
+            '',
+            $finalPrice,
+            $this->formatDate((string) ($item['start_date'] ?? '')),
+            $this->formatDate((string) ($item['end_date'] ?? '')),
+            (string) ($item['status'] ?? ''),
+            (string) ($item['status_campaing'] ?? ''),
+            (int) ($ads['sold_quantity'] ?? 0),
+            (string) ($ads['status'] ?? ''),
+            (string) ($item['offer_id'] ?? ''),
+            (string) ($item['id_campaign'] ?? ''),
+            $type,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    private function applyPromotionItemPercentages(array &$item): void
+    {
+        $benefits = is_array($item['benefits'] ?? null) ? $item['benefits'] : [];
+        if (!isset($item['meli_percentage']) || (float) $item['meli_percentage'] <= 0) {
+            $item['meli_percentage'] = (float) (
+                $benefits['meli_percent']
+                ?? $benefits['meli_percentage']
+                ?? $item['meli_percent']
+                ?? 0
+            );
+        }
+        if (!isset($item['seller_percentage']) || (float) $item['seller_percentage'] <= 0) {
+            $item['seller_percentage'] = (float) (
+                $benefits['seller_percent']
+                ?? $benefits['seller_percentage']
+                ?? $item['seller_percent']
+                ?? 0
+            );
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    private function readPercentage(array $item, string $side): float
+    {
+        if ($side === 'meli') {
+            return (float) ($item['meli_percentage'] ?? $item['meli_percent'] ?? 0);
+        }
+
+        return (float) ($item['seller_percentage'] ?? $item['seller_percent'] ?? 0);
+    }
+
+    private function formatExportNumber(float|int|string|null $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+        $n = (float) $value;
+        if (abs($n) < 0.00001) {
+            return '0';
+        }
+        if (abs($n - round($n)) < 0.00001) {
+            return (string) ((int) round($n));
+        }
+
+        return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+    }
+
+    /**
+     * SKU no padrao WCT (8 digitos numericos).
+     *
+     * @param array<string, mixed> $item
+     */
+    private function extractExportSku(array $item, string $accessToken): ?string
+    {
+        $sku = $this->pickWctSkuFromAttributes($item['attributes'] ?? []);
+        if ($sku !== null) {
+            return $sku;
+        }
+
+        $variations = $item['variations'] ?? [];
+        if (!is_array($variations)) {
+            return null;
+        }
+
+        foreach ($variations as $variation) {
+            if (!is_array($variation)) {
+                continue;
+            }
+            $relations = $variation['item_relations'] ?? [];
+            if (!is_array($relations) || $relations === []) {
+                continue;
+            }
+            $variationId = (string) ($relations[0]['id'] ?? '');
+            if ($variationId === '') {
+                continue;
+            }
+            $variationItem = $this->fetchItem($variationId, $accessToken);
+            if ($variationItem === null) {
+                continue;
+            }
+            $sku = $this->pickWctSkuFromAttributes($variationItem['attributes'] ?? []);
+            if ($sku !== null) {
+                return $sku;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param mixed $attributes
+     */
+    private function pickWctSkuFromAttributes(mixed $attributes): ?string
+    {
+        if (!is_array($attributes)) {
+            return null;
+        }
+
+        foreach (['SELLER_SKU', 'MODEL'] as $attrId) {
+            foreach ($attributes as $attr) {
+                if (!is_array($attr)) {
+                    continue;
+                }
+                if (strtoupper((string) ($attr['id'] ?? '')) !== $attrId) {
+                    continue;
+                }
+                $value = trim((string) ($attr['value_name'] ?? ''));
+                if ($this->isValidWctSku($value)) {
+                    return $value;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -522,58 +756,6 @@ class MlPromotionsService
         } catch (\Throwable) {
             return substr($iso, 0, 10);
         }
-    }
-
-    /**
-     * @param array<string, mixed> $item
-     */
-    private function extractSku(array $item): string
-    {
-        $sku = trim((string) ($item['seller_custom_field'] ?? ''));
-        if ($sku !== '') {
-            return $sku;
-        }
-
-        $attrs = $item['attributes'] ?? [];
-        if (!is_array($attrs)) {
-            return '';
-        }
-
-        foreach ($attrs as $attr) {
-            if (!is_array($attr)) {
-                continue;
-            }
-            $id = strtoupper((string) ($attr['id'] ?? ''));
-            if ($id !== 'SELLER_SKU' && $id !== 'MODEL') {
-                continue;
-            }
-            $value = trim((string) ($attr['value_name'] ?? ''));
-            if ($this->isValidWctSku($value)) {
-                return $value;
-            }
-        }
-
-        $variations = $item['variations'] ?? [];
-        if (!is_array($variations)) {
-            return '';
-        }
-
-        foreach ($variations as $variation) {
-            if (!is_array($variation)) {
-                continue;
-            }
-            $relations = $variation['item_relations'] ?? [];
-            if (!is_array($relations) || $relations === []) {
-                continue;
-            }
-            $variationId = (string) ($relations[0]['id'] ?? '');
-            if ($variationId === '') {
-                continue;
-            }
-            // Variations resolved in export loop only when needed — skip deep fetch for performance
-        }
-
-        return '';
     }
 
     private function isValidWctSku(string $value): bool

@@ -18,12 +18,22 @@ function ml_camp_h(mixed $value): string
 }
 
 $summary = [];
+$summaryMeta = [];
 $loadError = null;
 
 try {
-    $summary = $app['mlPromotionsService']->listCampaignSummaries($mlCampanhasItemStatus);
+    $listResult = $app['mlPromotionsService']->listCampaignSummaries($mlCampanhasItemStatus);
+    $summary = is_array($listResult['summaries'] ?? null) ? $listResult['summaries'] : [];
+    $summaryMeta = is_array($listResult['meta'] ?? null) ? $listResult['meta'] : [];
     if ($summary === []) {
-        $loadError = 'Nenhuma campanha encontrada para este filtro. Verifique promocoes abertas no Mercado Livre.';
+        $raw = (int) ($summaryMeta['raw_total'] ?? 0);
+        if ($raw === 0) {
+            $loadError = 'A API do Mercado Livre nao retornou promocoes para o seller '
+                . (string) ($summaryMeta['seller_id'] ?? '')
+                . '. Confira Seller ID e token em Configuracao API.';
+        } else {
+            $loadError = 'Foram encontradas ' . $raw . ' promocoes na API, mas nenhuma aberta/disponivel neste filtro.';
+        }
     }
 } catch (Throwable $e) {
     $loadError = $e->getMessage();
@@ -89,6 +99,13 @@ $subnavPages = [
 
     <?php if ($loadError !== null): ?>
         <p class="feedback err"><?= ml_camp_h($loadError) ?></p>
+    <?php elseif (($summaryMeta['raw_total'] ?? 0) > 0): ?>
+        <p style="font-size:.85rem;color:#64748b;margin:0 0 12px;">
+            Seller <?= ml_camp_h((string) ($summaryMeta['seller_id'] ?? '')) ?> —
+            <?= ml_camp_h((string) ($summaryMeta['shown'] ?? count($summary))) ?> campanha(s) exibida(s)
+            de <?= ml_camp_h((string) ($summaryMeta['raw_total'] ?? 0)) ?> na API
+            (filtro de itens: <?= ml_camp_h((string) ($summaryMeta['item_status'] ?? $mlCampanhasItemStatus)) ?>).
+        </p>
     <?php endif; ?>
 
     <?php if ($uploadFeedback !== null): ?>
@@ -121,7 +138,8 @@ $subnavPages = [
             <tr>
                 <th><input type="checkbox" id="ml-camp-select-all" aria-label="Selecionar todas"></th>
                 <th>Nome</th>
-                <th>Anuncios</th>
+                <th>Status</th>
+                <th>Anuncios (<?= ml_camp_h($mlCampanhasItemStatus) ?>)</th>
                 <th>Prazo inicial</th>
                 <th>Prazo final</th>
             </tr>
@@ -129,7 +147,7 @@ $subnavPages = [
             <tbody>
             <?php if ($summary === []): ?>
                 <tr>
-                    <td colspan="5" style="text-align:center;color:#64748b;">Nenhuma campanha listada.</td>
+                    <td colspan="6" style="text-align:center;color:#64748b;">Nenhuma campanha listada.</td>
                 </tr>
             <?php else: ?>
                 <?php foreach ($summary as $item): ?>
@@ -150,6 +168,7 @@ $subnavPages = [
                                 <?= ml_camp_h($cname) ?>
                             <?php endif; ?>
                         </td>
+                        <td><?= ml_camp_h((string) ($data['status'] ?? '')) ?></td>
                         <td><?= ($item['total'] ?? null) === null ? '—' : ml_camp_h((string) $item['total']) ?></td>
                         <td><?= ml_camp_h((string) ($data['start_date'] ?? '—')) ?></td>
                         <td><?= ml_camp_h((string) ($data['end_date'] ?? '—')) ?></td>
