@@ -22,6 +22,7 @@ class LexosHubApiClient
     public function request(string $method, string $url, ?array $payload = null): array
     {
         $this->assertLexosCredentials();
+        $this->maybeRefreshExpiredToken();
 
         try {
             return $this->executeRequest($method, $url, $payload);
@@ -136,7 +137,14 @@ class LexosHubApiClient
             }
         }
 
-        return $last;
+        $extra = is_string($last['body'] ?? null) ? ' Resposta: ' . substr((string) $last['body'], 0, 400) : '';
+
+        throw new RuntimeException(
+            'Falha consulta Lexos WebAPI. HTTP: ' . $last['status']
+            . ($last['auth'] !== '' ? ' Tentativa: ' . $last['auth'] : '')
+            . ($last['error'] !== '' ? ' ' . $last['error'] : '')
+            . $extra
+        );
     }
 
     /**
@@ -190,6 +198,19 @@ class LexosHubApiClient
         curl_close($ch);
 
         return [$status, $err, $raw];
+    }
+
+    private function maybeRefreshExpiredToken(): void
+    {
+        if (!$this->lexosCredentialsService->shouldRefreshAccessToken()) {
+            return;
+        }
+
+        try {
+            $this->renewLexosAccessToken();
+        } catch (Throwable) {
+            // Deixa a requisição tentar; em 401 o fluxo de retry renova de novo.
+        }
     }
 
     private function renewLexosAccessToken(): void

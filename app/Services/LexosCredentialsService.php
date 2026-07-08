@@ -72,12 +72,13 @@ final class LexosCredentialsService
             $source = 'portal';
         }
 
-        // Campos preenchidos manualmente no portal sempre prevalecem.
-        if ($portalToken !== '') {
+        // No modo portal, campos manuais sempre prevalecem. No auto/tracking, só substituem
+        // credenciais ausentes no Tracking (evita token/chave antigos no portal sobrescreverem o Tracking).
+        if ($portalToken !== '' && ($mode === self::MODE_PORTAL || !$useTracking || $trackingToken === '')) {
             $token = $portalToken;
             $source = $useTracking ? 'tracking+portal' : 'portal';
         }
-        if ($portalKey !== '') {
+        if ($portalKey !== '' && ($mode === self::MODE_PORTAL || !$useTracking || $trackingKey === '')) {
             $key = $portalKey;
             $source = $useTracking ? 'tracking+portal' : 'portal';
         }
@@ -102,6 +103,35 @@ final class LexosCredentialsService
         $c = $this->resolve();
 
         return $c['token'] !== '' && $c['integration_key'] !== '';
+    }
+
+    /**
+     * Indica se o access token do Tracking provavelmente expirou e deve ser renovado antes da chamada.
+     */
+    public function shouldRefreshAccessToken(): bool
+    {
+        $creds = $this->resolve();
+        if (trim((string) ($creds['refresh_token'] ?? '')) === '') {
+            return false;
+        }
+
+        $row = $this->trackingLexosTokenRepository->findLatest();
+        if ($row === null) {
+            return false;
+        }
+
+        $access = trim((string) ($row['access_token'] ?? ''));
+        if ($access === '' || strcasecmp($access, 'expired') === 0) {
+            return true;
+        }
+
+        $updatedAt = strtotime((string) ($row['atualizado_em'] ?? ''));
+        $expiresIn = (int) ($row['expires_in'] ?? 0);
+        if ($updatedAt <= 0 || $expiresIn <= 1) {
+            return false;
+        }
+
+        return time() >= ($updatedAt + $expiresIn - 300);
     }
 
     /**
