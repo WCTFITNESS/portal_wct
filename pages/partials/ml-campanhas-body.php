@@ -233,36 +233,46 @@ $subnavPages = [
     }
 
     if (btnDownload) {
-        btnDownload.addEventListener('click', async function () {
+        btnDownload.addEventListener('click', function () {
             if (selected.length === 0) {
                 alert('Selecione ao menos 1 campanha.');
                 return;
             }
-            if (loading) loading.style.display = 'block';
-            try {
-                const res = await fetch(exportUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ selected: selected, item_status: itemStatus })
-                });
-                if (!res.ok) {
-                    const text = await res.text();
-                    throw new Error(text || ('HTTP ' + res.status));
-                }
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'campanha.xlsx';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-            } catch (err) {
-                alert('Erro ao baixar relatorio: ' + (err && err.message ? err.message : err));
-            } finally {
-                if (loading) loading.style.display = 'none';
+            if (loading) {
+                loading.style.display = 'block';
+                loading.textContent = 'Gerando relatorio… pode levar alguns minutos.';
             }
+
+            let iframe = document.getElementById('ml-camp-export-iframe');
+            if (!iframe) {
+                iframe = document.createElement('iframe');
+                iframe.id = 'ml-camp-export-iframe';
+                iframe.name = 'ml-camp-export-iframe';
+                iframe.style.display = 'none';
+                iframe.title = 'Download campanhas';
+                document.body.appendChild(iframe);
+            }
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = exportUrl;
+            form.target = 'ml-camp-export-iframe';
+            form.style.display = 'none';
+            form.acceptCharset = 'UTF-8';
+
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'export_payload';
+            input.value = JSON.stringify({ selected: selected, item_status: itemStatus });
+            form.appendChild(input);
+
+            document.body.appendChild(form);
+            form.submit();
+            form.remove();
+
+            window.setTimeout(function () {
+                if (loading) loading.style.display = 'none';
+            }, 5000);
         });
     }
 })();

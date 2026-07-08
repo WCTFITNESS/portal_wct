@@ -7,6 +7,53 @@ $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
 
+$mlCampanhasPagesEarly = ['ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas'];
+if (in_array($page, $mlCampanhasPagesEarly, true) && ($_GET['ml_campanhas_action'] ?? '') === 'export') {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Metodo nao permitido.';
+        exit;
+    }
+
+    $rawInput = (string) file_get_contents('php://input');
+    $body = json_decode($rawInput, true);
+    if (!is_array($body)) {
+        $body = json_decode(trim((string) ($_POST['export_payload'] ?? '')), true);
+    }
+    if (!is_array($body)) {
+        $body = [];
+    }
+
+    $selected = is_array($body['selected'] ?? null) ? $body['selected'] : [];
+    $itemStatus = (string) ($body['item_status'] ?? match ($page) {
+        'ml-campanhas-pendentes' => 'pending',
+        'ml-campanhas-ativas' => 'started',
+        default => 'candidate',
+    });
+
+    try {
+        ignore_user_abort(true);
+        @set_time_limit(600);
+        $filePath = $app['mlPromotionsService']->exportCampaignAnalytics($selected, $itemStatus);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="campanha.xlsx"');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao exportar campanhas: ' . $exception->getMessage();
+    }
+    exit;
+}
+
 if ($page === 'repasse-mp-sync-config') {
     header('Content-Type: application/json; charset=utf-8');
     $expected = getenv('REPASSE_MP_DESKTOP_KEY') ?: '';
@@ -773,42 +820,7 @@ if ($page === 'ml-ads-report' && isset($_GET['download']) && $_GET['download'] !
     exit;
 }
 
-$mlCampanhasPages = ['ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas'];
-if (in_array($page, $mlCampanhasPages, true) && ($_GET['ml_campanhas_action'] ?? '') === 'export') {
-    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-        http_response_code(405);
-        header('Content-Type: text/plain; charset=utf-8');
-        echo 'Metodo nao permitido.';
-        exit;
-    }
-
-    $body = json_decode((string) file_get_contents('php://input'), true);
-    if (!is_array($body)) {
-        $body = [];
-    }
-
-    $selected = is_array($body['selected'] ?? null) ? $body['selected'] : [];
-    $itemStatus = (string) ($body['item_status'] ?? match ($page) {
-        'ml-campanhas-pendentes' => 'pending',
-        'ml-campanhas-ativas' => 'started',
-        default => 'candidate',
-    });
-
-    try {
-        $filePath = $app['mlPromotionsService']->exportCampaignAnalytics($selected, $itemStatus);
-        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        header('Content-Disposition: attachment; filename="campanha.xlsx"');
-        header('Content-Length: ' . (string) filesize($filePath));
-        readfile($filePath);
-        @unlink($filePath);
-    } catch (Throwable $exception) {
-        http_response_code(500);
-        header('Content-Type: text/plain; charset=utf-8');
-        echo 'Erro ao exportar campanhas: ' . $exception->getMessage();
-    }
-    exit;
-}
-
+// Upload Repasse MP precisa redirecionar antes de qualquer output HTML (evita "headers already sent").
 if ($page === 'ml-anuncios-inativos' && ($_GET['export'] ?? '') === 'xlsx') {
     try {
         $filePath = $app['mlInactiveAdsService']->exportAllInactiveAds();

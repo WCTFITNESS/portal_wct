@@ -575,16 +575,13 @@ class MlPromotionsService
     {
         $mlb = (string) ($item['id'] ?? '');
         $ads = $mlb !== '' ? ($adsMap[$mlb] ?? null) : null;
-        if ($ads === null && $mlb !== '') {
-            $ads = $this->fetchItem($mlb, $accessToken);
-        }
 
         $sku = '';
         $stock = 0;
         $sold = 0;
         $adsStatus = '';
         if (is_array($ads)) {
-            $sku = $this->extractExportSku($ads, $accessToken) ?? '';
+            $sku = $this->extractExportSkuFast($ads);
             $stock = (int) ($ads['available_quantity'] ?? 0);
             $sold = (int) ($ads['sold_quantity'] ?? 0);
             $adsStatus = (string) ($ads['status'] ?? '');
@@ -747,7 +744,27 @@ class MlPromotionsService
     }
 
     /**
-     * SKU no padrao WCT (8 digitos numericos).
+     * SKU rapido para export (sem chamadas extras a API de variacoes).
+     *
+     * @param array<string, mixed> $item
+     */
+    private function extractExportSkuFast(array $item): string
+    {
+        $fromAttr = $this->pickWctSkuFromAttributes($item['attributes'] ?? []);
+        if ($fromAttr !== null) {
+            return $fromAttr;
+        }
+
+        $scf = trim((string) ($item['seller_custom_field'] ?? ''));
+        if ($this->isValidWctSku($scf)) {
+            return $scf;
+        }
+
+        return '';
+    }
+
+    /**
+     * SKU no padrao WCT (8 digitos numericos) — inclui busca em variacoes (uso pontual).
      *
      * @param array<string, mixed> $item
      */
