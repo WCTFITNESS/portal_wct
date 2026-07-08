@@ -134,6 +134,8 @@ class MlPromotionsService
      */
     public function exportCampaignAnalytics(array $selected, string $itemStatus): string
     {
+        @set_time_limit(600);
+
         $itemStatus = $this->normalizeItemStatus($itemStatus);
         if ($selected === []) {
             throw new RuntimeException('Selecione ao menos uma campanha.');
@@ -141,37 +143,59 @@ class MlPromotionsService
 
         $accessToken = $this->tokenService->getValidAccessToken();
         $allCampaigns = $this->fetchAllCampaigns($accessToken);
-        $selectedMap = [];
-        foreach ($selected as $item) {
-            $id = trim((string) ($item['id'] ?? ''));
-            if ($id !== '') {
-                $selectedMap[$id] = true;
+        $campaignById = [];
+        foreach ($allCampaigns as $campaign) {
+            if (!is_array($campaign)) {
+                continue;
+            }
+            $cid = trim((string) ($campaign['id'] ?? ''));
+            if ($cid !== '') {
+                $campaignById[$cid] = $campaign;
             }
         }
 
         $campaignResults = [];
-        foreach ($allCampaigns as $campaign) {
-            if (!isset($selectedMap[(string) ($campaign['id'] ?? '')])) {
+        $fetchErrors = [];
+        foreach ($selected as $sel) {
+            if (!is_array($sel)) {
+                continue;
+            }
+            $id = trim((string) ($sel['id'] ?? ''));
+            $type = trim((string) ($sel['type'] ?? ''));
+            if ($id === '' || $type === '') {
                 continue;
             }
 
-            $id = (string) $campaign['id'];
-            $type = (string) ($campaign['type'] ?? '');
-            $name = (string) ($campaign['name'] ?? '');
-            $status = (string) ($campaign['status'] ?? '');
-            $startDate = (string) ($campaign['start_date'] ?? '');
-            $finishDate = (string) ($campaign['finish_date'] ?? $campaign['end_date'] ?? '');
+            $campaign = $campaignById[$id] ?? null;
+            $name = is_array($campaign) ? trim((string) ($campaign['name'] ?? '')) : '';
+            $status = is_array($campaign) ? (string) ($campaign['status'] ?? 'started') : 'started';
+            $startDate = is_array($campaign) ? (string) ($campaign['start_date'] ?? '') : '';
+            $finishDate = is_array($campaign)
+                ? (string) ($campaign['finish_date'] ?? $campaign['end_date'] ?? '')
+                : '';
+            $benefits = is_array($campaign) && is_array($campaign['benefits'] ?? null)
+                ? $campaign['benefits']
+                : [];
 
-            $promotions = $this->fetchPromotionItems(
-                $accessToken,
-                $id,
-                $type,
-                $itemStatus,
-                $name,
-                $status,
-                $startDate,
-                $finishDate
-            );
+            try {
+                $promotions = $this->fetchPromotionItems(
+                    $accessToken,
+                    $id,
+                    $type,
+                    $itemStatus,
+                    $name !== '' ? $name : $id,
+                    $status,
+                    $startDate,
+                    $finishDate,
+                    null,
+                    true,
+                    $benefits
+                );
+            } catch (RuntimeException $e) {
+                $fetchErrors[] = $id . ': ' . $e->getMessage();
+                continue;
+            }
+
             foreach ($promotions as $promo) {
                 if (is_array($promo)) {
                     $campaignResults[] = $promo;
@@ -179,13 +203,26 @@ class MlPromotionsService
             }
         }
 
+        if ($campaignResults === []) {
+            $detail = $fetchErrors !== []
+                ? implode(' | ', array_slice($fetchErrors, 0, 5))
+                : 'Nenhum item retornado pela API para as campanhas selecionadas.';
+            throw new RuntimeException('Relatorio vazio. ' . $detail);
+        }
+
         $rows = [self::EXPORT_HEADERS];
         foreach ($this->buildExportRows($campaignResults, $accessToken) as $row) {
             $rows[] = $row;
         }
 
-        $fileName = 'ml_campanhas_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.xlsx';
-        $filePath = $this->exportDirectory() . DIRECTORY_SEPARATOR . $fileName;
+        if (count($rows) <= 1) {
+            throw new RuntimeException(
+                'Nenhuma linha gerada no relatorio. Verifique token ML e campanhas selecionadas.'
+            );
+        }
+
+        $fileName = 'campanha.xlsx';
+        $filePath = $this->exportDirectory() . DIRECTORY_SEPARATOR . $fileName . '_' . bin2hex(random_bytes(4)) . '.xlsx';
 
         require_once __DIR__ . '/../Lib/SimpleXLSXGen.php';
         $xlsx = SimpleXLSXGen::fromArray($rows, 'Vendas');
@@ -397,22 +434,34 @@ class MlPromotionsService
         string $campaignStatus,
         string $startDate,
         string $finishDate,
-        ?string $searchAfter = null
+        ?string $searchAfter = null,
+        bool $strict = false,
+        array $campaignBenefits = []
     ): array {
         $path = '/seller-promotions/promotions/' . rawurlencode($promotionCode)
             . '/items?promotion_type=' . rawurlencode($promotionType)
-            . '&app_version=v2&limit=100&status=' . rawurlencode($status);
+            . '&app_version=v2&limit=50&status=' . rawurlencode($status);
         if ($searchAfter !== null && $searchAfter !== '') {
             $path .= '&search_after=' . rawurlencode($searchAfter);
         }
 
         $res = $this->client->get($path, $accessToken);
         if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
+            if ($strict) {
+                $msg = is_array($res['body'] ?? null)
+                    ? (string) (($res['body']['message'] ?? $res['body']['error'] ?? '') ?: json_encode($res['body']))
+                    : (string) ($res['raw'] ?? '');
+                throw new RuntimeException(
+                    'HTTP ' . (string) ($res['status'] ?? 0) . ($msg !== '' ? ' — ' . $msg : '')
+                );
+            }
+
             return [];
         }
 
-        $results = $res['body']['results'] ?? [];
-        $paging = is_array($res['body']['paging'] ?? null) ? $res['body']['paging'] : [];
+        $body = is_array($res['body'] ?? null) ? $res['body'] : [];
+        $results = $body['results'] ?? [];
+        $paging = is_array($body['paging'] ?? null) ? $body['paging'] : [];
         if (!is_array($results)) {
             return [];
         }
@@ -439,6 +488,11 @@ class MlPromotionsService
             if (in_array($promotionType, ['DEAL', 'SELLER_CAMPAIGN'], true)) {
                 $result['meli_percentage'] = 0;
                 $result['seller_percentage'] = 0;
+            }
+
+            if ($campaignBenefits !== []) {
+                $itemBenefits = is_array($result['benefits'] ?? null) ? $result['benefits'] : [];
+                $result['benefits'] = array_merge($campaignBenefits, $itemBenefits);
             }
 
             $this->applyPromotionItemPercentages($result);
@@ -469,7 +523,9 @@ class MlPromotionsService
                     $campaignStatus,
                     $startDate,
                     $finishDate,
-                    $next
+                    $next,
+                    $strict,
+                    $campaignBenefits
                 )
             );
         }
@@ -483,34 +539,57 @@ class MlPromotionsService
      */
     private function buildExportRows(array $items, string $accessToken): array
     {
+        $mlbIds = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $mlb = trim((string) ($item['id'] ?? ''));
+            if ($mlb !== '') {
+                $mlbIds[] = $mlb;
+            }
+        }
+
+        $adsMap = $this->fetchItemsBatchMap(array_values(array_unique($mlbIds)), $accessToken);
+
         $rows = [];
         foreach ($items as $item) {
-            $row = $this->buildExportRow($item, $accessToken);
-            if ($row !== null) {
-                $rows[] = $row;
+            if (!is_array($item)) {
+                continue;
             }
+            $mlb = trim((string) ($item['id'] ?? ''));
+            if ($mlb === '') {
+                continue;
+            }
+            $rows[] = $this->buildExportRow($item, $accessToken, $adsMap);
         }
 
         return $rows;
     }
 
     /**
-     * @param array<string, mixed> $item
-     * @return list<string|int|float>|null
+     * @param array<string, array<string, mixed>> $adsMap
+     * @return list<string|int|float>
      */
-    private function buildExportRow(array $item, string $accessToken): ?array
+    private function buildExportRow(array $item, string $accessToken, array $adsMap = []): array
     {
         $mlb = (string) ($item['id'] ?? '');
-        if ($mlb === '') {
-            return null;
+        $ads = $mlb !== '' ? ($adsMap[$mlb] ?? null) : null;
+        if ($ads === null && $mlb !== '') {
+            $ads = $this->fetchItem($mlb, $accessToken);
         }
 
-        $ads = $this->fetchItem($mlb, $accessToken);
-        if ($ads === null) {
-            return null;
+        $sku = '';
+        $stock = 0;
+        $sold = 0;
+        $adsStatus = '';
+        if (is_array($ads)) {
+            $sku = $this->extractExportSku($ads, $accessToken) ?? '';
+            $stock = (int) ($ads['available_quantity'] ?? 0);
+            $sold = (int) ($ads['sold_quantity'] ?? 0);
+            $adsStatus = (string) ($ads['status'] ?? '');
         }
 
-        $sku = $this->extractExportSku($ads, $accessToken);
         $meliPct = $this->readPercentage($item, 'meli');
         $sellerPct = $this->readPercentage($item, 'seller');
         $originalPrice = (float) ($item['original_price'] ?? 0);
@@ -547,12 +626,12 @@ class MlPromotionsService
         }
 
         return [
-            $sku ?? '',
+            $sku,
             $mlb,
             '',
             '',
             $this->formatExportNumber($originalPrice),
-            (int) ($ads['available_quantity'] ?? 0),
+            $stock,
             (string) ($item['title'] ?? ''),
             $meliMoeda > 0 ? $this->formatExportNumber($meliMoeda) : '',
             $meliPct > 0 ? (string) (int) ceil($meliPct) : '',
@@ -567,12 +646,51 @@ class MlPromotionsService
             $this->formatDate((string) ($item['end_date'] ?? '')),
             (string) ($item['status'] ?? ''),
             (string) ($item['status_campaing'] ?? ''),
-            (int) ($ads['sold_quantity'] ?? 0),
-            (string) ($ads['status'] ?? ''),
+            $sold,
+            $adsStatus,
             (string) ($item['offer_id'] ?? ''),
             (string) ($item['id_campaign'] ?? ''),
             $type,
         ];
+    }
+
+    /**
+     * @param list<string> $ids
+     * @return array<string, array<string, mixed>>
+     */
+    private function fetchItemsBatchMap(array $ids, string $accessToken): array
+    {
+        $map = [];
+        if ($ids === []) {
+            return $map;
+        }
+
+        foreach (array_chunk($ids, 20) as $chunk) {
+            $path = '/items?ids=' . rawurlencode(implode(',', $chunk));
+            $res = $this->client->get($path, $accessToken);
+            if (($res['status'] ?? 0) < 200 || ($res['status'] ?? 0) >= 300) {
+                continue;
+            }
+            $body = $res['body'] ?? [];
+            if (!is_array($body)) {
+                continue;
+            }
+            foreach ($body as $entry) {
+                if (!is_array($entry) || (int) ($entry['code'] ?? 0) !== 200) {
+                    continue;
+                }
+                $itemBody = $entry['body'] ?? null;
+                if (!is_array($itemBody)) {
+                    continue;
+                }
+                $id = trim((string) ($itemBody['id'] ?? ''));
+                if ($id !== '') {
+                    $map[$id] = $itemBody;
+                }
+            }
+        }
+
+        return $map;
     }
 
     /**
@@ -581,19 +699,20 @@ class MlPromotionsService
     private function applyPromotionItemPercentages(array &$item): void
     {
         $benefits = is_array($item['benefits'] ?? null) ? $item['benefits'] : [];
+
         if (!isset($item['meli_percentage']) || (float) $item['meli_percentage'] <= 0) {
             $item['meli_percentage'] = (float) (
-                $benefits['meli_percent']
+                $item['meli_percent']
+                ?? $benefits['meli_percent']
                 ?? $benefits['meli_percentage']
-                ?? $item['meli_percent']
                 ?? 0
             );
         }
         if (!isset($item['seller_percentage']) || (float) $item['seller_percentage'] <= 0) {
             $item['seller_percentage'] = (float) (
-                $benefits['seller_percent']
+                $item['seller_percent']
+                ?? $benefits['seller_percent']
                 ?? $benefits['seller_percentage']
-                ?? $item['seller_percent']
                 ?? 0
             );
         }
