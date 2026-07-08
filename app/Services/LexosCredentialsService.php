@@ -82,7 +82,7 @@ final class LexosCredentialsService
             $key = $portalKey;
             $source = $useTracking ? 'tracking+portal' : 'portal';
         }
-        if ($portalRefresh !== '') {
+        if ($portalRefresh !== '' && ($mode === self::MODE_PORTAL || !$useTracking || $trackingRefresh === '')) {
             $refresh = $portalRefresh;
         }
 

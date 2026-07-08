@@ -12,7 +12,7 @@ if (!in_array($apiTab, ['ml', 'lexos', 'mp'], true)) {
     $apiTab = 'ml';
 }
 
-$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test', 'lexos_sync_tracking', 'lexos_import_tracking_key'];
+$lexosFormTypes = ['lexos_api', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test', 'lexos_sync_tracking', 'lexos_import_tracking_key', 'lexos_hub_test'];
 $mpFormTypes = ['mp_token'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -145,6 +145,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (($st['has_refresh'] ?? false)) {
                     $feedback .= '; Refresh: sim';
                 }
+            }
+        }
+
+        if ($formType === 'lexos_hub_test') {
+            $probe = $app['lexosHubApiClient']->probeHubApi();
+            $parts = [
+                'Origem: ' . ($probe['source'] ?? '?') . ' (modo ' . ($probe['mode'] ?? '?') . ')',
+                'Token: ' . ($probe['token_preview'] ?? '—'),
+                'Chave: ' . ($probe['key_preview'] ?? '—'),
+            ];
+            if (!empty($probe['refresh_attempted'])) {
+                $parts[] = 'Refresh automático: ' . (!empty($probe['refresh_ok']) ? 'OK' : ('falhou — ' . ($probe['refresh_error'] ?? '')));
+            }
+            if (!empty($probe['hub_ok'])) {
+                $feedback = 'Lexos WebAPI OK. ' . implode('; ', $parts)
+                    . '; HTTP ' . (int) ($probe['hub_http'] ?? 0)
+                    . '; auth ' . (string) ($probe['hub_auth'] ?? '')
+                    . '; registros amostra: ' . (int) ($probe['hub_rows'] ?? 0);
+            } else {
+                $feedbackClass = 'err';
+                $feedback = 'Lexos WebAPI falhou. ' . implode('; ', $parts)
+                    . '; HTTP ' . (int) ($probe['hub_http'] ?? 0)
+                    . ($probe['hub_error'] !== '' ? '; ' . $probe['hub_error'] : '');
             }
         }
 
@@ -550,7 +573,8 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
                 <option value="portal" <?= $credMode === 'portal' ? 'selected' : '' ?>>Somente portal (campos abaixo)</option>
             </select>
             <p style="font-size:.85rem;color:#64748b;margin:.35rem 0 1rem">
-                No modo automático, token e chave preenchidos abaixo prevalecem sobre o Tracking.
+                No modo automático, o Portal usa o Tracking quando há token/chave lá.
+                Campos preenchidos abaixo só substituem credenciais ausentes no Tracking (exceto no modo &quot;Somente portal&quot;).
                 O <strong>webhook Lexos</strong> envia eventos de pedido — <strong>não envia o Code OAuth</strong>.
                 Para o Tracking, use <strong>Refresh Token + Chave</strong> ou o botão &quot;Enviar credenciais ao Tracking&quot;.
             </p>
@@ -599,6 +623,11 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
                         onclick="document.getElementById('tracking_import_url').value=document.getElementById('tracking_database_url').value">
                     Importar Key do Tracking
                 </button>
+            </form>
+            <form method="post">
+                <input type="hidden" name="api_tab" value="lexos">
+                <input type="hidden" name="form_type" value="lexos_hub_test">
+                <button type="submit">Testar Lexos WebAPI</button>
             </form>
             <form method="post">
                 <input type="hidden" name="api_tab" value="lexos">

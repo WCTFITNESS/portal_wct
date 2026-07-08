@@ -132,6 +132,7 @@ return [
     'mlImageResizeService' => $mlImageResizeService,
     'lexosAuthService' => $lexosAuthService,
     'lexosCredentialsService' => $lexosCredentialsService,
+    'lexosHubApiClient' => $lexosHubApiClient,
     'trackingLexosTokenRepository' => $trackingLexosTokenRepository,
     'mercadopagoSettingsRepository' => $mercadopagoSettingsRepository,
     'mercadopagoClient' => $mercadopagoClient,

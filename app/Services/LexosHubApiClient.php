@@ -46,6 +46,79 @@ class LexosHubApiClient
     }
 
     /**
+     * Diagnóstico das credenciais contra a Lexos WebAPI (endpoint leve).
+     *
+     * @return array<string, mixed>
+     */
+    public function probeHubApi(): array
+    {
+        $creds = $this->lexosCredentialsService->resolve();
+        $out = [
+            'ready' => $this->lexosCredentialsService->isReady(),
+            'source' => (string) ($creds['source'] ?? ''),
+            'mode' => (string) ($creds['mode'] ?? ''),
+            'has_refresh' => trim((string) ($creds['refresh_token'] ?? '')) !== '',
+            'token_preview' => self::maskSecret((string) ($creds['token'] ?? '')),
+            'key_preview' => self::maskSecret((string) ($creds['integration_key'] ?? '')),
+            'refresh_attempted' => false,
+            'refresh_ok' => false,
+            'refresh_error' => '',
+            'hub_ok' => false,
+            'hub_http' => 0,
+            'hub_auth' => '',
+            'hub_rows' => 0,
+            'hub_error' => '',
+        ];
+
+        if (!$out['ready']) {
+            $out['hub_error'] = 'Credenciais Lexos incompletas (token e chave de integração).';
+
+            return $out;
+        }
+
+        if ($this->lexosCredentialsService->shouldRefreshAccessToken()) {
+            $out['refresh_attempted'] = true;
+            try {
+                $this->renewLexosAccessToken();
+                $out['refresh_ok'] = true;
+                $creds = $this->lexosCredentialsService->resolve();
+                $out['token_preview'] = self::maskSecret((string) ($creds['token'] ?? ''));
+            } catch (Throwable $e) {
+                $out['refresh_error'] = $e->getMessage();
+            }
+        }
+
+        $url = 'https://app-hub-webapi.lexos.com.br/api/Transportadora/DataSource?lojaId=-1';
+        $payload = [
+            'requiresCounts' => false,
+            'skip' => 0,
+            'take' => 1,
+        ];
+
+        try {
+            $result = $this->request('POST', $url, $payload);
+            $out['hub_ok'] = (bool) ($result['ok'] ?? false);
+            $out['hub_http'] = (int) ($result['status'] ?? 0);
+            $out['hub_auth'] = (string) ($result['auth'] ?? '');
+            $body = $result['body'] ?? null;
+            if (is_array($body)) {
+                if (isset($body['result']) && is_array($body['result'])) {
+                    $out['hub_rows'] = count($body['result']);
+                } elseif ($body !== [] && array_keys($body) === range(0, count($body) - 1)) {
+                    $out['hub_rows'] = count($body);
+                }
+            }
+        } catch (Throwable $e) {
+            $out['hub_error'] = $e->getMessage();
+            if (preg_match('/HTTP:\s*(\d+)/', $e->getMessage(), $m)) {
+                $out['hub_http'] = (int) $m[1];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
@@ -156,7 +229,9 @@ class LexosHubApiClient
         $headers = [
             'Accept: application/json',
             'Content-Type: application/json',
+            'Cache-Control: no-cache',
             'Chave: ' . $integrationKey,
+            'chave: ' . $integrationKey,
         ];
 
         $customHeaderName = $this->getLexosIntegrationHeaderName();
@@ -265,9 +340,24 @@ class LexosHubApiClient
             $message .= ' Verifique Token Lexos, chave de integração (header Chave) e execute Refresh Token Lexos em Configuração API.';
             if ($refreshException !== null) {
                 $message .= ' Falha ao renovar token automaticamente: ' . $refreshException->getMessage();
+            } else {
+                $message .= ' Se o refresh já foi tentado, a causa mais provável é a Chave de integração incorreta — use Importar Key do Tracking ou renove o Code na Lexos.';
             }
         }
 
         return new RuntimeException($message, 0, $exception);
+    }
+
+    private static function maskSecret(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '—';
+        }
+        if (strlen($value) <= 8) {
+            return '****';
+        }
+
+        return substr($value, 0, 4) . '…' . substr($value, -4);
     }
 }
