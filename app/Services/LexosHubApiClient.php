@@ -9,6 +9,10 @@ use Throwable;
 
 class LexosHubApiClient
 {
+    public const AUTH_INTEGRATION = 'integration';
+    public const AUTH_HUB = 'hub';
+    public const AUTH_AUTO = 'auto';
+
     public function __construct(
         private LexosCredentialsService $lexosCredentialsService,
         private LexosAuthService $lexosAuthService,
@@ -19,28 +23,28 @@ class LexosHubApiClient
      * @param array<string, mixed>|null $payload
      * @return array{ok: bool, status: int, body: mixed, error: string, auth: string}
      */
-    public function request(string $method, string $url, ?array $payload = null): array
+    public function request(string $method, string $url, ?array $payload = null, string $authMode = self::AUTH_INTEGRATION): array
     {
-        $this->assertLexosCredentials();
+        $this->assertLexosCredentials($authMode);
         $this->maybeRefreshExpiredToken();
 
         try {
-            return $this->executeRequest($method, $url, $payload);
+            return $this->executeRequest($method, $url, $payload, $authMode);
         } catch (RuntimeException $exception) {
             if (!$this->isUnauthorized($exception)) {
-                throw $this->wrapFailure($exception);
+                throw $this->wrapFailure($exception, null, $authMode);
             }
 
             try {
                 $this->renewLexosAccessToken();
             } catch (Throwable $refreshException) {
-                throw $this->wrapFailure($exception, $refreshException);
+                throw $this->wrapFailure($exception, $refreshException, $authMode);
             }
 
             try {
-                return $this->executeRequest($method, $url, $payload);
+                return $this->executeRequest($method, $url, $payload, $authMode);
             } catch (RuntimeException $retryException) {
-                throw $this->wrapFailure($retryException);
+                throw $this->wrapFailure($retryException, null, $authMode);
             }
         }
     }
@@ -54,7 +58,8 @@ class LexosHubApiClient
     {
         $creds = $this->lexosCredentialsService->resolve();
         $out = [
-            'ready' => $this->lexosCredentialsService->isReady(),
+            'ready' => $this->lexosCredentialsService->hasHubToken(),
+            'integration_ready' => $this->lexosCredentialsService->isReady(),
             'source' => (string) ($creds['source'] ?? ''),
             'mode' => (string) ($creds['mode'] ?? ''),
             'has_refresh' => trim((string) ($creds['refresh_token'] ?? '')) !== '',
@@ -71,7 +76,7 @@ class LexosHubApiClient
         ];
 
         if (!$out['ready']) {
-            $out['hub_error'] = 'Credenciais Lexos incompletas (token e chave de integração).';
+            $out['hub_error'] = 'Token Lexos ausente. Cole o access_token do Hub (localStorage em app-hub.lexos.com.br) ou gere via Refresh Token.';
 
             return $out;
         }
@@ -88,15 +93,18 @@ class LexosHubApiClient
             }
         }
 
-        $url = 'https://app-hub-webapi.lexos.com.br/api/Transportadora/DataSource?lojaId=-1';
+        $today = (new \DateTimeImmutable('now'))->format('Y-m-d');
+        $monthStart = (new \DateTimeImmutable('first day of this month'))->format('Y-m-d');
+        $url = "https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceCurvaAbc?lojaId=-1&initialDate={$monthStart}T00:00:00&finalDate={$today}T23:59:59";
         $payload = [
-            'requiresCounts' => false,
+            'requiresCounts' => true,
+            'aggregates' => [['type' => 'sum', 'field' => 'TotalVendidoItem']],
             'skip' => 0,
             'take' => 1,
         ];
 
         try {
-            $result = $this->request('POST', $url, $payload);
+            $result = $this->request('POST', $url, $payload, self::AUTH_AUTO);
             $out['hub_ok'] = (bool) ($result['ok'] ?? false);
             $out['hub_http'] = (int) ($result['status'] ?? 0);
             $out['hub_auth'] = (string) ($result['auth'] ?? '');
@@ -122,9 +130,9 @@ class LexosHubApiClient
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    public function postJson(string $url, array $payload): array
+    public function postJson(string $url, array $payload, string $authMode = self::AUTH_INTEGRATION): array
     {
-        $result = $this->request('POST', $url, $payload);
+        $result = $this->request('POST', $url, $payload, $authMode);
         if (!$result['ok']) {
             throw new RuntimeException(
                 'Falha consulta Lexos WebAPI. HTTP: ' . $result['status']
@@ -135,9 +143,30 @@ class LexosHubApiClient
         return is_array($result['body']) ? $result['body'] : [];
     }
 
-    private function assertLexosCredentials(): void
+    /**
+     * Chamadas do Dashboard (plugin Chrome): Bearer do Hub, sem header Chave.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public function postJsonDashboard(string $url, array $payload): array
     {
-        if ($this->lexosCredentialsService->isReady()) {
+        return $this->postJson($url, $payload, self::AUTH_AUTO);
+    }
+
+    private function assertLexosCredentials(string $authMode = self::AUTH_INTEGRATION): void
+    {
+        if ($authMode === self::AUTH_HUB || $authMode === self::AUTH_AUTO) {
+            if ($this->lexosCredentialsService->hasHubToken()) {
+                return;
+            }
+        }
+
+        if ($authMode === self::AUTH_AUTO && $this->lexosCredentialsService->isReady()) {
+            return;
+        }
+
+        if ($authMode === self::AUTH_INTEGRATION && $this->lexosCredentialsService->isReady()) {
             return;
         }
 
@@ -146,6 +175,13 @@ class LexosHubApiClient
         if (($tracking['connected'] ?? false) && !($tracking['has_row'] ?? false)) {
             throw new RuntimeException(
                 'Banco Tracking conectado, mas não há registro em lexos_tokens. Configure as credenciais no Tracking ou preencha Token e Chave na aba Lexos.'
+            );
+        }
+
+        if ($authMode === self::AUTH_HUB || $authMode === self::AUTH_AUTO) {
+            throw new RuntimeException(
+                'Token Lexos ausente. Para o Dashboard (Produtos/SKU), cole o access_token do Hub Lexos '
+                . '(localStorage em app-hub.lexos.com.br, como no plugin Chrome) ou gere via Refresh Token em Configuração API.'
             );
         }
 
@@ -158,15 +194,10 @@ class LexosHubApiClient
      * @param array<string, mixed>|null $payload
      * @return array{ok: bool, status: int, body: mixed, error: string, auth: string}
      */
-    private function executeRequest(string $method, string $url, ?array $payload): array
+    private function executeRequest(string $method, string $url, ?array $payload, string $authMode): array
     {
-        $token = $this->getLexosToken();
         $body = $payload !== null ? json_encode($payload, JSON_THROW_ON_ERROR) : '';
-        $baseHeaders = $this->buildIntegrationHeaders();
-        $authVariants = [
-            ['Authorization: Bearer ' . $token, 'authorization_bearer'],
-            ['Authorization: ' . $token, 'authorization_raw'],
-        ];
+        $authAttempts = $this->buildAuthAttempts($authMode);
 
         $last = [
             'ok' => false,
@@ -176,8 +207,8 @@ class LexosHubApiClient
             'auth' => '',
         ];
 
-        foreach ($authVariants as [$authHeader, $label]) {
-            [$status, $err, $raw] = $this->curlRequest($method, $url, $body, array_merge($baseHeaders, [$authHeader]));
+        foreach ($authAttempts as $attempt) {
+            [$status, $err, $raw] = $this->curlRequest($method, $url, $body, $attempt['headers']);
             $decoded = null;
             if (is_string($raw) && $raw !== '') {
                 $decoded = json_decode($raw, true);
@@ -191,7 +222,7 @@ class LexosHubApiClient
                 'status' => $status,
                 'body' => $decoded,
                 'error' => $err,
-                'auth' => $label,
+                'auth' => (string) $attempt['label'],
             ];
 
             if ($last['ok']) {
@@ -203,7 +234,7 @@ class LexosHubApiClient
 
                 throw new RuntimeException(
                     'Falha consulta Lexos WebAPI. HTTP: ' . $status
-                    . ' Tentativa: ' . $label
+                    . ' Tentativa: ' . $attempt['label']
                     . ($err !== '' ? ' ' . $err : '')
                     . $extra
                 );
@@ -218,6 +249,47 @@ class LexosHubApiClient
             . ($last['error'] !== '' ? ' ' . $last['error'] : '')
             . $extra
         );
+    }
+
+    /**
+     * @return list<array{label: string, headers: list<string>}>
+     */
+    private function buildAuthAttempts(string $authMode): array
+    {
+        $token = $this->getLexosToken();
+        $attempts = [];
+
+        if ($authMode === self::AUTH_HUB || $authMode === self::AUTH_AUTO) {
+            $attempts[] = [
+                'label' => 'hub_bearer',
+                'headers' => [
+                    'Accept: application/json',
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $token,
+                ],
+            ];
+        }
+
+        if ($authMode === self::AUTH_INTEGRATION || $authMode === self::AUTH_AUTO) {
+            $integrationKey = $this->getLexosIntegrationKey();
+            if ($integrationKey !== '') {
+                $baseHeaders = $this->buildIntegrationHeaders();
+                $attempts[] = [
+                    'label' => 'integration_bearer',
+                    'headers' => array_merge($baseHeaders, ['Authorization: Bearer ' . $token]),
+                ];
+                $attempts[] = [
+                    'label' => 'integration_raw',
+                    'headers' => array_merge($baseHeaders, ['Authorization: ' . $token]),
+                ];
+            }
+        }
+
+        if ($attempts === []) {
+            throw new RuntimeException('Token Lexos não configurado.');
+        }
+
+        return $attempts;
     }
 
     /**
@@ -333,14 +405,19 @@ class LexosHubApiClient
         return str_contains($exception->getMessage(), 'HTTP: 401');
     }
 
-    private function wrapFailure(RuntimeException $exception, ?Throwable $refreshException = null): RuntimeException
+    private function wrapFailure(RuntimeException $exception, ?Throwable $refreshException = null, string $authMode = self::AUTH_INTEGRATION): RuntimeException
     {
         $message = $exception->getMessage();
         if ($this->isUnauthorized($exception)) {
-            $message .= ' Verifique Token Lexos, chave de integração (header Chave) e execute Refresh Token Lexos em Configuração API.';
+            if ($authMode === self::AUTH_HUB || $authMode === self::AUTH_AUTO) {
+                $message .= ' Para o Dashboard, use o access_token do Hub Lexos (localStorage em app-hub.lexos.com.br, como no plugin Chrome) '
+                    . 'ou execute Refresh Token em Configuração API.';
+            } else {
+                $message .= ' Verifique Token Lexos, chave de integração (header Chave) e execute Refresh Token Lexos em Configuração API.';
+            }
             if ($refreshException !== null) {
                 $message .= ' Falha ao renovar token automaticamente: ' . $refreshException->getMessage();
-            } else {
+            } elseif ($authMode === self::AUTH_INTEGRATION) {
                 $message .= ' Se o refresh já foi tentado, a causa mais provável é a Chave de integração incorreta — use Importar Key do Tracking ou renove o Code na Lexos.';
             }
         }

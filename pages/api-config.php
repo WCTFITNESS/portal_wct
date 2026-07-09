@@ -166,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $parts[] = 'Refresh automático: ' . (!empty($probe['refresh_ok']) ? 'OK' : ('falhou — ' . ($probe['refresh_error'] ?? '')));
             }
             if (!empty($probe['hub_ok'])) {
-                $feedback = 'Lexos WebAPI OK. ' . implode('; ', $parts)
+                $feedback = 'Lexos WebAPI OK (modo Dashboard/plugin). ' . implode('; ', $parts)
                     . '; HTTP ' . (int) ($probe['hub_http'] ?? 0)
                     . '; auth ' . (string) ($probe['hub_auth'] ?? '')
                     . '; registros amostra: ' . (int) ($probe['hub_rows'] ?? 0);
@@ -594,7 +594,11 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
             <textarea name="lexos_code" rows="2" placeholder="Cole o code da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_code'] ?? '')) ?></textarea>
 
             <label>Token Lexos</label>
-            <textarea name="lexos_token" rows="3" placeholder="Cole o access_token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_token'] ?? '')) ?></textarea>
+            <textarea name="lexos_token" rows="3" placeholder="Cole o access_token (Hub: localStorage em app-hub.lexos.com.br, como no plugin Chrome)"><?= htmlspecialchars((string) ($apiConfig['lexos_token'] ?? '')) ?></textarea>
+            <p style="font-size:.85rem;color:#64748b;margin:.25rem 0 .75rem">
+                <strong>Dashboard (Produtos/SKU):</strong> usa só Bearer, igual ao plugin — token do Hub (<code>localStorage.access_token</code>).
+                <strong>Tracking/integração:</strong> também exige a Chave abaixo.
+            </p>
 
             <label>Refresh token Lexos</label>
             <textarea name="lexos_refresh_token" rows="3" placeholder="Cole o refresh token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_refresh_token'] ?? '')) ?></textarea>

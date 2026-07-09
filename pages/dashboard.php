@@ -52,23 +52,23 @@ $selectedYears = array_values(array_map(static fn (mixed $y): string => (string)
 $comparison = ['months' => [], 'series' => []];
 
 try {
-    if ($app['lexosCredentialsService']->isReady()) {
-        if ($activeTab === 'dashboard') {
-            $metrics = $lexos->getDashboardMetrics($dStart, $dEnd);
-            $channelsRaw = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
-            $channels = [];
-            foreach ($channelsRaw as $r) {
-                $pair = $normalizeChannelRow($r);
-                if ($pair !== null) {
-                    $channels[] = $pair;
-                }
+    if ($activeTab === 'dashboard') {
+        $metrics = $lexos->getDashboardMetrics($dStart, $dEnd);
+        $channelsRaw = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
+        $channels = [];
+        foreach ($channelsRaw as $r) {
+            $pair = $normalizeChannelRow($r);
+            if ($pair !== null) {
+                $channels[] = $pair;
             }
-        } elseif ($activeTab === 'products') {
+        }
+    } elseif ($activeTab === 'comparison') {
+        $comparison = $lexos->getComparisonData($selectedYears);
+    } elseif ($app['lexosCredentialsService']->hasHubToken()) {
+        if ($activeTab === 'products') {
             $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
             $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
             $productsTotal = (int) ($productsResp['count'] ?? count($products));
-        } elseif ($activeTab === 'comparison') {
-            $comparison = $lexos->getComparisonData($selectedYears);
         } elseif ($activeTab === 'sku-analysis' && $sku !== '') {
             $skuData = $lexos->getSkuAnalysis($sku, $dStart, $dEnd);
         }
@@ -208,8 +208,11 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
 </style>
 
 <section class="card">
-    <?php if (!$app['lexosCredentialsService']->isReady()): ?>
-        <div class="msg err">Configure o <strong>Token Lexos</strong> em Configuração API para habilitar esta seção.</div>
+    <?php
+    $lexosNeedsHubToken = in_array($activeTab, ['products', 'sku-analysis'], true);
+    ?>
+    <?php if ($lexosNeedsHubToken && !$app['lexosCredentialsService']->hasHubToken()): ?>
+        <div class="msg err">Configure o <strong>Token Lexos</strong> (access_token do Hub em app-hub.lexos.com.br) em Configuração API para habilitar esta aba.</div>
     <?php elseif ($lexosError): ?>
         <div class="msg err">Erro Lexos: <?= htmlspecialchars($lexosError) ?></div>
     <?php endif; ?>

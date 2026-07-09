@@ -105,6 +105,13 @@ final class LexosCredentialsService
         return $c['token'] !== '' && $c['integration_key'] !== '';
     }
 
+    public function hasHubToken(): bool
+    {
+        $c = $this->resolve();
+
+        return $c['token'] !== '';
+    }
+
     /**
      * Indica se o access token do Tracking provavelmente expirou e deve ser renovado antes da chamada.
      */

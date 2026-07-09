@@ -53,7 +53,7 @@ class LexosDashboardService
         }
 
         $url = "https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceCurvaAbc?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
-        $json = $this->lexosHubApiClient->postJson($url, $payload);
+        $json = $this->lexosHubApiClient->postJsonDashboard($url, $payload);
         $norm = $this->normalizeAppHubDatasourceResponse($json);
 
         return [
@@ -118,7 +118,7 @@ class LexosDashboardService
             'take' => 5000,
         ];
         $salesUrl = 'https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceLucratividadeItem';
-        $salesRaw = $this->lexosHubApiClient->postJson($salesUrl, $salesPayload);
+        $salesRaw = $this->lexosHubApiClient->postJsonDashboard($salesUrl, $salesPayload);
 
         $stockPayload = [
             'requiresCounts' => false,
@@ -141,7 +141,7 @@ class LexosDashboardService
             'take' => 1,
         ];
         $stockUrl = 'https://app-hub-webapi.lexos.com.br/api/Produto/DataSource?lojaId=-1';
-        $stockRaw = $this->lexosHubApiClient->postJson($stockUrl, $stockPayload);
+        $stockRaw = $this->lexosHubApiClient->postJsonDashboard($stockUrl, $stockPayload);
 
         return [
             'sales' => $this->normalizeAppHubDatasourceResponse($salesRaw),
