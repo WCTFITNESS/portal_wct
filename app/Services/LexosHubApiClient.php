@@ -16,6 +16,7 @@ class LexosHubApiClient
     public function __construct(
         private LexosCredentialsService $lexosCredentialsService,
         private LexosAuthService $lexosAuthService,
+        private ?LexosHubSessionService $lexosHubSessionService = null,
     ) {
     }
 
@@ -33,6 +34,16 @@ class LexosHubApiClient
         try {
             return $this->executeRequest($method, $url, $payload, $authMode);
         } catch (RuntimeException $exception) {
+            if ($authMode === self::AUTH_HUB && $this->isUnauthorized($exception)) {
+                if ($this->lexosHubSessionService !== null && $this->lexosHubSessionService->refreshHubAccessToken()) {
+                    try {
+                        return $this->executeRequest($method, $url, $payload, $authMode);
+                    } catch (RuntimeException $retryException) {
+                        throw $this->wrapFailure($retryException, null, $authMode);
+                    }
+                }
+            }
+
             if ($authMode === self::AUTH_HUB || !$this->isUnauthorized($exception)) {
                 throw $this->wrapFailure($exception, null, $authMode);
             }
@@ -60,7 +71,8 @@ class LexosHubApiClient
     {
         $creds = $this->lexosCredentialsService->resolve();
         $out = [
-            'ready' => $this->lexosCredentialsService->hasHubToken() || $this->lexosCredentialsService->isReady(),
+            'ready' => $this->lexosCredentialsService->hasHubToken()
+                || $this->lexosCredentialsService->getHubRefreshToken() !== '',
             'integration_ready' => $this->lexosCredentialsService->isReady(),
             'hub_token_preview' => $this->lexosCredentialsService->getHubStatusSummary()['hub_token_preview'],
             'key_preview' => self::maskSecret((string) ($creds['integration_key'] ?? '')),
@@ -75,7 +87,15 @@ class LexosHubApiClient
         ];
 
         if (!$out['ready']) {
-            $out['hub_error'] = 'Credenciais Lexos ausentes. Configure Tracking (refresh token + chave) ou Token Hub.';
+            $out['hub_error'] = 'Token Hub ausente. Instale o conector Lexos (Configuração API) ou sincronize via app-hub.lexos.com.br.';
+
+            return $out;
+        }
+
+        try {
+            $this->ensureHubSession();
+        } catch (Throwable $e) {
+            $out['hub_error'] = $e->getMessage();
 
             return $out;
         }
@@ -91,7 +111,7 @@ class LexosHubApiClient
         ];
 
         try {
-            $result = $this->request('POST', $url, $payload, self::AUTH_AUTO);
+            $result = $this->request('POST', $url, $payload, self::AUTH_HUB);
             $out['hub_ok'] = (bool) ($result['ok'] ?? false);
             $out['hub_http'] = (int) ($result['status'] ?? 0);
             $out['hub_auth'] = (string) ($result['auth'] ?? '');
@@ -131,14 +151,31 @@ class LexosHubApiClient
     }
 
     /**
-     * Dashboard WebAPI: tenta Token Hub, depois OAuth integração (Tracking) com refresh automático.
+     * Produtos/SKU: exige Token Hub (sessão app-hub.lexos.com.br).
      *
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
     public function postJsonDashboard(string $url, array $payload): array
     {
-        return $this->postJson($url, $payload, self::AUTH_AUTO);
+        $this->ensureHubSession();
+
+        return $this->postJson($url, $payload, self::AUTH_HUB);
+    }
+
+    private function ensureHubSession(): void
+    {
+        if ($this->lexosHubSessionService === null) {
+            if (!$this->lexosCredentialsService->hasHubToken()) {
+                throw new RuntimeException(
+                    'Token Hub ausente. Instale o conector Lexos em Configuração API → Lexos.'
+                );
+            }
+
+            return;
+        }
+
+        $this->lexosHubSessionService->ensureValidHubToken();
     }
 
     private function assertLexosCredentials(string $authMode = self::AUTH_INTEGRATION): void
@@ -415,9 +452,11 @@ class LexosHubApiClient
     {
         $message = $exception->getMessage();
         if ($this->isUnauthorized($exception)) {
-            if ($authMode === self::AUTH_HUB || $authMode === self::AUTH_AUTO) {
-                $message .= ' O Dashboard exige o Token Hub (localStorage access_token de app-hub.lexos.com.br). '
-                    . 'O Refresh Token OAuth do Tracking não serve para Produtos/SKU.';
+            if ($authMode === self::AUTH_HUB) {
+                $message .= ' Produtos/SKU exigem Token Hub do app-hub.lexos.com.br. '
+                    . 'Instale o conector Lexos (Configuração API → Lexos) para sincronizar automaticamente.';
+            } elseif ($authMode === self::AUTH_AUTO) {
+                $message .= ' Verifique Token Hub ou credenciais de integração Lexos.';
             } else {
                 $message .= ' Verifique Token Lexos, chave de integração (header Chave) e execute Refresh Token Lexos em Configuração API.';
             }

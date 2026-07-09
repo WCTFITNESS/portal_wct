@@ -17,6 +17,7 @@ class SettingsRepository
     private ?bool $hasTrackingDatabaseUrlColumn = null;
     private ?bool $hasLexosCredentialsModeColumn = null;
     private ?bool $hasLexosHubTokenColumn = null;
+    private ?bool $hasLexosHubRefreshTokenColumn = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -38,6 +39,9 @@ class SettingsRepository
         if (isset($data['lexos_hub_token'])) {
             $data['lexos_hub_token'] = $this->normalizeBearerToken((string) $data['lexos_hub_token']);
         }
+        if (isset($data['lexos_hub_refresh_token'])) {
+            $data['lexos_hub_refresh_token'] = trim((string) $data['lexos_hub_refresh_token']);
+        }
         $this->ensureOauthCodeColumnExists();
         $this->ensureLexosCodeColumnExists();
         $this->ensureLexosTokenColumnExists();
@@ -47,6 +51,7 @@ class SettingsRepository
         $this->ensureTrackingDatabaseUrlColumnExists();
         $this->ensureLexosCredentialsModeColumnExists();
         $this->ensureLexosHubTokenColumnExists();
+        $this->ensureLexosHubRefreshTokenColumnExists();
         $existing = $this->getApiConfig();
 
         if ($existing) {
@@ -60,6 +65,7 @@ class SettingsRepository
                      lexos_code = :lexos_code,
                      lexos_token = :lexos_token,
                      lexos_hub_token = :lexos_hub_token,
+                     lexos_hub_refresh_token = :lexos_hub_refresh_token,
                      lexos_refresh_token = :lexos_refresh_token,
                      lexos_integration_key = :lexos_integration_key,
                      lexos_integration_header_name = :lexos_integration_header_name,
@@ -77,6 +83,7 @@ class SettingsRepository
                 ':lexos_code' => (($data['lexos_code'] ?? '') !== '') ? (string) $data['lexos_code'] : null,
                 ':lexos_token' => (($data['lexos_token'] ?? '') !== '') ? (string) $data['lexos_token'] : null,
                 ':lexos_hub_token' => (($data['lexos_hub_token'] ?? '') !== '') ? (string) $data['lexos_hub_token'] : null,
+                ':lexos_hub_refresh_token' => (($data['lexos_hub_refresh_token'] ?? '') !== '') ? (string) $data['lexos_hub_refresh_token'] : null,
                 ':lexos_refresh_token' => (($data['lexos_refresh_token'] ?? '') !== '') ? (string) $data['lexos_refresh_token'] : null,
                 ':lexos_integration_key' => (($data['lexos_integration_key'] ?? '') !== '') ? (string) $data['lexos_integration_key'] : null,
                 ':lexos_integration_header_name' => (($data['lexos_integration_header_name'] ?? '') !== '') ? (string) $data['lexos_integration_header_name'] : null,
@@ -90,9 +97,9 @@ class SettingsRepository
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO api_settings (
-                app_id, client_secret, redirect_uri, seller_id, oauth_code, lexos_code, lexos_token, lexos_hub_token, lexos_refresh_token, lexos_integration_key, lexos_integration_header_name, tracking_database_url, lexos_credentials_mode, created_at, updated_at
+                app_id, client_secret, redirect_uri, seller_id, oauth_code, lexos_code, lexos_token, lexos_hub_token, lexos_hub_refresh_token, lexos_refresh_token, lexos_integration_key, lexos_integration_header_name, tracking_database_url, lexos_credentials_mode, created_at, updated_at
              ) VALUES (
-                :app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, :lexos_code, :lexos_token, :lexos_hub_token, :lexos_refresh_token, :lexos_integration_key, :lexos_integration_header_name, :tracking_database_url, :lexos_credentials_mode, NOW(), NOW()
+                :app_id, :client_secret, :redirect_uri, :seller_id, :oauth_code, :lexos_code, :lexos_token, :lexos_hub_token, :lexos_hub_refresh_token, :lexos_refresh_token, :lexos_integration_key, :lexos_integration_header_name, :tracking_database_url, :lexos_credentials_mode, NOW(), NOW()
              )'
         );
         $stmt->execute([
@@ -104,6 +111,7 @@ class SettingsRepository
             ':lexos_code' => (($data['lexos_code'] ?? '') !== '') ? (string) $data['lexos_code'] : null,
             ':lexos_token' => (($data['lexos_token'] ?? '') !== '') ? (string) $data['lexos_token'] : null,
             ':lexos_hub_token' => (($data['lexos_hub_token'] ?? '') !== '') ? (string) $data['lexos_hub_token'] : null,
+            ':lexos_hub_refresh_token' => (($data['lexos_hub_refresh_token'] ?? '') !== '') ? (string) $data['lexos_hub_refresh_token'] : null,
             ':lexos_refresh_token' => (($data['lexos_refresh_token'] ?? '') !== '') ? (string) $data['lexos_refresh_token'] : null,
             ':lexos_integration_key' => (($data['lexos_integration_key'] ?? '') !== '') ? (string) $data['lexos_integration_key'] : null,
             ':lexos_integration_header_name' => (($data['lexos_integration_header_name'] ?? '') !== '') ? (string) $data['lexos_integration_header_name'] : null,
@@ -492,5 +500,46 @@ class SettingsRepository
         $this->hasLexosHubTokenColumn = ((int) $stmt->fetchColumn()) > 0;
 
         return $this->hasLexosHubTokenColumn;
+    }
+
+    private function ensureLexosHubRefreshTokenColumnExists(): void
+    {
+        if ($this->hasLexosHubRefreshTokenColumn()) {
+            return;
+        }
+
+        if ($this->isPgsql()) {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN lexos_hub_refresh_token TEXT DEFAULT NULL');
+        } else {
+            $this->pdo->exec('ALTER TABLE api_settings ADD COLUMN lexos_hub_refresh_token TEXT NULL AFTER lexos_hub_token');
+        }
+        $this->hasLexosHubRefreshTokenColumn = true;
+    }
+
+    private function hasLexosHubRefreshTokenColumn(): bool
+    {
+        if ($this->hasLexosHubRefreshTokenColumn !== null) {
+            return $this->hasLexosHubRefreshTokenColumn;
+        }
+
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_hub_refresh_token'"
+            );
+        } else {
+            $stmt = $this->pdo->query(
+                "SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'api_settings'
+                   AND column_name = 'lexos_hub_refresh_token'"
+            );
+        }
+
+        $this->hasLexosHubRefreshTokenColumn = ((int) $stmt->fetchColumn()) > 0;
+
+        return $this->hasLexosHubRefreshTokenColumn;
     }
 }

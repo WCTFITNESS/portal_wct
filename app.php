@@ -24,6 +24,7 @@ use App\Services\LexosDashboardService;
 use App\Services\LexosAuthService;
 use App\Services\LexosCredentialsService;
 use App\Services\LexosHubApiClient;
+use App\Services\LexosHubSessionService;
 use App\Services\LexosExpeditionDiagnosticService;
 use App\Services\LexosTransportadoraService;
 use App\Services\LexosOrderMonitorService;
@@ -100,7 +101,8 @@ $lexosAuthService = new LexosAuthService(
     $lexosCredentialsService,
     $trackingLexosTokenRepository
 );
-$lexosHubApiClient = new LexosHubApiClient($lexosCredentialsService, $lexosAuthService);
+$lexosHubSessionService = new LexosHubSessionService($settingsRepository, $lexosCredentialsService);
+$lexosHubApiClient = new LexosHubApiClient($lexosCredentialsService, $lexosAuthService, $lexosHubSessionService);
 $lexosDashboardService = new LexosDashboardService($lexosHubApiClient);
 $lexosOrderWebhookRepository = new LexosOrderWebhookRepository($pdo);
 $lexosOrderWebhookService = new LexosOrderWebhookService($lexosOrderWebhookRepository);
@@ -137,6 +139,7 @@ return [
     'mlImageResizeService' => $mlImageResizeService,
     'lexosAuthService' => $lexosAuthService,
     'lexosCredentialsService' => $lexosCredentialsService,
+    'lexosHubSessionService' => $lexosHubSessionService,
     'lexosHubApiClient' => $lexosHubApiClient,
     'trackingLexosTokenRepository' => $trackingLexosTokenRepository,
     'mercadopagoSettingsRepository' => $mercadopagoSettingsRepository,

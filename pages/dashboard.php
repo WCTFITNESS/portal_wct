@@ -219,7 +219,16 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
 
 <section class="card">
     <?php if ($lexosError): ?>
-        <div class="msg err">Erro Lexos: <?= htmlspecialchars($lexosError) ?></div>
+        <div class="msg err">
+            Erro Lexos: <?= htmlspecialchars($lexosError) ?>
+            <?php if (stripos($lexosError, 'Token Hub') !== false || stripos($lexosError, '401') !== false): ?>
+                <p style="margin:.5rem 0 0;font-size:.9rem">
+                    Instale o <strong>Conector Lexos</strong> em
+                    <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=api-config&api_tab=lexos'), ENT_QUOTES, 'UTF-8') ?>">Configuração API → Lexos</a>
+                    (pasta <code>tools/lexos-portal-sync</code>) e mantenha login em app-hub.lexos.com.br.
+                </p>
+            <?php endif; ?>
+        </div>
     <?php endif; ?>
 
     <nav class="lexos-tabs" id="lexos-tabs">

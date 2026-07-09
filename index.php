@@ -118,6 +118,28 @@ if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
 }
 
+if (
+    $page === 'api-config'
+    && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && ($_POST['form_type'] ?? '') === 'lexos_hub_capture'
+    && ($_POST['lexos_hub_silent'] ?? '') === '1'
+) {
+    header('Content-Type: text/plain; charset=utf-8');
+    try {
+        $hubToken = trim((string) ($_POST['lexos_hub_token'] ?? ''));
+        if ($hubToken === '') {
+            throw new RuntimeException('missing token');
+        }
+        $hubRefresh = trim((string) ($_POST['lexos_hub_refresh_token'] ?? ''));
+        $app['lexosHubSessionService']->persistHubTokens($hubToken, $hubRefresh);
+        echo 'ok';
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo 'err: ' . $e->getMessage();
+    }
+    exit;
+}
+
 if ($page === 'protheus-consulta-sql' && isset($_GET['protheus_sql_action']) && $_GET['protheus_sql_action'] !== '') {
     header('Content-Type: application/json; charset=utf-8');
     $action = (string) $_GET['protheus_sql_action'];

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Portal WCT Lexos Sync</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 520px; margin: 24px auto; padding: 0 16px; }
+    label { display: block; margin: 12px 0 4px; font-weight: 600; }
+    input { width: 100%; box-sizing: border-box; padding: 8px; }
+    button { margin-top: 12px; padding: 8px 14px; }
+    #status { margin-top: 12px; color: #166534; }
+  </style>
+</head>
+<body>
+  <h1>Conector Lexos → Portal WCT</h1>
+  <p>Cole a URL de captura do portal (Configuração API → Lexos).</p>
+  <label for="portalUrl">URL do portal</label>
+  <input id="portalUrl" type="url" placeholder="https://seu-portal/index.php?page=api-config">
+  <button id="save">Salvar</button>
+  <p id="status"></p>
+  <script src="options.js"></script>
+</body>
+</html>

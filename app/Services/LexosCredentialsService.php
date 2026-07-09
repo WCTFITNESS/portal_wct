@@ -125,6 +125,13 @@ final class LexosCredentialsService
         return '';
     }
 
+    public function getHubRefreshToken(): string
+    {
+        $portal = $this->settingsRepository->getApiConfig() ?? [];
+
+        return trim((string) ($portal['lexos_hub_refresh_token'] ?? ''));
+    }
+
     /**
      * @return array{has_hub_token: bool, hub_token_preview: string}
      */

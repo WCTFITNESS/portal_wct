@@ -65,6 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
                 'lexos_code' => trim((string) ($_POST['lexos_code'] ?? '')),
                 'lexos_hub_token' => $hubTokenInput !== '' ? $hubTokenInput : trim((string) ($existing['lexos_hub_token'] ?? '')),
+                'lexos_hub_refresh_token' => trim((string) ($existing['lexos_hub_refresh_token'] ?? '')),
                 'lexos_token' => trim((string) ($_POST['lexos_token'] ?? '')),
                 'lexos_refresh_token' => trim((string) ($_POST['lexos_refresh_token'] ?? '')),
                 'lexos_integration_key' => trim((string) ($_POST['lexos_integration_key'] ?? '')),
@@ -80,26 +81,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($formType === 'lexos_hub_capture') {
             $hubToken = trim((string) ($_POST['lexos_hub_token'] ?? ''));
+            $hubRefresh = trim((string) ($_POST['lexos_hub_refresh_token'] ?? ''));
             if ($hubToken === '') {
-                throw new RuntimeException('Token Hub não recebido. Faça login em app-hub.lexos.com.br e use o botão de captura.');
+                throw new RuntimeException('Token Hub não recebido. Faça login em app-hub.lexos.com.br.');
             }
-            $existing = $app['settingsRepository']->getApiConfig() ?? [];
-            $app['settingsRepository']->saveApiConfig([
-                'app_id' => trim((string) ($existing['app_id'] ?? '')),
-                'client_secret' => trim((string) ($existing['client_secret'] ?? '')),
-                'redirect_uri' => trim((string) ($existing['redirect_uri'] ?? '')),
-                'seller_id' => trim((string) ($existing['seller_id'] ?? '')),
-                'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
-                'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
-                'lexos_hub_token' => $hubToken,
-                'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
-                'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
-                'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
-                'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
-                'tracking_database_url' => trim((string) ($existing['tracking_database_url'] ?? '')) !== '' ? trim((string) $existing['tracking_database_url']) : null,
-                'lexos_credentials_mode' => trim((string) ($existing['lexos_credentials_mode'] ?? 'auto')),
-            ]);
-            $feedback = 'Token Hub capturado automaticamente do Lexos Hub e salvo.';
+            $app['lexosHubSessionService']->persistHubTokens($hubToken, $hubRefresh);
+            $silent = ($_POST['lexos_hub_silent'] ?? '') === '1' || ($_GET['lexos_hub_silent'] ?? '') === '1';
+            if ($silent) {
+                header('Content-Type: text/plain; charset=utf-8');
+                echo 'ok';
+                exit;
+            }
+            $feedback = 'Token Hub sincronizado automaticamente do Lexos Hub.';
             $apiConfig = $app['settingsRepository']->getApiConfig();
         }
 
@@ -629,21 +622,26 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
             <label>Token Hub (Dashboard Produtos/SKU)</label>
             <?php
                 $lexosHubCaptureAction = portal_wct_public_path($baseUrl, 'index.php?page=api-config');
-                $lexosHubBookmarklet = "javascript:(function(){var t=localStorage.getItem('access_token');if(!t){alert('Faça login em app-hub.lexos.com.br primeiro.');return;}var f=document.createElement('form');f.method='POST';f.action=" . json_encode($lexosHubCaptureAction, JSON_UNESCAPED_SLASHES) . ";f.target='_blank';[['api_tab','lexos'],['form_type','lexos_hub_capture']].forEach(function(p){var i=document.createElement('input');i.type='hidden';i.name=p[0];i.value=p[1];f.appendChild(i);});var tok=document.createElement('input');tok.type='hidden';tok.name='lexos_hub_token';tok.value=t;f.appendChild(tok);document.body.appendChild(f);f.submit();})();";
+                $lexosHubBookmarklet = "javascript:(function(){var t=localStorage.getItem('access_token');if(!t){alert('Faça login em app-hub.lexos.com.br primeiro.');return;}var r=localStorage.getItem('refresh_token')||localStorage.getItem('refreshToken')||'';var f=document.createElement('form');f.method='POST';f.action=" . json_encode($lexosHubCaptureAction, JSON_UNESCAPED_SLASHES) . ";f.target='_blank';[['api_tab','lexos'],['form_type','lexos_hub_capture']].forEach(function(p){var i=document.createElement('input');i.type='hidden';i.name=p[0];i.value=p[1];f.appendChild(i);});var tok=document.createElement('input');tok.type='hidden';tok.name='lexos_hub_token';tok.value=t;f.appendChild(tok);var ref=document.createElement('input');ref.type='hidden';ref.name='lexos_hub_refresh_token';ref.value=r;f.appendChild(ref);document.body.appendChild(f);f.submit();})();";
+                $lexosHubCaptureUrl = portal_wct_public_path($baseUrl, 'index.php?page=api-config');
             ?>
-            <div style="margin:.35rem 0 .75rem;padding:10px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;font-size:.88rem;color:#1e3a8a">
-                <strong>Captura automática (1 clique no Hub):</strong> o portal não pode ler o login do Lexos sozinho (segurança do navegador).
+            <div style="margin:.35rem 0 .75rem;padding:12px 14px;border:1px solid #86efac;border-radius:8px;background:#f0fdf4;font-size:.88rem;color:#14532d">
+                <strong>Recomendado — Conector automático (instalar 1x):</strong>
                 <ol style="margin:.5rem 0 0;padding-left:1.2rem">
-                    <li>Abra <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a> e faça login</li>
-                    <li>Arraste este link para a barra de favoritos: <a href="<?= htmlspecialchars($lexosHubBookmarklet, ENT_QUOTES, 'UTF-8') ?>" style="font-weight:700">Capturar Token Hub → Portal</a></li>
-                    <li>Com o Hub aberto, clique no favorito — o token é enviado ao portal automaticamente</li>
+                    <li>Chrome → <code>chrome://extensions</code> → Modo desenvolvedor → Carregar sem compactação</li>
+                    <li>Pasta: <code>tools/lexos-portal-sync</code> deste repositório</li>
+                    <li>Opções da extensão → URL: <code style="word-break:break-all"><?= htmlspecialchars($lexosHubCaptureUrl, ENT_QUOTES, 'UTF-8') ?></code></li>
+                    <li>Mantenha login em <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a> — o token sincroniza sozinho</li>
                 </ol>
-                <p style="margin:.5rem 0 0;font-size:.82rem;color:#475569">Igual ao plugin Faturamento: lê <code>localStorage.access_token</code> só quando você está no domínio do Hub.</p>
+            </div>
+            <div style="margin:.35rem 0 .75rem;padding:10px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;font-size:.88rem;color:#1e3a8a">
+                <strong>Alternativa manual:</strong> arraste para favoritos
+                <a href="<?= htmlspecialchars($lexosHubBookmarklet, ENT_QUOTES, 'UTF-8') ?>" style="font-weight:700">Capturar Token Hub → Portal</a>
+                e clique com o Hub aberto.
             </div>
             <textarea name="lexos_hub_token" rows="3" placeholder="Ou cole manualmente localStorage.access_token de app-hub.lexos.com.br"><?= htmlspecialchars((string) ($apiConfig['lexos_hub_token'] ?? '')) ?></textarea>
             <p style="font-size:.85rem;color:#64748b;margin:.25rem 0 .75rem">
-                <strong>Obrigatório para Produtos/SKU.</strong> Com o Hub aberto e logado: F12 → Application → Local Storage → <code>access_token</code>.
-                É diferente do token OAuth de integração abaixo.
+                <strong>Obrigatório para Produtos/SKU.</strong> O OAuth do Tracking <em>não</em> funciona nesta API — use o conector acima ou cole o <code>access_token</code> do Hub.
             </p>
 
             <label>Token OAuth integração (Tracking / Refresh)</label>

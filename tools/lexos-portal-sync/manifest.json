@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Portal WCT - Lexos Sync",
+  "version": "1.0.0",
+  "description": "Sincroniza automaticamente o Token Hub Lexos com o Portal WCT (aba Produtos).",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://app-hub.lexos.com.br/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://app-hub.lexos.com.br/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html"
+}
