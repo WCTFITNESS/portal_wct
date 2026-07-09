@@ -695,6 +695,37 @@ if ($page === 'protheus-monitor-pedidos' && ($_GET['export'] ?? '') === 'xlsx') 
     exit;
 }
 
+if (in_array($page, ['dashboard', 'ml-dashboard'], true) && ($_GET['export'] ?? '') === 'xlsx' && ($_GET['lexos_tab'] ?? '') === 'products') {
+    try {
+        if (!$app['lexosCredentialsService']->hasHubToken()) {
+            throw new RuntimeException('Configure o Token Hub (Dashboard) em Configuracao API → Lexos.');
+        }
+        $dStart = trim((string) ($_GET['lexos_start'] ?? ''));
+        $dEnd = trim((string) ($_GET['lexos_end'] ?? ''));
+        $search = trim((string) ($_GET['lexos_search'] ?? ''));
+        if ($dStart === '' || $dEnd === '') {
+            throw new RuntimeException('Informe data inicial e final para exportar.');
+        }
+        $rows = $app['lexosDashboardService']->exportProductsRows($dStart, $dEnd, $search);
+        if ($rows === []) {
+            throw new RuntimeException('Nenhum produto encontrado para exportar.');
+        }
+        require_once __DIR__ . '/app/Lib/SimpleXLSXGen.php';
+        $sheet = [['SKU', 'Nome', 'EAN', 'Estoque', 'Faturamento', 'Quantidade', 'Classificacao']];
+        foreach ($rows as $row) {
+            $sheet[] = $row;
+        }
+        $fileName = 'produtos_lexos_' . date('Y-m-d_His') . '.xlsx';
+        $xlsx = \Shuchkin\SimpleXLSXGen::fromArray($sheet, 'Produtos');
+        $xlsx->downloadAs($fileName);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao exportar: ' . $exception->getMessage();
+    }
+    exit;
+}
+
 if ($page === 'ml-ads-report' && ($_GET['export'] ?? '') === 'xlsx') {
     try {
         $limitRaw = trim((string) ($_GET['limit'] ?? '200'));

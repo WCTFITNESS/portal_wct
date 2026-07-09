@@ -208,6 +208,15 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     .lexos-sku-chart-block h2 { margin:0 0 10px 0; font-size:1.1rem; color:#1e293b; }
     .lexos-sku-chart-host { position:relative; width:100%; height:min(380px, 70vh); margin-top:6px; }
     .lexos-metric-alert { color:#dc2626; font-weight:800; }
+    .lexos-products-header { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
+    .lexos-products-header h1 { margin:0; }
+    .lexos-products-filters { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 18px; margin-bottom:14px; padding:12px; border:1px solid #e5e7eb; border-radius:8px; background:#f8fafc; }
+    .lexos-products-filters .lexos-filter-item { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .lexos-products-filters label { font-size:.82rem; margin:0; }
+    .lexos-products-filters input, .lexos-products-filters select { width:auto; min-width:140px; margin:0; }
+    .lexos-products-filters .lexos-filter-search { flex:1 1 220px; min-width:180px; }
+    a.btn-export-xlsx { display:inline-block; padding:8px 14px; background:#3483fa; color:#fff !important; border-radius:6px; text-decoration:none; font-size:.88rem; font-weight:600; }
+    a.btn-export-xlsx:hover { background:#2968c8; }
 </style>
 
 <section class="card">
@@ -343,32 +352,47 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     </div>
 
     <div class="lexos-tab-content<?= $activeTab === 'products' ? ' active' : '' ?>" data-content="products">
-        <h1>Produtos</h1>
-        <form method="get" style="margin-bottom:10px;">
+        <div class="lexos-products-header">
+            <h1>Produtos Mais Vendidos</h1>
+            <?php if ($app['lexosCredentialsService']->hasHubToken()): ?>
+                <?php
+                    $exportQs = http_build_query([
+                        'page' => $dashboardPageId,
+                        'lexos_tab' => 'products',
+                        'export' => 'xlsx',
+                        'lexos_start' => $dStart,
+                        'lexos_end' => $dEnd,
+                        'lexos_search' => $search,
+                    ], '', '&', PHP_QUERY_RFC3986);
+                ?>
+                <a class="btn-export-xlsx" href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?' . $exportQs), ENT_QUOTES, 'UTF-8') ?>">Exportar Excel</a>
+            <?php endif; ?>
+        </div>
+        <form method="get" class="lexos-products-filters">
             <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="lexos_tab" value="products">
-            <input type="hidden" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
-            <input type="hidden" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
-            <input type="hidden" name="lexos_products_take" value="<?= htmlspecialchars((string) $productsPerPage) ?>">
-            <label>Buscar SKU/Nome/EAN</label>
-            <input type="text" name="lexos_search" value="<?= htmlspecialchars($search) ?>">
             <input type="hidden" name="lexos_sku" value="<?= htmlspecialchars($sku) ?>">
+            <div class="lexos-filter-item">
+                <label for="lexos-product-start">Data Inicial</label>
+                <input id="lexos-product-start" type="date" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
+            </div>
+            <div class="lexos-filter-item">
+                <label for="lexos-product-end">Data Final</label>
+                <input id="lexos-product-end" type="date" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
+            </div>
+            <div class="lexos-filter-item lexos-filter-search">
+                <label for="lexos-product-search">Buscar</label>
+                <input id="lexos-product-search" type="text" name="lexos_search" value="<?= htmlspecialchars($search) ?>" placeholder="SKU, Nome ou EAN">
+            </div>
+            <div class="lexos-filter-item">
+                <label for="lexos-products-take">Itens/página</label>
+                <select id="lexos-products-take" name="lexos_products_take">
+                    <?php foreach ([10, 20, 50, 100] as $takeOpt): ?>
+                        <option value="<?= $takeOpt ?>" <?= $productsPerPage === $takeOpt ? 'selected' : '' ?>><?= $takeOpt ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
             <button type="submit">Filtrar</button>
-        </form>
-        <form method="get" style="margin-bottom:10px;">
-            <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
-            <input type="hidden" name="lexos_tab" value="products">
-            <input type="hidden" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
-            <input type="hidden" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
-            <input type="hidden" name="lexos_search" value="<?= htmlspecialchars($search) ?>">
-            <input type="hidden" name="lexos_sku" value="<?= htmlspecialchars($sku) ?>">
-            <label>Itens/página</label>
-            <select name="lexos_products_take">
-                <?php foreach ([10,20,50,100] as $takeOpt): ?>
-                    <option value="<?= $takeOpt ?>" <?= $productsPerPage === $takeOpt ? 'selected' : '' ?>><?= $takeOpt ?></option>
-                <?php endforeach; ?>
-            </select>
-            <button type="submit">Aplicar</button>
         </form>
         <table>
             <thead>
@@ -381,12 +405,12 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             <?php foreach ($products as $p): ?>
                 <tr>
                     <td><?= htmlspecialchars((string) ($p['Sku'] ?? '')) ?></td>
-                    <td><?= htmlspecialchars((string) ($p['Nome'] ?? '')) ?></td>
+                    <td title="<?= htmlspecialchars((string) ($p['Nome'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(mb_strlen((string) ($p['Nome'] ?? '')) > 50 ? mb_substr((string) ($p['Nome'] ?? ''), 0, 50) . '…' : (string) ($p['Nome'] ?? '')) ?></td>
                     <td><?= htmlspecialchars((string) ($p['Ean'] ?? '')) ?></td>
-                    <td><?= htmlspecialchars((string) ($p['Estoque'] ?? '')) ?></td>
+                    <td><?= htmlspecialchars(number_format((float) ($p['Estoque'] ?? 0), 0, ',', '.')) ?></td>
                     <td>R$ <?= htmlspecialchars(number_format((float) ($p['TotalVendidoItem'] ?? 0), 2, ',', '.')) ?></td>
-                    <td><?= htmlspecialchars((string) ($p['TotalUnidadesVendidas'] ?? '')) ?></td>
-                    <td><?= htmlspecialchars((string) ($p['Classificacao'] ?? '')) ?></td>
+                    <td><?= htmlspecialchars(number_format((float) ($p['TotalUnidadesVendidas'] ?? 0), 0, ',', '.')) ?></td>
+                    <td><?= htmlspecialchars((string) ($p['Classificacao'] ?? '-')) ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>

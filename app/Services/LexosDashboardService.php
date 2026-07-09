@@ -42,6 +42,7 @@ class LexosDashboardService
             'aggregates' => [['type' => 'sum', 'field' => 'TotalVendidoItem']],
             'skip' => max(0, $skip),
             'take' => max(1, min(500, $take)),
+            'sorted' => [['name' => 'Sku', 'direction' => 'ascending']],
         ];
         if ($search !== '') {
             $payload['search'] = [[
@@ -55,11 +56,113 @@ class LexosDashboardService
         $url = "https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceCurvaAbc?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
         $json = $this->lexosHubApiClient->postJsonDashboard($url, $payload);
         $norm = $this->normalizeAppHubDatasourceResponse($json);
+        $items = $this->filterProductsLikePlugin($norm['result']);
 
         return [
-            'items' => $norm['result'],
-            'count' => (int) ($json['count'] ?? $norm['count'] ?? count($norm['result'])),
+            'items' => $items,
+            'count' => (int) ($json['count'] ?? $norm['count'] ?? count($items)),
         ];
+    }
+
+    /**
+     * Exporta todos os produtos do período (paginação 1000, como no plugin Chrome).
+     *
+     * @return list<list<string|float|int>>
+     */
+    public function exportProductsRows(string $startDate, string $endDate, string $search = ''): array
+    {
+        $countPayload = [
+            'requiresCounts' => true,
+            'aggregates' => [['type' => 'sum', 'field' => 'TotalVendidoItem']],
+            'skip' => 0,
+            'take' => 1,
+            'sorted' => [['name' => 'Sku', 'direction' => 'ascending']],
+        ];
+        if ($search !== '') {
+            $countPayload['search'] = [[
+                'fields' => ['Nome', 'Sku', 'Ean'],
+                'operator' => 'contains',
+                'key' => $search,
+                'ignoreCase' => true,
+            ]];
+        }
+
+        $url = "https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceCurvaAbc?lojaId=-1&initialDate={$startDate}T00:00:00&finalDate={$endDate}T23:59:59";
+        $countJson = $this->lexosHubApiClient->postJsonDashboard($url, $countPayload);
+        $totalRecords = (int) ($countJson['count'] ?? 0);
+        if ($totalRecords <= 0) {
+            return [];
+        }
+
+        $pageSize = 1000;
+        $totalPages = (int) ceil($totalRecords / $pageSize);
+        $all = [];
+
+        for ($page = 0; $page < $totalPages; $page++) {
+            $payload = [
+                'requiresCounts' => true,
+                'aggregates' => [['type' => 'sum', 'field' => 'TotalVendidoItem']],
+                'skip' => $page * $pageSize,
+                'take' => $pageSize,
+                'sorted' => [['name' => 'Sku', 'direction' => 'ascending']],
+            ];
+            if ($search !== '') {
+                $payload['search'] = [[
+                    'fields' => ['Nome', 'Sku', 'Ean'],
+                    'operator' => 'contains',
+                    'key' => $search,
+                    'ignoreCase' => true,
+                ]];
+            }
+
+            $json = $this->lexosHubApiClient->postJsonDashboard($url, $payload);
+            $norm = $this->normalizeAppHubDatasourceResponse($json);
+            foreach ($this->filterProductsLikePlugin($norm['result']) as $row) {
+                $all[] = [
+                    (string) ($row['Sku'] ?? ''),
+                    (string) ($row['Nome'] ?? ''),
+                    (string) ($row['Ean'] ?? ''),
+                    (float) ($row['Estoque'] ?? 0),
+                    (float) ($row['TotalVendidoItem'] ?? 0),
+                    (float) ($row['TotalUnidadesVendidas'] ?? 0),
+                    (string) ($row['Classificacao'] ?? ''),
+                ];
+            }
+        }
+
+        return $all;
+    }
+
+    /**
+     * Igual ao plugin Faturamento: ignora linhas cujo SKU começa com 7, 8 ou 9 (EAN usado como SKU).
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function filterProductsLikePlugin(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $sku = (string) ($row['Sku'] ?? '');
+            if ($sku !== '' && preg_match('/^[789]/', $sku) === 1) {
+                continue;
+            }
+            $out[] = [
+                'Sku' => $sku,
+                'Nome' => (string) ($row['Nome'] ?? ''),
+                'Ean' => (string) ($row['Ean'] ?? ''),
+                'Estoque' => $row['Estoque'] ?? 0,
+                'TotalVendidoItem' => (float) ($row['TotalVendidoItem'] ?? 0),
+                'TotalUnidadesVendidas' => $row['TotalUnidadesVendidas'] ?? 0,
+                'Classificacao' => (string) ($row['Classificacao'] ?? ''),
+                'UltimaVenda' => (string) ($row['UltimaVenda'] ?? ''),
+            ];
+        }
+
+        return $out;
     }
 
     public function getComparisonData(array $years): array
