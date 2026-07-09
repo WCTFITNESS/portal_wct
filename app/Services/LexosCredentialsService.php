@@ -107,9 +107,35 @@ final class LexosCredentialsService
 
     public function hasHubToken(): bool
     {
-        $c = $this->resolve();
+        return $this->getHubAccessToken() !== '';
+    }
 
-        return $c['token'] !== '';
+    /**
+     * Token da sessão do Hub Lexos (localStorage access_token) — usado pelo Dashboard/Produtos.
+     * Separado do token OAuth de integração (Tracking/Refresh).
+     */
+    public function getHubAccessToken(): string
+    {
+        $portal = $this->settingsRepository->getApiConfig() ?? [];
+        $hubToken = $this->normalizeBearer((string) ($portal['lexos_hub_token'] ?? ''));
+        if ($hubToken !== '') {
+            return $hubToken;
+        }
+
+        return '';
+    }
+
+    /**
+     * @return array{has_hub_token: bool, hub_token_preview: string}
+     */
+    public function getHubStatusSummary(): array
+    {
+        $token = $this->getHubAccessToken();
+
+        return [
+            'has_hub_token' => $token !== '',
+            'hub_token_preview' => $this->maskSecret($token),
+        ];
     }
 
     /**
@@ -117,6 +143,10 @@ final class LexosCredentialsService
      */
     public function shouldRefreshAccessToken(): bool
     {
+        if ($this->getHubAccessToken() !== '') {
+            return false;
+        }
+
         $creds = $this->resolve();
         if (trim((string) ($creds['refresh_token'] ?? '')) === '') {
             return false;
@@ -186,5 +216,18 @@ final class LexosCredentialsService
     private function normalizeBearer(string $token): string
     {
         return preg_replace('/^\s*Bearer\s+/i', '', trim($token)) ?? trim($token);
+    }
+
+    private function maskSecret(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '—';
+        }
+        if (strlen($value) <= 8) {
+            return '****';
+        }
+
+        return substr($value, 0, 4) . '…' . substr($value, -4);
     }
 }

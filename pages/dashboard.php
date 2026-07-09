@@ -212,7 +212,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
     $lexosNeedsHubToken = in_array($activeTab, ['products', 'sku-analysis'], true);
     ?>
     <?php if ($lexosNeedsHubToken && !$app['lexosCredentialsService']->hasHubToken()): ?>
-        <div class="msg err">Configure o <strong>Token Lexos</strong> (access_token do Hub em app-hub.lexos.com.br) em Configuração API para habilitar esta aba.</div>
+        <div class="msg err">Configure o <strong>Token Hub (Dashboard)</strong> em Configuração API → Lexos (localStorage <code>access_token</code> de app-hub.lexos.com.br).</div>
     <?php elseif ($lexosError): ?>
         <div class="msg err">Erro Lexos: <?= htmlspecialchars($lexosError) ?></div>
     <?php endif; ?>

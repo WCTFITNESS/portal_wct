@@ -40,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'oauth_code' => trim((string) ($_POST['oauth_code'] ?? '')),
                 'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
                 'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
+                'lexos_hub_token' => trim((string) ($existing['lexos_hub_token'] ?? '')),
                 'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
                 'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
                 'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
@@ -62,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'seller_id' => trim((string) ($existing['seller_id'] ?? '')),
                 'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
                 'lexos_code' => trim((string) ($_POST['lexos_code'] ?? '')),
+                'lexos_hub_token' => trim((string) ($_POST['lexos_hub_token'] ?? '')),
                 'lexos_token' => trim((string) ($_POST['lexos_token'] ?? '')),
                 'lexos_refresh_token' => trim((string) ($_POST['lexos_refresh_token'] ?? '')),
                 'lexos_integration_key' => trim((string) ($_POST['lexos_integration_key'] ?? '')),
@@ -158,13 +160,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($formType === 'lexos_hub_test') {
             $probe = $app['lexosHubApiClient']->probeHubApi();
             $parts = [
-                'Origem: ' . ($probe['source'] ?? '?') . ' (modo ' . ($probe['mode'] ?? '?') . ')',
-                'Token: ' . ($probe['token_preview'] ?? '—'),
+                'Token Hub: ' . ($probe['hub_token_preview'] ?? '—'),
+                'Integração OAuth: ' . (($probe['integration_ready'] ?? false) ? 'pronta' : 'incompleta'),
                 'Chave: ' . ($probe['key_preview'] ?? '—'),
             ];
-            if (!empty($probe['refresh_attempted'])) {
-                $parts[] = 'Refresh automático: ' . (!empty($probe['refresh_ok']) ? 'OK' : ('falhou — ' . ($probe['refresh_error'] ?? '')));
-            }
             if (!empty($probe['hub_ok'])) {
                 $feedback = 'Lexos WebAPI OK (modo Dashboard/plugin). ' . implode('; ', $parts)
                     . '; HTTP ' . (int) ($probe['hub_http'] ?? 0)
@@ -210,6 +209,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
                 'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
                 'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
+                'lexos_hub_token' => trim((string) ($existing['lexos_hub_token'] ?? '')),
                 'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
                 'lexos_integration_key' => $chave,
                 'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
@@ -281,6 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'oauth_code' => $app['mercadoLivreOAuthService']->normalizeOauthCode($code),
                 'lexos_code' => (string) ($existing['lexos_code'] ?? ''),
                 'lexos_token' => (string) ($existing['lexos_token'] ?? ''),
+                'lexos_hub_token' => (string) ($existing['lexos_hub_token'] ?? ''),
                 'lexos_refresh_token' => (string) ($existing['lexos_refresh_token'] ?? ''),
                 'lexos_integration_key' => (string) ($existing['lexos_integration_key'] ?? ''),
                 'lexos_integration_header_name' => (string) ($existing['lexos_integration_header_name'] ?? ''),
@@ -327,6 +328,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $apiConfig = $app['settingsRepository']->getApiConfig();
 $lexosCredStatus = $app['lexosCredentialsService']->getStatusSummary();
+$lexosHubStatus = $app['lexosCredentialsService']->getHubStatusSummary();
 $token = $app['tokenRepository']->getLatestToken();
 
 if ($apiConfig
@@ -530,9 +532,13 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
             $trk = $lexosCredStatus['tracking'];
             $credMode = (string) ($apiConfig['lexos_credentials_mode'] ?? 'auto');
             ?>
+            <p class="feedback <?= $lexosHubStatus['has_hub_token'] ? 'ok' : 'err' ?>" style="margin-bottom:.5rem">
+                Token Hub (Dashboard Produtos/SKU):
+                <?= $lexosHubStatus['has_hub_token'] ? 'configurado (' . htmlspecialchars((string) $lexosHubStatus['hub_token_preview']) . ')' : 'ausente — cole localStorage.access_token do Hub' ?>
+            </p>
             <p class="feedback <?= $lexosCredStatus['has_token'] && $lexosCredStatus['has_key'] ? 'ok' : 'err' ?>" style="margin-bottom:.75rem">
-                Credenciais efetivas:
-                <?= $lexosCredStatus['has_token'] && $lexosCredStatus['has_key'] ? 'prontas' : 'incompletas' ?>
+                Integração OAuth (Tracking):
+                <?= $lexosCredStatus['has_token'] && $lexosCredStatus['has_key'] ? 'pronta' : 'incompleta' ?>
                 (origem: <strong><?= htmlspecialchars($lexosCredStatus['source']) ?></strong>, modo: <?= htmlspecialchars($credMode) ?>)
             </p>
             <?php if ($trk['connected'] ?? false): ?>
@@ -593,11 +599,17 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
             <label>Lexos Code</label>
             <textarea name="lexos_code" rows="2" placeholder="Cole o code da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_code'] ?? '')) ?></textarea>
 
-            <label>Token Lexos</label>
-            <textarea name="lexos_token" rows="3" placeholder="Cole o access_token (Hub: localStorage em app-hub.lexos.com.br, como no plugin Chrome)"><?= htmlspecialchars((string) ($apiConfig['lexos_token'] ?? '')) ?></textarea>
+            <label>Token Hub (Dashboard Produtos/SKU)</label>
+            <textarea name="lexos_hub_token" rows="3" placeholder="Cole localStorage.access_token de app-hub.lexos.com.br (plugin Chrome)"><?= htmlspecialchars((string) ($apiConfig['lexos_hub_token'] ?? '')) ?></textarea>
             <p style="font-size:.85rem;color:#64748b;margin:.25rem 0 .75rem">
-                <strong>Dashboard (Produtos/SKU):</strong> usa só Bearer, igual ao plugin — token do Hub (<code>localStorage.access_token</code>).
-                <strong>Tracking/integração:</strong> também exige a Chave abaixo.
+                <strong>Obrigatório para Produtos/SKU.</strong> Com o Hub aberto e logado: F12 → Application → Local Storage → <code>access_token</code>.
+                É diferente do token OAuth de integração abaixo.
+            </p>
+
+            <label>Token OAuth integração (Tracking / Refresh)</label>
+            <textarea name="lexos_token" rows="3" placeholder="Preenchido automaticamente pelo Refresh Token — não usar no Dashboard"><?= htmlspecialchars((string) ($apiConfig['lexos_token'] ?? '')) ?></textarea>
+            <p style="font-size:.85rem;color:#64748b;margin:.25rem 0 .75rem">
+                Usado pelo Tracking e APIs com header <code>Chave</code>. O Refresh Token atualiza este campo, não o Token Hub.
             </p>
 
             <label>Refresh token Lexos</label>
