@@ -87,6 +87,98 @@ class OrderService
     }
 
     /**
+     * Uma página de GET /orders/search com metadados de paginação.
+     *
+     * @return array{results: list<array<string, mixed>>, paging: array<string, mixed>}
+     */
+    public function searchOrdersPage(
+        string $status = 'paid',
+        int $limit = 50,
+        int $offset = 0,
+        ?string $dateFrom = null,
+        ?string $dateTo = null
+    ): array {
+        $apiConfig = $this->settingsRepository->getApiConfig();
+        if (!$apiConfig || empty($apiConfig['seller_id'])) {
+            throw new \RuntimeException('Seller ID não configurado em Configurar API.');
+        }
+
+        $sellerId = trim((string) $apiConfig['seller_id']);
+        if (!ctype_digit($sellerId)) {
+            throw new \RuntimeException('Seller ID inválido. Informe o user_id numérico da conta vendedora no Mercado Livre.');
+        }
+
+        $limit = max(1, min(50, $limit));
+        $offset = max(0, $offset);
+        $accessToken = $this->tokenService->getValidAccessToken();
+        $query = $this->buildOrdersSearchQuery($sellerId, $status, $limit, $dateFrom, $dateTo)
+            . '&offset=' . $offset;
+        $ordersResult = $this->client->get('/orders/search?' . $query, $accessToken);
+
+        if ($ordersResult['status'] < 200 || $ordersResult['status'] >= 300) {
+            $raw = (string) ($ordersResult['raw'] ?? '');
+            $message = 'Falha ao buscar pedidos. HTTP: ' . $ordersResult['status'];
+            if ($raw !== '') {
+                $message .= ' Resposta da API: ' . substr($raw, 0, 300);
+            }
+
+            throw new \RuntimeException($message);
+        }
+
+        $body = is_array($ordersResult['body'] ?? null) ? $ordersResult['body'] : [];
+        $results = $body['results'] ?? [];
+        $paging = is_array($body['paging'] ?? null) ? $body['paging'] : [];
+
+        return [
+            'results' => is_array($results) ? $results : [],
+            'paging' => $paging,
+        ];
+    }
+
+    /**
+     * Pedidos pagos no período, com paginação automática (limite de segurança).
+     *
+     * @return array{orders: list<array<string, mixed>>, total_api: int, truncated: bool}
+     */
+    public function listPaidOrdersInPeriod(string $dateFrom, string $dateTo, int $maxOrders = 2000): array
+    {
+        $maxOrders = max(1, min(5000, $maxOrders));
+        $all = [];
+        $offset = 0;
+        $totalApi = 0;
+
+        do {
+            $page = $this->searchOrdersPage('paid', 50, $offset, $dateFrom, $dateTo);
+            $batch = $page['results'];
+            $totalApi = (int) ($page['paging']['total'] ?? $totalApi);
+            if ($batch === []) {
+                break;
+            }
+
+            foreach ($batch as $order) {
+                if (!is_array($order)) {
+                    continue;
+                }
+                $all[] = $order;
+                if (count($all) >= $maxOrders) {
+                    break 2;
+                }
+            }
+
+            $offset += count($batch);
+            if (count($batch) < 50) {
+                break;
+            }
+        } while ($offset < 10000);
+
+        return [
+            'orders' => $all,
+            'total_api' => $totalApi > 0 ? $totalApi : count($all),
+            'truncated' => $totalApi > count($all),
+        ];
+    }
+
+    /**
      * Busca pedidos por texto livre (parâmetro {@code q} em {@code GET /orders/search}), sem filtrar por status.
      * Mais eficiente que listar vários status no período quando se conhece id ou trecho do pedido.
      *

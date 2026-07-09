@@ -32,6 +32,7 @@ use App\Services\MercadoLivreOrderMonitorService;
 use App\Services\MessageService;
 use App\Services\MlAdsReportService;
 use App\Services\MlCatalogListService;
+use App\Services\MlDashboardService;
 use App\Services\MlPromotionsService;
 use App\Services\MlInactiveAdsService;
 use App\Services\MlImageResizeService;
@@ -72,6 +73,7 @@ $repasseService = new RepasseService($orderService);
 $mercadopagoPaymentService = new MercadoPagoPaymentService($mercadopagoSettingsRepository, $mercadopagoClient);
 $repasseMpService = new RepasseMpService($mercadopagoPaymentService, $repasseMpJobRepository);
 $mlAdsReportService = new MlAdsReportService($tokenService, $client, $settingsRepository);
+$mlDashboardService = new MlDashboardService($orderService, $client, $tokenService);
 $mlCatalogListService = new MlCatalogListService($tokenService, $client, $settingsRepository);
 $mlPromotionsService = new MlPromotionsService($tokenService, $client, $settingsRepository);
 $mlInactiveAdsService = new MlInactiveAdsService($tokenService, $client, $settingsRepository);
@@ -131,6 +133,7 @@ return [
     'repasseService' => $repasseService,
     'repasseMpService' => $repasseMpService,
     'mlAdsReportService' => $mlAdsReportService,
+    'mlDashboardService' => $mlDashboardService,
     'mlCatalogListService' => $mlCatalogListService,
     'mlPromotionsService' => $mlPromotionsService,
     'mlInactiveAdsService' => $mlInactiveAdsService,

@@ -97,6 +97,7 @@ $allowedPages = [
     'repasse-mp',
     'message-template',
     'manual-send',
+    'ml-dashboard',
     'ml-ads-report',
     'ml-catalogos',
     'ml-campanhas',
@@ -393,6 +394,7 @@ if ($page === 'repasse-mp' && isset($_GET['repasse_action']) && $_GET['repasse_a
 
 $menuSections = [
     'Mercado Livre' => [
+        ['id' => 'ml-dashboard', 'label' => 'Dashboard'],
         ['id' => 'api-config', 'label' => 'Configuração API'],
         ['id' => 'orders', 'label' => 'Pedidos'],
         ['id' => 'ml-catalogos', 'label' => 'Catálogos'],
@@ -1196,7 +1198,7 @@ if (
         }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar'], true) ? 'page-protheus-monitor-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar'], true) ? 'page-protheus-monitor-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">
