@@ -1,5 +1,7 @@
-const DEFAULT_PORTAL_URL = 'https://portal-wct.onrender.com/index.php?page=api-config';
-
+/**
+ * Igual ao plugin Faturamento: lê access_token do Hub e guarda em chrome.storage.local.lexosToken.
+ * Também sincroniza com o Portal (servidor) para fallback PHP.
+ */
 function pickRefreshToken() {
   const keys = ['refresh_token', 'refreshToken', 'hub_refresh_token'];
   for (const k of keys) {
@@ -11,13 +13,11 @@ function pickRefreshToken() {
   return '';
 }
 
-function syncToPortal(portalUrl) {
-  const token = localStorage.getItem('access_token');
-  if (!token || String(token).trim() === '') {
+function syncToPortal(portalUrl, token, refresh) {
+  if (!portalUrl || !token) {
     return;
   }
 
-  const refresh = pickRefreshToken();
   const last = sessionStorage.getItem('wct_lexos_last_sync') || '';
   const fingerprint = token.slice(0, 24) + '|' + refresh.slice(0, 16);
   if (last === fingerprint) {
@@ -60,11 +60,20 @@ function syncToPortal(portalUrl) {
   sessionStorage.setItem('wct_lexos_last_sync', fingerprint);
 }
 
-chrome.storage.sync.get(['portalUrl'], (result) => {
-  const portalUrl = (result.portalUrl || DEFAULT_PORTAL_URL).trim();
-  if (!portalUrl) {
+function captureHubToken() {
+  const token = localStorage.getItem('access_token');
+  if (!token || String(token).trim() === '') {
     return;
   }
-  syncToPortal(portalUrl);
-  setInterval(() => syncToPortal(portalUrl), 5 * 60 * 1000);
-});
+
+  const trimmed = String(token).trim();
+  chrome.storage.local.set({ lexosToken: trimmed });
+
+  chrome.storage.sync.get(['portalUrl'], (result) => {
+    const portalUrl = (result.portalUrl || 'https://portal-wct.onrender.com/index.php?page=api-config').trim();
+    syncToPortal(portalUrl, trimmed, pickRefreshToken());
+  });
+}
+
+captureHubToken();
+setInterval(captureHubToken, 60 * 1000);

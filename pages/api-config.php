@@ -626,12 +626,12 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
                 $lexosHubCaptureUrl = portal_wct_public_path($baseUrl, 'index.php?page=api-config');
             ?>
             <div style="margin:.35rem 0 .75rem;padding:12px 14px;border:1px solid #86efac;border-radius:8px;background:#f0fdf4;font-size:.88rem;color:#14532d">
-                <strong>Recomendado — Conector automático (instalar 1x):</strong>
+                <strong>Igual ao plugin Faturamento — instale 1x:</strong>
                 <ol style="margin:.5rem 0 0;padding-left:1.2rem">
                     <li>Chrome → <code>chrome://extensions</code> → Modo desenvolvedor → Carregar sem compactação</li>
-                    <li>Pasta: <code>tools/lexos-portal-sync</code> deste repositório</li>
+                    <li>Pasta: <code>tools/lexos-portal-sync</code> (usa o mesmo <code>access_token</code> do Hub que o Faturamento)</li>
                     <li>Opções da extensão → URL: <code style="word-break:break-all"><?= htmlspecialchars($lexosHubCaptureUrl, ENT_QUOTES, 'UTF-8') ?></code></li>
-                    <li>Mantenha login em <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a> — o token sincroniza sozinho</li>
+                    <li>Login em <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a> → aba Produtos do Dashboard carrega sozinha</li>
                 </ol>
             </div>
             <div style="margin:.35rem 0 .75rem;padding:10px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;font-size:.88rem;color:#1e3a8a">

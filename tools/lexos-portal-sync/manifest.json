@@ -1,18 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "Portal WCT - Lexos Sync",
-  "version": "1.0.0",
-  "description": "Sincroniza automaticamente o Token Hub Lexos com o Portal WCT (aba Produtos).",
+  "name": "Portal WCT - Lexos Hub",
+  "version": "1.1.0",
+  "description": "Conector Lexos Hub para o Portal WCT — mesma autenticação do plugin Faturamento.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://app-hub.lexos.com.br/*",
-    "http://*/*",
-    "https://*/*"
+    "https://app-hub-webapi.lexos.com.br/*",
+    "https://lexos.metabaseapp.com/*",
+    "http://localhost/*",
+    "https://*.onrender.com/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://app-hub.lexos.com.br/*"],
-      "js": ["content.js"],
+      "js": ["content-hub.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost/*",
+        "https://*.onrender.com/*"
+      ],
+      "js": ["content-portal.js"],
       "run_at": "document_idle"
     }
   ],

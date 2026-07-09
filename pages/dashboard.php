@@ -353,24 +353,20 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
         </table>
     </div>
 
-    <div class="lexos-tab-content<?= $activeTab === 'products' ? ' active' : '' ?>" data-content="products">
+    <div class="lexos-tab-content<?= $activeTab === 'products' ? ' active' : '' ?>" data-content="products" id="lexos-products-tab">
         <div class="lexos-products-header">
             <h1>Produtos Mais Vendidos</h1>
-            <?php if ($app['lexosCredentialsService']->hasHubToken()): ?>
-                <?php
-                    $exportQs = http_build_query([
-                        'page' => $dashboardPageId,
-                        'lexos_tab' => 'products',
-                        'export' => 'xlsx',
-                        'lexos_start' => $dStart,
-                        'lexos_end' => $dEnd,
-                        'lexos_search' => $search,
-                    ], '', '&', PHP_QUERY_RFC3986);
-                ?>
-                <a class="btn-export-xlsx" href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?' . $exportQs), ENT_QUOTES, 'UTF-8') ?>">Exportar Excel</a>
-            <?php endif; ?>
+            <a class="btn-export-xlsx" id="lexos-products-export" href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?' . http_build_query([
+                'page' => $dashboardPageId,
+                'lexos_tab' => 'products',
+                'export' => 'xlsx',
+                'lexos_start' => $dStart,
+                'lexos_end' => $dEnd,
+                'lexos_search' => $search,
+            ], '', '&', PHP_QUERY_RFC3986)), ENT_QUOTES, 'UTF-8') ?>">Exportar Excel</a>
         </div>
-        <form method="get" class="lexos-products-filters">
+        <div id="lexos-products-extension-hint" style="display:none;margin:.5rem 0 .75rem;padding:10px 12px;border:1px solid #fde68a;border-radius:8px;background:#fffbeb;font-size:.88rem;color:#92400e"></div>
+        <form method="get" class="lexos-products-filters" id="lexos-products-form">
             <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="lexos_tab" value="products">
             <input type="hidden" name="lexos_sku" value="<?= htmlspecialchars($sku) ?>">
@@ -400,7 +396,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             <thead>
             <tr><th>SKU</th><th>Nome</th><th>EAN</th><th>Estoque</th><th>Faturamento</th><th>Quantidade</th><th>Classificação</th></tr>
             </thead>
-            <tbody>
+            <tbody id="lexos-products-tbody">
             <?php if (!$products): ?>
                 <tr><td colspan="7">Nenhum produto encontrado.</td></tr>
             <?php endif; ?>
@@ -427,7 +423,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             $prevPage = max(1, $productsPage - 1);
             $nextPage = min($productsTotalPages, $productsPage + 1);
         ?>
-        <div class="lexos-pagination">
+        <div class="lexos-pagination" id="lexos-products-pagination">
             <?php if ($productsPage > 1): ?>
                 <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_tab=products&lexos_start=' . urlencode($dStart) . '&lexos_end=' . urlencode($dEnd) . '&lexos_search=' . urlencode($search) . '&lexos_sku=' . urlencode($sku) . '&lexos_products_take=' . urlencode((string) $productsPerPage) . '&lexos_products_page=' . urlencode((string) $prevPage))) ?>">Anterior</a>
             <?php endif; ?>
@@ -667,3 +663,204 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     }
 })();
 </script>
+<?php if ($activeTab === 'products'): ?>
+<script>
+(function () {
+    var CURVA_ABC_URL = 'https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceCurvaAbc';
+    var state = {
+        page: <?= (int) $productsPage ?>,
+        perPage: <?= (int) $productsPerPage ?>,
+        total: <?= (int) $productsTotal ?>,
+        extensionReady: false,
+        productsChart: null,
+    };
+
+    function fmtCurrency(v) {
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+    }
+    function fmtNumber(v) {
+        return new Intl.NumberFormat('pt-BR').format(v || 0);
+    }
+    function truncate(text, max) {
+        text = String(text || '');
+        return text.length <= max ? text : text.substring(0, max) + '…';
+    }
+
+    function pingExtension() {
+        return new Promise(function (resolve) {
+            var requestId = 'ping-' + Math.random().toString(36).slice(2);
+            var timer = setTimeout(function () { resolve(false); }, 400);
+            function onMessage(e) {
+                if (!e.data || e.data.type !== 'WCT_LEXOS_PONG' || e.data.requestId !== requestId) return;
+                clearTimeout(timer);
+                window.removeEventListener('message', onMessage);
+                resolve(true);
+            }
+            window.addEventListener('message', onMessage);
+            window.postMessage({ type: 'WCT_LEXOS_PING', requestId: requestId }, '*');
+        });
+    }
+
+    function extensionFetch(url, payload) {
+        return new Promise(function (resolve, reject) {
+            var requestId = 'fetch-' + Math.random().toString(36).slice(2);
+            var timer = setTimeout(function () {
+                window.removeEventListener('message', onMessage);
+                reject(new Error('Timeout aguardando extensão Lexos'));
+            }, 60000);
+            function onMessage(e) {
+                if (!e.data || e.data.type !== 'WCT_LEXOS_FETCH_RESULT' || e.data.requestId !== requestId) return;
+                clearTimeout(timer);
+                window.removeEventListener('message', onMessage);
+                if (e.data.ok) resolve(e.data.body);
+                else reject(new Error(e.data.error || ('HTTP ' + (e.data.status || 0))));
+            }
+            window.addEventListener('message', onMessage);
+            window.postMessage({ type: 'WCT_LEXOS_FETCH', requestId: requestId, url: url, payload: payload }, '*');
+        });
+    }
+
+    function buildPayload(page, perPage, searchTerm) {
+        var payload = {
+            requiresCounts: true,
+            aggregates: [{ type: 'sum', field: 'TotalVendidoItem' }],
+            skip: (page - 1) * perPage,
+            take: perPage,
+            sorted: [{ name: 'Sku', direction: 'ascending' }],
+        };
+        if (searchTerm) {
+            payload.search = [{
+                fields: ['Nome', 'Sku', 'Ean'],
+                operator: 'contains',
+                key: searchTerm,
+                ignoreCase: true,
+            }];
+        }
+        return payload;
+    }
+
+    function filterRows(rows) {
+        return (rows || []).filter(function (p) {
+            return !/^[789]/.test(String(p.Sku || ''));
+        });
+    }
+
+    function renderRows(rows) {
+        var tbody = document.getElementById('lexos-products-tbody');
+        if (!tbody) return;
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="7">Nenhum produto encontrado.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map(function (p) {
+            return '<tr>'
+                + '<td>' + (p.Sku || '') + '</td>'
+                + '<td title="' + String(p.Nome || '').replace(/"/g, '&quot;') + '">' + truncate(p.Nome, 50) + '</td>'
+                + '<td>' + (p.Ean || '') + '</td>'
+                + '<td>' + fmtNumber(p.Estoque) + '</td>'
+                + '<td>' + fmtCurrency(p.TotalVendidoItem) + '</td>'
+                + '<td>' + fmtNumber(p.TotalUnidadesVendidas) + '</td>'
+                + '<td>' + (p.Classificacao || '-') + '</td>'
+                + '</tr>';
+        }).join('');
+    }
+
+    function renderPagination() {
+        var el = document.getElementById('lexos-products-pagination');
+        if (!el) return;
+        var totalPages = Math.max(1, Math.ceil(state.total / state.perPage));
+        el.innerHTML = '<span>Página ' + state.page + ' de ' + totalPages + '</span>';
+        if (state.page > 1) {
+            var prev = document.createElement('button');
+            prev.type = 'button';
+            prev.textContent = 'Anterior';
+            prev.addEventListener('click', function () { loadProductsPage(state.page - 1); });
+            el.insertBefore(prev, el.firstChild);
+        }
+        if (state.page < totalPages) {
+            var next = document.createElement('button');
+            next.type = 'button';
+            next.textContent = 'Próxima';
+            next.addEventListener('click', function () { loadProductsPage(state.page + 1); });
+            el.appendChild(next);
+        }
+    }
+
+    function renderProductsChart(rows) {
+        if (typeof Chart === 'undefined') return;
+        var top = rows.slice(0, 10);
+        var labels = top.map(function (p) { return p.Sku || ''; });
+        var values = top.map(function (p) { return Number(p.TotalVendidoItem || 0); });
+        var canvas = document.getElementById('lexos-products-chart');
+        if (!canvas || !labels.length) return;
+        if (state.productsChart) state.productsChart.destroy();
+        state.productsChart = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: { labels: labels, datasets: [{ label: 'Faturamento', data: values, backgroundColor: 'rgba(37,99,235,.55)' }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+        });
+    }
+
+    function showHint(message) {
+        var hint = document.getElementById('lexos-products-extension-hint');
+        if (!hint) return;
+        hint.style.display = 'block';
+        hint.innerHTML = message;
+    }
+
+    async function loadProductsPage(page) {
+        if (!state.extensionReady) return;
+        var startDate = document.getElementById('lexos-product-start').value;
+        var endDate = document.getElementById('lexos-product-end').value;
+        var searchTerm = document.getElementById('lexos-product-search').value.trim();
+        state.perPage = parseInt(document.getElementById('lexos-products-take').value, 10) || 20;
+        state.page = page;
+
+        var tbody = document.getElementById('lexos-products-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7">Carregando produtos…</td></tr>';
+
+        try {
+            var url = CURVA_ABC_URL
+                + '?lojaId=-1&initialDate=' + encodeURIComponent(startDate + 'T00:00:00')
+                + '&finalDate=' + encodeURIComponent(endDate + 'T23:59:59');
+            var data = await extensionFetch(url, buildPayload(page, state.perPage, searchTerm));
+            state.total = Number(data.count || 0);
+            var rows = filterRows(data.result || []);
+            renderRows(rows);
+            renderPagination();
+            renderProductsChart(rows);
+            var errBox = document.querySelector('.msg.err');
+            if (errBox) errBox.style.display = 'none';
+        } catch (error) {
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="7" style="color:#dc2626">Erro: ' + error.message + '</td></tr>';
+            }
+        }
+    }
+
+    async function initProductsViaExtension() {
+        state.extensionReady = await pingExtension();
+        if (!state.extensionReady) {
+            showHint(
+                'Para funcionar <strong>igual ao plugin Faturamento</strong>, instale a extensão '
+                + '<code>tools/lexos-portal-sync</code> e mantenha login em '
+                + '<a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a>.'
+            );
+            return;
+        }
+        showHint('Conector Lexos ativo — carregando produtos direto do Hub (mesmo fluxo do plugin).');
+        await loadProductsPage(state.page);
+
+        var form = document.getElementById('lexos-products-form');
+        if (form) {
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                loadProductsPage(1);
+            });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', initProductsViaExtension);
+})();
+</script>
+<?php endif; ?>

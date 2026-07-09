@@ -117,7 +117,7 @@ class LexosDashboardService
 
             $json = $this->lexosHubApiClient->postJsonDashboard($url, $payload);
             $norm = $this->normalizeAppHubDatasourceResponse($json);
-            foreach ($this->filterProductsLikePlugin($norm['result']) as $row) {
+            foreach ($this->filterProductsForExportLikePlugin($norm['result']) as $row) {
                 $all[] = [
                     (string) ($row['Sku'] ?? ''),
                     (string) ($row['Nome'] ?? ''),
@@ -159,6 +159,37 @@ class LexosDashboardService
                 'TotalUnidadesVendidas' => $row['TotalUnidadesVendidas'] ?? 0,
                 'Classificacao' => (string) ($row['Classificacao'] ?? ''),
                 'UltimaVenda' => (string) ($row['UltimaVenda'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Export Excel no plugin Faturamento: exclui só SKU que começa com 7.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function filterProductsForExportLikePlugin(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $sku = (string) ($row['Sku'] ?? '');
+            if ($sku !== '' && str_starts_with($sku, '7')) {
+                continue;
+            }
+            $out[] = [
+                'Sku' => $sku,
+                'Nome' => (string) ($row['Nome'] ?? ''),
+                'Ean' => (string) ($row['Ean'] ?? ''),
+                'Estoque' => $row['Estoque'] ?? 0,
+                'TotalVendidoItem' => (float) ($row['TotalVendidoItem'] ?? 0),
+                'TotalUnidadesVendidas' => $row['TotalUnidadesVendidas'] ?? 0,
+                'Classificacao' => (string) ($row['Classificacao'] ?? ''),
             ];
         }
 
