@@ -1,7 +1,21 @@
 /**
- * Igual ao plugin Faturamento: lê access_token do Hub e guarda em chrome.storage.local.lexosToken.
- * Também sincroniza com o Portal (servidor) para fallback PHP.
+ * Igual ao plugin Faturamento: lê access_token do Hub e sincroniza com o Portal automaticamente.
  */
+function dumpStorage(store) {
+  const out = {};
+  try {
+    for (let i = 0; i < store.length; i += 1) {
+      const key = store.key(i);
+      if (key) {
+        out[key] = String(store.getItem(key) || '');
+      }
+    }
+  } catch (_e) {
+    /* ignore */
+  }
+  return out;
+}
+
 function pickRefreshToken() {
   const keys = ['refresh_token', 'refreshToken', 'hub_refresh_token'];
   for (const k of keys) {
@@ -13,67 +27,84 @@ function pickRefreshToken() {
   return '';
 }
 
-function syncToPortal(portalUrl, token, refresh) {
-  if (!portalUrl || !token) {
+function pickAccessToken() {
+  const direct = localStorage.getItem('access_token') || localStorage.getItem('accessToken') || '';
+  if (String(direct).trim() !== '') {
+    return String(direct).trim();
+  }
+  const storage = dumpStorage(localStorage);
+  for (const value of Object.values(storage)) {
+    const val = String(value || '').trim();
+    if (val.startsWith('eyJ') && val.split('.').length === 3) {
+      return val;
+    }
+  }
+  return '';
+}
+
+async function syncToPortal(syncUrl, token, refresh) {
+  if (!syncUrl || !token) {
     return;
   }
 
-  const last = sessionStorage.getItem('wct_lexos_last_sync') || '';
   const fingerprint = token.slice(0, 24) + '|' + refresh.slice(0, 16);
+  const last = sessionStorage.getItem('wct_lexos_last_sync') || '';
   if (last === fingerprint) {
     return;
   }
 
-  let iframe = document.getElementById('wct-lexos-sync-frame');
-  if (!iframe) {
-    iframe = document.createElement('iframe');
-    iframe.id = 'wct-lexos-sync-frame';
-    iframe.name = 'wct-lexos-sync-frame';
-    iframe.style.display = 'none';
-    document.body.appendChild(iframe);
-  }
-
-  const form = document.createElement('form');
-  form.method = 'POST';
-  form.action = portalUrl;
-  form.target = 'wct-lexos-sync-frame';
-
-  const fields = {
-    api_tab: 'lexos',
-    form_type: 'lexos_hub_capture',
-    lexos_hub_silent: '1',
+  const payload = {
     lexos_hub_token: String(token).trim(),
     lexos_hub_refresh_token: refresh,
+    lexos_hub_context: {
+      local_storage: dumpStorage(localStorage),
+      session_storage: dumpStorage(sessionStorage),
+      cookies: String(document.cookie || ''),
+      captured_at: Date.now(),
+    },
   };
 
-  Object.keys(fields).forEach((name) => {
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = name;
-    input.value = fields[name];
-    form.appendChild(input);
-  });
-
-  document.body.appendChild(form);
-  form.submit();
-  form.remove();
-  sessionStorage.setItem('wct_lexos_last_sync', fingerprint);
+  try {
+    const response = await fetch(syncUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok && body.ok) {
+      sessionStorage.setItem('wct_lexos_last_sync', fingerprint);
+      sessionStorage.setItem('wct_lexos_last_sync_at', String(Date.now()));
+    }
+  } catch (_e) {
+    /* rede / portal offline */
+  }
 }
 
 function captureHubToken() {
-  const token = localStorage.getItem('access_token');
-  if (!token || String(token).trim() === '') {
+  const token = pickAccessToken();
+  if (!token) {
     return;
   }
 
-  const trimmed = String(token).trim();
-  chrome.storage.local.set({ lexosToken: trimmed });
+  chrome.storage.local.set({ lexosToken: token });
 
-  chrome.storage.sync.get(['portalUrl'], (result) => {
-    const portalUrl = (result.portalUrl || 'https://portal-wct.onrender.com/index.php?page=api-config').trim();
-    syncToPortal(portalUrl, trimmed, pickRefreshToken());
+  chrome.storage.sync.get(['portalSyncUrl', 'portalUrl'], (result) => {
+    const syncUrl = String(
+      result.portalSyncUrl
+        || (String(result.portalUrl || '').includes('action=sync') ? result.portalUrl : '')
+        || '',
+    ).trim();
+    if (!syncUrl) {
+      return;
+    }
+    syncToPortal(syncUrl, token, pickRefreshToken());
   });
 }
 
 captureHubToken();
-setInterval(captureHubToken, 60 * 1000);
+setInterval(captureHubToken, 30 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    captureHubToken();
+  }
+});

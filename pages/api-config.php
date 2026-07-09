@@ -645,9 +645,9 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
                     || trim((string) (getenv('LEXOS_HUB_REFRESH_TOKEN') ?: '')) !== '';
             ?>
             <div style="margin:.35rem 0 .75rem;padding:12px 14px;border:1px solid #bbf7d0;border-radius:8px;background:#f0fdf4;font-size:.88rem;color:#14532d">
-                <strong>Captura do navegador (recomendado):</strong>
-                <a href="<?= htmlspecialchars($hubConnectUrl, ENT_QUOTES, 'UTF-8') ?>">Abrir Conectar Lexos Hub</a>
-                — lê o refresh do Hub, salva em <em>cache do navegador</em> + servidor.
+                <strong>Automático (TI):</strong>
+                <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=lexos-hub-connect'), ENT_QUOTES, 'UTF-8') ?>">Conectar Lexos Hub</a>
+                — instale o conector Chrome uma vez; sem favorito.
             </div>
             <div style="margin:.35rem 0 .75rem;padding:12px 14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fafc;font-size:.88rem;color:#1e3a8a">
                 <strong>Usuários finais não precisam instalar nada.</strong> Configure <em>uma vez</em> (ou variável <code>LEXOS_HUB_REFRESH_TOKEN</code> no Render).

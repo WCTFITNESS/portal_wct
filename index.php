@@ -170,6 +170,24 @@ if (($_GET['page'] ?? '') === 'lexos-hub-connect') {
         exit;
     }
 
+    if ($hubAction === 'status') {
+        header('Content-Type: application/json; charset=utf-8');
+        $app['lexosHubSessionService']->maintainHubSessionSilently();
+        $hasAccess = $app['lexosCredentialsService']->getHubAccessToken() !== '';
+        $hasRefresh = $app['lexosCredentialsService']->getHubRefreshToken() !== '';
+        $hubStatus = $app['lexosCredentialsService']->getHubStatusSummary();
+        echo json_encode([
+            'ok' => $hasAccess,
+            'has_access' => $hasAccess,
+            'has_refresh' => $hasRefresh,
+            'hub_token_preview' => (string) ($hubStatus['hub_token_preview'] ?? ''),
+            'message' => $hasAccess
+                ? 'Sessão Hub pronta no servidor.'
+                : 'Aguardando login em app-hub.lexos.com.br (extensão ou favorito).',
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($hubAction === 'sync' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         header('Content-Type: application/json; charset=utf-8');
         $body = json_decode((string) file_get_contents('php://input'), true);

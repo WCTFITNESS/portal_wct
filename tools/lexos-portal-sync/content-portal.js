@@ -1,6 +1,31 @@
 /**
- * Ponte entre a página do Portal e a extensão (fetch Lexos com token do Hub).
+ * Ao abrir o Portal, grava automaticamente a URL de sync para a extensão.
  */
+(function () {
+  function buildSyncUrl() {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('page', 'lexos-hub-connect');
+      url.searchParams.set('action', 'sync');
+      return url.toString();
+    } catch (_e) {
+      return '';
+    }
+  }
+
+  const syncUrl = buildSyncUrl();
+  if (!syncUrl) {
+    return;
+  }
+
+  chrome.storage.sync.set({
+    portalSyncUrl: syncUrl,
+    portalUrl: window.location.origin + window.location.pathname,
+  });
+
+  document.documentElement.setAttribute('data-wct-lexos-extension', '1');
+})();
+
 window.addEventListener('message', (event) => {
   if (event.source !== window || !event.data || typeof event.data.type !== 'string') {
     return;
@@ -9,7 +34,7 @@ window.addEventListener('message', (event) => {
   const data = event.data;
 
   if (data.type === 'WCT_LEXOS_PING') {
-    window.postMessage({ type: 'WCT_LEXOS_PONG', requestId: data.requestId, version: '1.1.0' }, '*');
+    window.postMessage({ type: 'WCT_LEXOS_PONG', requestId: data.requestId, version: '1.2.0' }, '*');
     return;
   }
 
@@ -32,11 +57,9 @@ window.addEventListener('message', (event) => {
             body: response ? response.body : null,
             error: err ? err.message : (response ? response.error : 'Sem resposta da extensão'),
           },
-          '*'
+          '*',
         );
-      }
+      },
     );
   }
 });
-
-document.documentElement.setAttribute('data-wct-lexos-extension', '1');
