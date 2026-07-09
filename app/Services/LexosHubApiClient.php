@@ -60,7 +60,7 @@ class LexosHubApiClient
     {
         $creds = $this->lexosCredentialsService->resolve();
         $out = [
-            'ready' => $this->lexosCredentialsService->hasHubToken(),
+            'ready' => $this->lexosCredentialsService->hasHubToken() || $this->lexosCredentialsService->isReady(),
             'integration_ready' => $this->lexosCredentialsService->isReady(),
             'hub_token_preview' => $this->lexosCredentialsService->getHubStatusSummary()['hub_token_preview'],
             'key_preview' => self::maskSecret((string) ($creds['integration_key'] ?? '')),
@@ -75,7 +75,7 @@ class LexosHubApiClient
         ];
 
         if (!$out['ready']) {
-            $out['hub_error'] = 'Token Hub ausente. Em app-hub.lexos.com.br → DevTools → Application → Local Storage → copie access_token para o campo Token Hub (Dashboard).';
+            $out['hub_error'] = 'Credenciais Lexos ausentes. Configure Tracking (refresh token + chave) ou Token Hub.';
 
             return $out;
         }
@@ -91,7 +91,7 @@ class LexosHubApiClient
         ];
 
         try {
-            $result = $this->request('POST', $url, $payload, self::AUTH_HUB);
+            $result = $this->request('POST', $url, $payload, self::AUTH_AUTO);
             $out['hub_ok'] = (bool) ($result['ok'] ?? false);
             $out['hub_http'] = (int) ($result['status'] ?? 0);
             $out['hub_auth'] = (string) ($result['auth'] ?? '');
@@ -131,14 +131,14 @@ class LexosHubApiClient
     }
 
     /**
-     * Chamadas do Dashboard (plugin Chrome): Bearer do Hub, sem header Chave.
+     * Dashboard WebAPI: tenta Token Hub, depois OAuth integração (Tracking) com refresh automático.
      *
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
     public function postJsonDashboard(string $url, array $payload): array
     {
-        return $this->postJson($url, $payload, self::AUTH_HUB);
+        return $this->postJson($url, $payload, self::AUTH_AUTO);
     }
 
     private function assertLexosCredentials(string $authMode = self::AUTH_INTEGRATION): void
@@ -261,16 +261,28 @@ class LexosHubApiClient
         if ($authMode === self::AUTH_INTEGRATION || $authMode === self::AUTH_AUTO) {
             $token = $this->getIntegrationToken();
             $integrationKey = $this->getLexosIntegrationKey();
-            if ($token !== '' && $integrationKey !== '') {
-                $baseHeaders = $this->buildIntegrationHeaders();
-                $attempts[] = [
-                    'label' => 'integration_bearer',
-                    'headers' => array_merge($baseHeaders, ['Authorization: Bearer ' . $token]),
-                ];
-                $attempts[] = [
-                    'label' => 'integration_raw',
-                    'headers' => array_merge($baseHeaders, ['Authorization: ' . $token]),
-                ];
+            if ($token !== '') {
+                if ($authMode === self::AUTH_AUTO) {
+                    $attempts[] = [
+                        'label' => 'integration_bearer_only',
+                        'headers' => [
+                            'Accept: application/json',
+                            'Content-Type: application/json',
+                            'Authorization: Bearer ' . $token,
+                        ],
+                    ];
+                }
+                if ($integrationKey !== '') {
+                    $baseHeaders = $this->buildIntegrationHeaders();
+                    $attempts[] = [
+                        'label' => 'integration_bearer',
+                        'headers' => array_merge($baseHeaders, ['Authorization: Bearer ' . $token]),
+                    ];
+                    $attempts[] = [
+                        'label' => 'integration_raw',
+                        'headers' => array_merge($baseHeaders, ['Authorization: ' . $token]),
+                    ];
+                }
             }
         }
 

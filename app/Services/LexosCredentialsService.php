@@ -143,10 +143,6 @@ final class LexosCredentialsService
      */
     public function shouldRefreshAccessToken(): bool
     {
-        if ($this->getHubAccessToken() !== '') {
-            return false;
-        }
-
         $creds = $this->resolve();
         if (trim((string) ($creds['refresh_token'] ?? '')) === '') {
             return false;

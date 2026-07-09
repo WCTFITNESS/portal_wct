@@ -67,46 +67,15 @@ try {
         }
     } elseif ($activeTab === 'comparison') {
         $comparison = $lexos->getComparisonData($selectedYears);
-    } elseif ($app['lexosCredentialsService']->hasHubToken()) {
-        if ($activeTab === 'products') {
-            $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
-            $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
-            $productsTotal = (int) ($productsResp['count'] ?? count($products));
-        } elseif ($activeTab === 'sku-analysis' && $sku !== '') {
-            $skuData = $lexos->getSkuAnalysis($sku, $dStart, $dEnd);
-        }
+    } elseif ($activeTab === 'products') {
+        $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
+        $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
+        $productsTotal = (int) ($productsResp['count'] ?? count($products));
+    } elseif ($activeTab === 'sku-analysis' && $sku !== '') {
+        $skuData = $lexos->getSkuAnalysis($sku, $dStart, $dEnd);
     }
 } catch (Throwable $e) {
     $lexosError = $e->getMessage();
-}
-
-/** ML Dashboard: verifica sessão Lexos Hub (Token Hub válido na WebAPI). */
-$lexosHubLoggedIn = true;
-$lexosHubConnectReason = '';
-$lexosOpenHubWindow = false;
-$lexosHubConfigUrl = portal_wct_public_path($baseUrl, 'index.php?page=api-config&api_tab=lexos');
-
-if ($dashboardPageId === 'ml-dashboard') {
-    $lexosHubLoggedIn = false;
-    $lexosCreds = $app['lexosCredentialsService'];
-    if (!$lexosCreds->hasHubToken()) {
-        $lexosHubConnectReason = 'Token Hub não configurado no portal.';
-        $lexosOpenHubWindow = true;
-    } elseif (in_array($activeTab, ['products', 'sku-analysis'], true)) {
-        try {
-            $hubProbe = $app['lexosHubApiClient']->probeHubApi();
-            $lexosHubLoggedIn = (bool) ($hubProbe['hub_ok'] ?? false);
-            if (!$lexosHubLoggedIn) {
-                $lexosHubConnectReason = (string) ($hubProbe['hub_error'] ?? 'Token Hub expirado ou inválido.');
-                $lexosOpenHubWindow = true;
-            }
-        } catch (Throwable $hubEx) {
-            $lexosHubConnectReason = $hubEx->getMessage();
-            $lexosOpenHubWindow = true;
-        }
-    } else {
-        $lexosHubLoggedIn = true;
-    }
 }
 
 $channelsChartLabels = [];
@@ -246,48 +215,10 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     .lexos-products-filters .lexos-filter-search { flex:1 1 220px; min-width:180px; }
     a.btn-export-xlsx { display:inline-block; padding:8px 14px; background:#3483fa; color:#fff !important; border-radius:6px; text-decoration:none; font-size:.88rem; font-weight:600; }
     a.btn-export-xlsx:hover { background:#2968c8; }
-    .lexos-hub-connect-banner {
-        margin-bottom:14px; padding:14px 16px; border:1px solid #fcd34d; border-radius:8px;
-        background:#fffbeb; color:#92400e; font-size:.9rem;
-    }
-    .lexos-hub-connect-banner strong { color:#78350f; }
-    .lexos-hub-connect-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; align-items:center; }
-    .lexos-hub-connect-actions button, .lexos-hub-connect-actions a.lexos-hub-btn {
-        margin:0; padding:8px 14px; border-radius:6px; font-size:.88rem; font-weight:600; cursor:pointer;
-        text-decoration:none; display:inline-block; border:none;
-    }
-    .lexos-hub-connect-actions button, a.lexos-hub-btn-primary {
-        background:#3483fa; color:#fff !important;
-    }
-    .lexos-hub-connect-actions a.lexos-hub-btn-secondary {
-        background:#fff; color:#1e40af !important; border:1px solid #93c5fd;
-    }
 </style>
 
 <section class="card">
-    <?php
-    $lexosNeedsHubToken = in_array($activeTab, ['products', 'sku-analysis'], true);
-    ?>
-    <?php if ($lexosOpenHubWindow): ?>
-        <div class="lexos-hub-connect-banner" id="lexos-hub-connect-banner">
-            <strong>Conexão com Lexos Hub necessária</strong>
-            <p style="margin:.35rem 0 0">
-                <?= htmlspecialchars($lexosHubConnectReason !== '' ? $lexosHubConnectReason : 'Faça login no Lexos Hub para usar Produtos e Análise de SKU.', ENT_QUOTES, 'UTF-8') ?>
-                Abrimos (ou tentamos abrir) o Hub em uma nova janela. Após logar, use o favorito
-                <strong>Capturar Token Hub → Portal</strong> em Configuração API → Lexos.
-            </p>
-            <div class="lexos-hub-connect-actions">
-                <button type="button" class="lexos-hub-btn-primary" id="lexos-hub-open-btn">Abrir Lexos Hub</button>
-                <a class="lexos-hub-btn lexos-hub-btn-secondary" href="<?= htmlspecialchars($lexosHubConfigUrl, ENT_QUOTES, 'UTF-8') ?>">Configurar Token Hub</a>
-            </div>
-            <p id="lexos-hub-popup-hint" style="margin:.5rem 0 0;font-size:.82rem;display:none;color:#b45309">
-                Se a janela não abriu, o navegador pode ter bloqueado o pop-up — clique em <strong>Abrir Lexos Hub</strong>.
-            </p>
-        </div>
-    <?php endif; ?>
-    <?php if ($lexosNeedsHubToken && !$app['lexosCredentialsService']->hasHubToken() && !$lexosOpenHubWindow): ?>
-        <div class="msg err">Configure o <strong>Token Hub (Dashboard)</strong> em Configuração API → Lexos (localStorage <code>access_token</code> de app-hub.lexos.com.br).</div>
-    <?php elseif ($lexosError): ?>
+    <?php if ($lexosError): ?>
         <div class="msg err">Erro Lexos: <?= htmlspecialchars($lexosError) ?></div>
     <?php endif; ?>
 
@@ -727,26 +658,3 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     }
 })();
 </script>
-<?php if ($lexosOpenHubWindow): ?>
-<script>
-(function () {
-    var hubUrl = 'https://app-hub.lexos.com.br/';
-    var popupName = 'lexosHubLogin';
-    var openHub = function () {
-        var win = window.open(hubUrl, popupName, 'width=1120,height=820,menubar=no,toolbar=no,location=yes,status=no,resizable=yes,scrollbars=yes');
-        return win;
-    };
-    var btn = document.getElementById('lexos-hub-open-btn');
-    if (btn) {
-        btn.addEventListener('click', function () { openHub(); });
-    }
-    var popup = openHub();
-    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        var hint = document.getElementById('lexos-hub-popup-hint');
-        if (hint) {
-            hint.style.display = 'block';
-        }
-    }
-})();
-</script>
-<?php endif; ?>

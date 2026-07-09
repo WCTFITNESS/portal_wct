@@ -186,14 +186,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($formType === 'lexos_hub_test') {
             $probe = $app['lexosHubApiClient']->probeHubApi();
             $parts = [
+                'Credenciais: ' . (($probe['ready'] ?? false) ? 'prontas' : 'incompletas'),
                 'Token Hub: ' . ($probe['hub_token_preview'] ?? '—'),
                 'Integração OAuth: ' . (($probe['integration_ready'] ?? false) ? 'pronta' : 'incompleta'),
                 'Chave: ' . ($probe['key_preview'] ?? '—'),
             ];
             if (!empty($probe['hub_ok'])) {
-                $feedback = 'Lexos WebAPI OK (modo Dashboard/plugin). ' . implode('; ', $parts)
-                    . '; HTTP ' . (int) ($probe['hub_http'] ?? 0)
+                $feedback = 'Lexos WebAPI OK. ' . implode('; ', $parts)
                     . '; auth ' . (string) ($probe['hub_auth'] ?? '')
+                    . '; HTTP ' . (int) ($probe['hub_http'] ?? 0)
                     . '; registros amostra: ' . (int) ($probe['hub_rows'] ?? 0);
             } else {
                 $feedbackClass = 'err';
