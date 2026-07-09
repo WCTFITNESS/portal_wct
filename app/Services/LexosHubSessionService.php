@@ -6,9 +6,11 @@ namespace App\Services;
 
 use App\Repositories\SettingsRepository;
 use RuntimeException;
+use Throwable;
 
 /**
- * Mantém o Token Hub (sessão app-hub.lexos.com.br) válido para Produtos/SKU.
+ * Mantém o Token Hub (sessão app-hub.lexos.com.br) válido no servidor.
+ * Configuração única (TI/Render); usuários finais não precisam instalar nada.
  */
 final class LexosHubSessionService
 {
@@ -18,20 +20,37 @@ final class LexosHubSessionService
     ) {
     }
 
-    public function ensureValidHubToken(): void
+    /**
+     * Renova silenciosamente em todo request do portal (sem travar a página).
+     */
+    public function maintainHubSessionSilently(): void
+    {
+        try {
+            $this->maintainHubSession();
+        } catch (Throwable) {
+            // Token ausente ou refresh falhou — dashboard mostra mensagem amigável.
+        }
+    }
+
+    public function maintainHubSession(): bool
     {
         $token = $this->lexosCredentialsService->getHubAccessToken();
         if ($token !== '' && !$this->isJwtExpired($token)) {
-            return;
+            return true;
         }
 
-        if ($this->refreshHubAccessToken()) {
+        return $this->refreshHubAccessToken();
+    }
+
+    public function ensureValidHubToken(): void
+    {
+        if ($this->maintainHubSession()) {
             return;
         }
 
         throw new RuntimeException(
-            'Token Hub ausente ou expirado. Instale o conector Lexos do Portal (Configuração API → Lexos) '
-            . 'ou faça login em app-hub.lexos.com.br e sincronize o token.'
+            'A aba Produtos está temporariamente indisponível. '
+            . 'Peça ao suporte para concluir a configuração do Lexos Hub (feita uma única vez).'
         );
     }
 
@@ -55,12 +74,12 @@ final class LexosHubSessionService
         foreach ($urls as $url) {
             foreach ($payloads as $payload) {
                 try {
-                    $response = $this->httpPostJson($url, $payload);
-                    $access = $this->extractToken($response, ['access_token', 'accessToken', 'token', 'Token']);
+                    $response = $this->postWithPayloadFallbacks($url, [$payload]);
+                    $access = $this->extractTokenDeep($response, ['access_token', 'accessToken', 'token', 'Token']);
                     if ($access === '') {
                         continue;
                     }
-                    $newRefresh = $this->extractToken($response, ['refresh_token', 'refreshToken', 'RefreshToken']);
+                    $newRefresh = $this->extractTokenDeep($response, ['refresh_token', 'refreshToken', 'RefreshToken']);
                     $this->persistHubTokens($access, $newRefresh !== '' ? $newRefresh : $refresh);
 
                     return true;
@@ -115,14 +134,15 @@ final class LexosHubSessionService
             return false;
         }
 
-        return time() >= ((int) $payload['exp'] - 120);
+        // Renova ~30 min antes de expirar (sessão sempre pronta para o usuário).
+        return time() >= ((int) $payload['exp'] - 1800);
     }
 
     /**
      * @param array<string, mixed> $response
      * @param list<string> $keys
      */
-    private function extractToken(array $response, array $keys): string
+    private function extractTokenDeep(array $response, array $keys): string
     {
         foreach ($keys as $key) {
             $val = trim((string) ($response[$key] ?? ''));
@@ -131,7 +151,43 @@ final class LexosHubSessionService
             }
         }
 
+        foreach (['data', 'result', 'tokenData', 'TokenData'] as $nested) {
+            $child = $response[$nested] ?? null;
+            if (!is_array($child)) {
+                continue;
+            }
+            foreach ($keys as $key) {
+                $val = trim((string) ($child[$key] ?? ''));
+                if ($val !== '') {
+                    return $val;
+                }
+            }
+        }
+
         return '';
+    }
+
+    /**
+     * @param list<array<string, mixed>> $payloads
+     * @return array<string, mixed>
+     */
+    private function postWithPayloadFallbacks(string $url, array $payloads): array
+    {
+        $lastError = '';
+        foreach ($payloads as $payload) {
+            try {
+                return $this->httpPostJson($url, $payload);
+            } catch (RuntimeException $exception) {
+                $lastError = $exception->getMessage();
+            }
+            try {
+                return $this->httpPostFormUrlEncoded($url, $payload);
+            } catch (RuntimeException $exception) {
+                $lastError = $exception->getMessage();
+            }
+        }
+
+        throw new RuntimeException($lastError !== '' ? $lastError : 'Falha ao renovar Token Hub.');
     }
 
     /**
@@ -147,6 +203,31 @@ final class LexosHubSessionService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body,
             CURLOPT_HTTPHEADER => ['Accept: application/json', 'Content-Type: application/json'],
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        $raw = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($raw === false || $status < 200 || $status >= 300) {
+            throw new RuntimeException('HTTP ' . $status);
+        }
+        $decoded = json_decode((string) $raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function httpPostFormUrlEncoded(string $url, array $payload): array
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query($payload),
+            CURLOPT_HTTPHEADER => ['Accept: application/json', 'Content-Type: application/x-www-form-urlencoded'],
             CURLOPT_TIMEOUT => 30,
         ]);
         $raw = curl_exec($ch);

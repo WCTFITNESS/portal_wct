@@ -87,7 +87,7 @@ class LexosHubApiClient
         ];
 
         if (!$out['ready']) {
-            $out['hub_error'] = 'Token Hub ausente. Instale o conector Lexos (Configuração API) ou sincronize via app-hub.lexos.com.br.';
+            $out['hub_error'] = 'Acesso ao Lexos Hub não configurado no servidor (configuração única de TI).';
 
             return $out;
         }
@@ -167,9 +167,9 @@ class LexosHubApiClient
     {
         if ($this->lexosHubSessionService === null) {
             if (!$this->lexosCredentialsService->hasHubToken()) {
-                throw new RuntimeException(
-                    'Token Hub ausente. Instale o conector Lexos em Configuração API → Lexos.'
-                );
+            throw new RuntimeException(
+                'Token Hub ausente no servidor. Peça ao suporte para configurar o Lexos Hub (uma única vez).'
+            );
             }
 
             return;
@@ -186,9 +186,7 @@ class LexosHubApiClient
             }
 
             throw new RuntimeException(
-                'Token Hub ausente. Abra app-hub.lexos.com.br logado, copie localStorage.access_token '
-                . 'e cole em Configuração API → Lexos → Token Hub (Dashboard). '
-                . 'Não use o token OAuth do Tracking — é outro tipo de credencial.'
+                'Token Hub ausente no servidor. Peça ao suporte para configurar o Lexos Hub (uma única vez).'
             );
         }
 
@@ -453,8 +451,7 @@ class LexosHubApiClient
         $message = $exception->getMessage();
         if ($this->isUnauthorized($exception)) {
             if ($authMode === self::AUTH_HUB) {
-                $message .= ' Produtos/SKU exigem Token Hub do app-hub.lexos.com.br. '
-                    . 'Instale o conector Lexos (Configuração API → Lexos) para sincronizar automaticamente.';
+                $message .= ' Peça ao suporte para verificar o Refresh Token Hub em Configuração API → Lexos.';
             } elseif ($authMode === self::AUTH_AUTO) {
                 $message .= ' Verifique Token Hub ou credenciais de integração Lexos.';
             } else {

@@ -162,3 +162,7 @@ return [
     'protheusZa4PedidosErroMonitorService' => $protheusZa4PedidosErroMonitorService,
     'protheusAdHocQueryService' => $protheusAdHocQueryService,
 ];
+
+$lexosHubSessionService->maintainHubSessionSilently();
+
+return $app;

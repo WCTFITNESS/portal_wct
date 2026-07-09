@@ -107,7 +107,7 @@ final class LexosCredentialsService
 
     public function hasHubToken(): bool
     {
-        return $this->getHubAccessToken() !== '';
+        return $this->getHubAccessToken() !== '' || $this->getHubRefreshToken() !== '';
     }
 
     /**
@@ -116,6 +116,11 @@ final class LexosCredentialsService
      */
     public function getHubAccessToken(): string
     {
+        $env = trim((string) getenv('LEXOS_HUB_ACCESS_TOKEN'));
+        if ($env !== '') {
+            return $this->normalizeBearer($env);
+        }
+
         $portal = $this->settingsRepository->getApiConfig() ?? [];
         $hubToken = $this->normalizeBearer((string) ($portal['lexos_hub_token'] ?? ''));
         if ($hubToken !== '') {
@@ -127,6 +132,11 @@ final class LexosCredentialsService
 
     public function getHubRefreshToken(): string
     {
+        $env = trim((string) getenv('LEXOS_HUB_REFRESH_TOKEN'));
+        if ($env !== '') {
+            return $env;
+        }
+
         $portal = $this->settingsRepository->getApiConfig() ?? [];
 
         return trim((string) ($portal['lexos_hub_refresh_token'] ?? ''));

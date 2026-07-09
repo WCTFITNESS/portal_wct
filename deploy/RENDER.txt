@@ -69,6 +69,12 @@
    REPASSE_MP_DESKTOP_KEY=wct-repasse-desktop-2026
    (mesma chave embutida no RepasseMercadoPago.exe; altere em producao se necessario)
 
+   Lexos Hub — aba Produtos do Dashboard (configuracao unica de TI; usuarios leigos nao fazem nada):
+   LEXOS_HUB_REFRESH_TOKEN=<refresh_token do app-hub.lexos.com.br>
+   (opcional) LEXOS_HUB_ACCESS_TOKEN=<access_token atual>
+   Cron sugerido no Render (ou agendador externo), a cada 1 hora:
+   php /var/www/html/cron/refresh_lexos_hub.php
+
 8) Opcional: use o arquivo render.yaml na raiz como Blueprint (ajuste nome/regiao).
 
 ================================================================================
