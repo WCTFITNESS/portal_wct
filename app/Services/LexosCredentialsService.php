@@ -153,15 +153,18 @@ final class LexosCredentialsService
     public function getTrackingDatabaseUrl(): string
     {
         $portal = $this->settingsRepository->getApiConfig() ?? [];
-        $url = trim((string) ($portal['tracking_database_url'] ?? ''));
+        $portalUrl = trim((string) ($portal['tracking_database_url'] ?? ''));
+        $env = getenv('TRACKING_DATABASE_URL');
+        $envUrl = is_string($env) ? trim($env) : '';
 
-        if ($url !== '') {
-            return $url;
+        if ($portalUrl !== '' && \App\Core\TrackingDatabase::hasValidCredentials($portalUrl)) {
+            return $portalUrl;
+        }
+        if ($envUrl !== '') {
+            return $envUrl;
         }
 
-        $env = getenv('TRACKING_DATABASE_URL');
-
-        return is_string($env) ? trim($env) : '';
+        return $portalUrl;
     }
 
     private function normalizeMode(string $mode): string

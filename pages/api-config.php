@@ -51,6 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($formType === 'lexos_api') {
             $existing = $app['settingsRepository']->getApiConfig() ?? [];
+            $trackingUrlInput = trim((string) ($_POST['tracking_database_url'] ?? ''));
+            if ($trackingUrlInput !== '' && !\App\Core\TrackingDatabase::hasValidCredentials($trackingUrlInput)) {
+                $trackingUrlInput = '';
+            }
             $app['settingsRepository']->saveApiConfig([
                 'app_id' => trim((string) ($existing['app_id'] ?? '')),
                 'client_secret' => trim((string) ($existing['client_secret'] ?? '')),
@@ -62,21 +66,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'lexos_refresh_token' => trim((string) ($_POST['lexos_refresh_token'] ?? '')),
                 'lexos_integration_key' => trim((string) ($_POST['lexos_integration_key'] ?? '')),
                 'lexos_integration_header_name' => trim((string) ($_POST['lexos_integration_header_name'] ?? '')),
-                'tracking_database_url' => trim((string) ($_POST['tracking_database_url'] ?? '')),
+                'tracking_database_url' => $trackingUrlInput !== '' ? $trackingUrlInput : null,
                 'lexos_credentials_mode' => trim((string) ($_POST['lexos_credentials_mode'] ?? 'auto')),
             ]);
             $feedback = 'Configurações da API Lexos salvas.';
+            if (trim((string) ($_POST['tracking_database_url'] ?? '')) !== '' && $trackingUrlInput === '') {
+                $feedback .= ' URL do Tracking incompleta foi ignorada — o Portal usará TRACKING_DATABASE_URL do Render.';
+            }
         }
 
         if ($formType === 'lexos_tracking_test') {
-            $testUrl = trim((string) ($_POST['tracking_database_url'] ?? ''));
+            $postUrl = trim((string) ($_POST['tracking_database_url'] ?? ''));
+            $testUrl = $postUrl !== '' && \App\Core\TrackingDatabase::hasValidCredentials($postUrl)
+                ? $postUrl
+                : $app['lexosCredentialsService']->getTrackingDatabaseUrl();
             if ($testUrl === '') {
-                $existing = $app['settingsRepository']->getApiConfig() ?? [];
-                $testUrl = trim((string) ($existing['tracking_database_url'] ?? ''));
-            }
-            if ($testUrl === '') {
-                $env = getenv('TRACKING_DATABASE_URL');
-                $testUrl = is_string($env) ? trim($env) : '';
+                throw new RuntimeException(
+                    'URL do Tracking não configurada. Cole a URL completa do PostgreSQL ou configure TRACKING_DATABASE_URL no Render.'
+                );
             }
             $repo = new \App\Repositories\TrackingLexosTokenRepository(
                 new \App\Core\TrackingDatabase($testUrl)
@@ -172,14 +179,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formType === 'lexos_import_tracking_key') {
-            $testUrl = trim((string) ($_POST['tracking_database_url'] ?? ''));
+            $postUrl = trim((string) ($_POST['tracking_database_url'] ?? ''));
+            $testUrl = $postUrl !== '' && \App\Core\TrackingDatabase::hasValidCredentials($postUrl)
+                ? $postUrl
+                : $app['lexosCredentialsService']->getTrackingDatabaseUrl();
             if ($testUrl === '') {
-                $existing = $app['settingsRepository']->getApiConfig() ?? [];
-                $testUrl = trim((string) ($existing['tracking_database_url'] ?? ''));
-            }
-            if ($testUrl === '') {
-                $env = getenv('TRACKING_DATABASE_URL');
-                $testUrl = is_string($env) ? trim($env) : '';
+                throw new RuntimeException(
+                    'URL do Tracking não configurada. Cole a URL completa do PostgreSQL ou configure TRACKING_DATABASE_URL no Render.'
+                );
             }
             $repo = new \App\Repositories\TrackingLexosTokenRepository(
                 new \App\Core\TrackingDatabase($testUrl)
@@ -562,9 +569,13 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
 
             <label>URL PostgreSQL do Tracking</label>
             <input type="password" id="tracking_database_url" name="tracking_database_url" autocomplete="off"
-                   placeholder="postgresql://usuario:senha@host:5432/tracking"
+                   placeholder="postgresql://usuario:senha@host:5432/banco (opcional se TRACKING_DATABASE_URL estiver no Render)"
                    value="<?= htmlspecialchars((string) ($apiConfig['tracking_database_url'] ?? '')) ?>"
                    style="width:100%;font-family:monospace;font-size:.85rem">
+            <p style="font-size:.85rem;color:#64748b;margin:.35rem 0 1rem">
+                Deixe em branco para usar a variável <code>TRACKING_DATABASE_URL</code> do Render.
+                Se preencher, use a URL <strong>completa</strong> (usuário e senha). URL incompleta é ignorada e o Portal usa o env.
+            </p>
 
             <label style="margin-top:.75rem">Origem das credenciais Lexos</label>
             <select name="lexos_credentials_mode" style="max-width:320px">

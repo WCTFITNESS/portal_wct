@@ -28,17 +28,21 @@ final class TrackingLexosTokenRepository
             return null;
         }
 
-        $stmt = $this->trackingDatabase->pdo()->query(
-            'SELECT id, access_token, token_type, expires_in, refresh_token,
-                    refresh_token_expires_in, chave, atualizado_em, refresh_token_updated_at
-             FROM lexos_tokens
-             ORDER BY id DESC
-             LIMIT 1'
-        );
+        try {
+            $stmt = $this->trackingDatabase->pdo()->query(
+                'SELECT id, access_token, token_type, expires_in, refresh_token,
+                        refresh_token_expires_in, chave, atualizado_em, refresh_token_updated_at
+                 FROM lexos_tokens
+                 ORDER BY id DESC
+                 LIMIT 1'
+            );
 
-        $row = $stmt->fetch();
+            $row = $stmt->fetch();
 
-        return $row ?: null;
+            return $row ?: null;
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

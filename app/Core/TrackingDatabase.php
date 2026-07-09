@@ -44,6 +44,12 @@ final class TrackingDatabase
         }
 
         $cfg = self::parseUrl($databaseUrl);
+        if ($cfg['user'] === '' || $cfg['pass'] === '') {
+            throw new RuntimeException(
+                'URL do Tracking sem usuário ou senha. Cole a URL completa do Render '
+                . '(postgresql://usuario:senha@host/banco) ou configure TRACKING_DATABASE_URL no servidor.'
+            );
+        }
 
         $dsn = sprintf(
             'pgsql:host=%s;port=%d;dbname=%s;sslmode=%s',
@@ -53,48 +59,117 @@ final class TrackingDatabase
             $cfg['sslmode'] ?? 'require'
         );
 
-        return new PDO($dsn, $cfg['user'], $cfg['pass'], [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_TIMEOUT => 15,
-        ]);
+        try {
+            return new PDO($dsn, $cfg['user'], $cfg['pass'], [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_TIMEOUT => 15,
+            ]);
+        } catch (\PDOException $e) {
+            throw new RuntimeException(
+                'Falha ao conectar no banco Tracking: ' . $e->getMessage(),
+                0,
+                $e
+            );
+        }
+    }
+
+    public static function hasValidCredentials(string $url): bool
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return false;
+        }
+
+        try {
+            $cfg = self::parseUrl($url);
+
+            return $cfg['user'] !== '' && $cfg['pass'] !== '';
+        } catch (RuntimeException) {
+            return false;
+        }
     }
 
     /**
-     * @return array{driver: string, host: string, port: int, name: string, user: string, pass: string}
+     * @return array{driver: string, host: string, port: int, name: string, user: string, pass: string, sslmode?: string}
      */
     public static function parseUrl(string $url): array
     {
-        $parts = parse_url($url);
-        if ($parts === false || !isset($parts['host'])) {
-            throw new RuntimeException('DATABASE_URL do Tracking inválida.');
+        $url = trim($url);
+        if ($url === '') {
+            throw new RuntimeException('DATABASE_URL do Tracking vazia.');
         }
 
-        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
-        if ($scheme !== 'postgres' && $scheme !== 'postgresql') {
+        if (!preg_match('#^postgres(?:ql)?://#i', $url)) {
             throw new RuntimeException('A URL do Tracking deve ser PostgreSQL (postgresql://...).');
         }
 
-        $name = ltrim((string) ($parts['path'] ?? ''), '/');
+        $withoutScheme = (string) preg_replace('#^postgres(?:ql)?://#i', '', $url, 1);
+        $query = '';
+        $queryPos = strpos($withoutScheme, '?');
+        if ($queryPos !== false) {
+            $query = substr($withoutScheme, $queryPos + 1);
+            $withoutScheme = substr($withoutScheme, 0, $queryPos);
+        }
+
+        $path = '';
+        $slashPos = strpos($withoutScheme, '/');
+        if ($slashPos !== false) {
+            $path = substr($withoutScheme, $slashPos + 1);
+            $withoutScheme = substr($withoutScheme, 0, $slashPos);
+        }
+
+        $name = trim($path);
         if ($name === '') {
             throw new RuntimeException('Nome do banco ausente na URL do Tracking.');
         }
 
+        $user = '';
+        $pass = '';
+        $hostPart = $withoutScheme;
+        $atPos = strrpos($withoutScheme, '@');
+        if ($atPos !== false) {
+            $credPart = substr($withoutScheme, 0, $atPos);
+            $hostPart = substr($withoutScheme, $atPos + 1);
+            $colonPos = strpos($credPart, ':');
+            if ($colonPos !== false) {
+                $user = substr($credPart, 0, $colonPos);
+                $pass = substr($credPart, $colonPos + 1);
+            } else {
+                $user = $credPart;
+            }
+        }
+
+        $host = $hostPart;
+        $port = 5432;
+        $colonPos = strrpos($hostPart, ':');
+        if ($colonPos !== false) {
+            $maybePort = substr($hostPart, $colonPos + 1);
+            if ($maybePort !== '' && ctype_digit($maybePort)) {
+                $host = substr($hostPart, 0, $colonPos);
+                $port = (int) $maybePort;
+            }
+        }
+
+        if ($host === '') {
+            throw new RuntimeException('Host ausente na URL do Tracking.');
+        }
+
         $sslmode = 'require';
-        if (isset($parts['query'])) {
-            parse_str((string) $parts['query'], $query);
-            if (is_array($query) && isset($query['sslmode']) && is_string($query['sslmode']) && $query['sslmode'] !== '') {
-                $sslmode = $query['sslmode'];
+        if ($query !== '') {
+            parse_str($query, $queryParams);
+            if (is_array($queryParams) && isset($queryParams['sslmode']) && is_string($queryParams['sslmode']) && $queryParams['sslmode'] !== '') {
+                $sslmode = $queryParams['sslmode'];
             }
         }
 
         return [
             'driver' => 'pgsql',
-            'host' => (string) $parts['host'],
-            'port' => (int) ($parts['port'] ?? 5432),
-            'name' => $name,
-            'user' => (string) ($parts['user'] ?? ''),
-            'pass' => (string) ($parts['pass'] ?? ''),
+            'host' => rawurldecode($host),
+            'port' => $port,
+            'name' => rawurldecode($name),
+            'user' => rawurldecode($user),
+            'pass' => rawurldecode($pass),
             'sslmode' => $sslmode,
         ];
     }

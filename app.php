@@ -78,13 +78,18 @@ $mlInactiveAdsService = new MlInactiveAdsService($tokenService, $client, $settin
 $mlImageResizeService = new MlImageResizeService();
 $trackingDatabaseUrl = static function () use ($settingsRepository): string {
     $cfg = $settingsRepository->getApiConfig() ?? [];
-    $url = trim((string) ($cfg['tracking_database_url'] ?? ''));
-    if ($url !== '') {
-        return $url;
-    }
+    $portalUrl = trim((string) ($cfg['tracking_database_url'] ?? ''));
     $env = getenv('TRACKING_DATABASE_URL');
+    $envUrl = is_string($env) ? trim($env) : '';
 
-    return is_string($env) ? trim($env) : '';
+    if ($portalUrl !== '' && TrackingDatabase::hasValidCredentials($portalUrl)) {
+        return $portalUrl;
+    }
+    if ($envUrl !== '') {
+        return $envUrl;
+    }
+
+    return $portalUrl;
 };
 $trackingLexosTokenRepository = new TrackingLexosTokenRepository(
     new TrackingDatabase($trackingDatabaseUrl())
