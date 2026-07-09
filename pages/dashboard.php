@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+/** Rota do portal: {@code dashboard} (Lexos) ou {@code ml-dashboard} (Mercado Livre). */
+$dashboardPageId = $dashboardPageId ?? 'dashboard';
+
 $apiConfig = $app['settingsRepository']->getApiConfig();
 $lexos = $app['lexosDashboardService'];
 
@@ -144,9 +147,9 @@ $lexosJsonEmbed = static function (mixed $data): string {
 };
 
 /** Troca de aba por link real (GET) — não depende de JS nem de URLSearchParams. */
-$lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $search, $sku, $selectedYears, $productsPerPage, $productsPage): string {
+$lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, $dStart, $dEnd, $search, $sku, $selectedYears, $productsPerPage, $productsPage): string {
     $query = [
-        'page' => 'dashboard',
+        'page' => $dashboardPageId,
         'lexos_tab' => $tabId,
         'lexos_start' => $dStart,
         'lexos_end' => $dEnd,
@@ -228,7 +231,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
         <div class="lexos-header">
             <h1>Dashboard de Vendas</h1>
             <form method="get" class="lexos-date-inline">
-                <input type="hidden" name="page" value="dashboard">
+                <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
                 <input type="hidden" name="lexos_tab" value="dashboard">
                 <label for="lexos-start">Período:</label>
                 <input id="lexos-start" type="date" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
@@ -295,7 +298,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
     <div class="lexos-tab-content<?= $activeTab === 'comparison' ? ' active' : '' ?>" data-content="comparison">
         <h1>Comparação Anual</h1>
         <form method="get" style="margin-bottom:10px;">
-            <input type="hidden" name="page" value="dashboard">
+            <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="lexos_tab" value="comparison">
             <input type="hidden" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
             <input type="hidden" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
@@ -342,7 +345,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
     <div class="lexos-tab-content<?= $activeTab === 'products' ? ' active' : '' ?>" data-content="products">
         <h1>Produtos</h1>
         <form method="get" style="margin-bottom:10px;">
-            <input type="hidden" name="page" value="dashboard">
+            <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="lexos_tab" value="products">
             <input type="hidden" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
             <input type="hidden" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
@@ -353,7 +356,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
             <button type="submit">Filtrar</button>
         </form>
         <form method="get" style="margin-bottom:10px;">
-            <input type="hidden" name="page" value="dashboard">
+            <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="lexos_tab" value="products">
             <input type="hidden" name="lexos_start" value="<?= htmlspecialchars($dStart) ?>">
             <input type="hidden" name="lexos_end" value="<?= htmlspecialchars($dEnd) ?>">
@@ -400,11 +403,11 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
         ?>
         <div class="lexos-pagination">
             <?php if ($productsPage > 1): ?>
-                <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=dashboard&lexos_tab=products&lexos_start=' . urlencode($dStart) . '&lexos_end=' . urlencode($dEnd) . '&lexos_search=' . urlencode($search) . '&lexos_sku=' . urlencode($sku) . '&lexos_products_take=' . urlencode((string) $productsPerPage) . '&lexos_products_page=' . urlencode((string) $prevPage))) ?>">Anterior</a>
+                <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_tab=products&lexos_start=' . urlencode($dStart) . '&lexos_end=' . urlencode($dEnd) . '&lexos_search=' . urlencode($search) . '&lexos_sku=' . urlencode($sku) . '&lexos_products_take=' . urlencode((string) $productsPerPage) . '&lexos_products_page=' . urlencode((string) $prevPage))) ?>">Anterior</a>
             <?php endif; ?>
             <span>Página <?= htmlspecialchars((string) $productsPage) ?> de <?= htmlspecialchars((string) $productsTotalPages) ?></span>
             <?php if ($productsPage < $productsTotalPages): ?>
-                <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=dashboard&lexos_tab=products&lexos_start=' . urlencode($dStart) . '&lexos_end=' . urlencode($dEnd) . '&lexos_search=' . urlencode($search) . '&lexos_sku=' . urlencode($sku) . '&lexos_products_take=' . urlencode((string) $productsPerPage) . '&lexos_products_page=' . urlencode((string) $nextPage))) ?>">Próxima</a>
+                <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_tab=products&lexos_start=' . urlencode($dStart) . '&lexos_end=' . urlencode($dEnd) . '&lexos_search=' . urlencode($search) . '&lexos_sku=' . urlencode($sku) . '&lexos_products_take=' . urlencode((string) $productsPerPage) . '&lexos_products_page=' . urlencode((string) $nextPage))) ?>">Próxima</a>
             <?php endif; ?>
         </div>
     </div>
@@ -413,7 +416,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dStart, $dEnd, $s
         <h1>Análise de SKU</h1>
         <div class="lexos-sku-toolbar">
             <form method="get" class="lexos-sku-filters" action="">
-                <input type="hidden" name="page" value="dashboard">
+                <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
                 <input type="hidden" name="lexos_tab" value="sku-analysis">
                 <input type="hidden" name="lexos_search" value="<?= htmlspecialchars($search) ?>">
                 <div class="lexos-sku-filter-row">
