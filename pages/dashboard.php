@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 /** Rota do portal: {@code dashboard} (Lexos) ou {@code ml-dashboard} (Mercado Livre). */
 $dashboardPageId = $dashboardPageId ?? 'dashboard';
+$lexosHubSyncUrl = portal_wct_absolute_url($baseUrl, 'index.php?page=lexos-hub-connect&action=sync');
+$lexosHubProductsApiUrl = portal_wct_public_path(
+    $baseUrl,
+    'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_hub_api=products'
+);
 
 $apiConfig = $app['settingsRepository']->getApiConfig();
 $lexos = $app['lexosDashboardService'];
@@ -359,6 +364,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             ], '', '&', PHP_QUERY_RFC3986)), ENT_QUOTES, 'UTF-8') ?>">Exportar Excel</a>
         </div>
         <div id="lexos-products-extension-hint" style="display:none"></div>
+        <div id="lexos-products-sync-status" style="display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;font-size:.88rem"></div>
         <form method="get" class="lexos-products-filters" id="lexos-products-form">
             <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="lexos_tab" value="products">
@@ -653,6 +659,103 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
                 options: { responsive: true, maintainAspectRatio: false }
             });
         }
+    }
+})();
+</script>
+<script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-hub-cache.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<script>
+(function () {
+    if (typeof window.WctLexosHubCache === 'undefined') return;
+    var activeTab = <?= json_encode($activeTab, JSON_UNESCAPED_UNICODE) ?>;
+    var syncUrl = <?= json_encode($lexosHubSyncUrl, JSON_UNESCAPED_SLASHES) ?>;
+    var productsApiUrl = <?= json_encode($lexosHubProductsApiUrl, JSON_UNESCAPED_SLASHES) ?>;
+    var hadServerError = <?= json_encode($lexosError !== null) ?>;
+    var hadEmptyProducts = <?= json_encode($activeTab === 'products' && count($products) === 0) ?>;
+    var statusEl = document.getElementById('lexos-products-sync-status');
+
+    function setStatus(text, ok) {
+        if (!statusEl) return;
+        statusEl.style.display = 'block';
+        statusEl.style.background = ok ? '#f0fdf4' : '#fff7ed';
+        statusEl.style.border = '1px solid ' + (ok ? '#bbf7d0' : '#fed7aa');
+        statusEl.style.color = ok ? '#14532d' : '#9a3412';
+        statusEl.textContent = text;
+    }
+
+    function fmtCurrency(v) {
+        return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function fmtNumber(v) {
+        return Number(v || 0).toLocaleString('pt-BR');
+    }
+
+    function renderProducts(items) {
+        var tbody = document.getElementById('lexos-products-tbody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (!items || !items.length) {
+            tbody.innerHTML = '<tr><td colspan="7">Nenhum produto encontrado.</td></tr>';
+            return;
+        }
+        items.forEach(function (p) {
+            var nome = String(p.Nome || '');
+            var tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td>' + (p.Sku || '') + '</td>' +
+                '<td title="' + nome.replace(/"/g, '&quot;') + '">' + (nome.length > 50 ? nome.slice(0, 50) + '…' : nome) + '</td>' +
+                '<td>' + (p.Ean || '') + '</td>' +
+                '<td>' + fmtNumber(p.Estoque) + '</td>' +
+                '<td>' + fmtCurrency(p.TotalVendidoItem) + '</td>' +
+                '<td>' + fmtNumber(p.TotalUnidadesVendidas) + '</td>' +
+                '<td>' + (p.Classificacao || '-') + '</td>';
+            tbody.appendChild(tr);
+        });
+    }
+
+    function loadProductsViaApi(cache) {
+        cache = cache || window.WctLexosHubCache.readCache();
+        var payload = {
+            lexos_start: document.getElementById('lexos-product-start') ? document.getElementById('lexos-product-start').value : <?= json_encode($dStart) ?>,
+            lexos_end: document.getElementById('lexos-product-end') ? document.getElementById('lexos-product-end').value : <?= json_encode($dEnd) ?>,
+            lexos_search: document.getElementById('lexos-product-search') ? document.getElementById('lexos-product-search').value : <?= json_encode($search) ?>,
+            lexos_products_take: <?= (int) $productsPerPage ?>,
+            lexos_products_page: <?= (int) $productsPage ?>,
+            lexos_hub_token: cache.access,
+            lexos_hub_refresh_token: cache.refresh,
+            lexos_hub_context: cache.context || {}
+        };
+        setStatus('Sincronizando sessão Hub e carregando produtos…', true);
+        return fetch(productsApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload)
+        }).then(function (res) {
+            return res.json().then(function (body) { return { res: res, body: body }; });
+        }).then(function (pack) {
+            if (!pack.res.ok || !pack.body.ok) {
+                throw new Error((pack.body && pack.body.message) || ('HTTP ' + pack.res.status));
+            }
+            renderProducts(pack.body.items || []);
+            setStatus('Produtos carregados com token Hub do cache.', true);
+        }).catch(function (err) {
+            setStatus('Não foi possível carregar Produtos automaticamente. TI: faça login em app-hub.lexos.com.br e use o favorito Capturar Hub → Portal. ' + (err.message || ''), false);
+        });
+    }
+
+    if (activeTab === 'products' && (hadServerError || hadEmptyProducts)) {
+        window.WctLexosHubCache.syncToServer(syncUrl, { silent: true }).then(function (syncResult) {
+            var cache = window.WctLexosHubCache.readCache();
+            if (cache.access || cache.refresh || (cache.context && Object.keys(cache.context).length)) {
+                return loadProductsViaApi(cache);
+            }
+            if (!syncResult.ok) {
+                setStatus(syncResult.message, false);
+            }
+        });
+    } else if (activeTab === 'products') {
+        window.WctLexosHubCache.syncToServer(syncUrl, { silent: true });
     }
 })();
 </script>

@@ -99,7 +99,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($hubToken === '' && $hubRefresh === '') {
                 throw new RuntimeException('Tokens Hub não recebidos. Faça login em app-hub.lexos.com.br.');
             }
-            $captureResult = $app['lexosHubBrowserCacheService']->saveFromBrowser($hubToken, $hubRefresh);
+            $hubContext = $app['lexosHubBrowserCacheService']->parseHubContextFromRequest($_POST);
+            $captureResult = $app['lexosHubBrowserCacheService']->saveFromBrowser($hubToken, $hubRefresh, $hubContext);
             $silent = ($_POST['lexos_hub_silent'] ?? '') === '1' || ($_GET['lexos_hub_silent'] ?? '') === '1';
             if ($silent) {
                 header('Content-Type: text/plain; charset=utf-8');

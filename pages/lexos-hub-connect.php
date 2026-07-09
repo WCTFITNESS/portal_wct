@@ -15,8 +15,9 @@ $errorMsg = trim((string) ($_GET['error'] ?? ''));
 <section class="card">
     <h1>Conectar Lexos Hub</h1>
     <p style="color:#475569;max-width:720px">
-        Captura o <strong>refresh token</strong> do navegador (sessão em
-        <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a>)
+        Captura o <strong>access_token</strong> (como o plugin Faturamento), refresh, cookies e todo o
+        <strong>localStorage</strong> de
+        <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a>
         e salva no <strong>cache do navegador</strong> + <strong>banco do portal</strong>.
         Usuários finais não precisam fazer nada depois disso.
     </p>

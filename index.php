@@ -82,16 +82,69 @@ if ($page === 'repasse-mp-sync-config') {
     exit;
 }
 
+if (in_array($page, ['dashboard', 'ml-dashboard'], true) && ($_GET['lexos_hub_api'] ?? '') !== '') {
+    header('Content-Type: application/json; charset=utf-8');
+    $hubApi = (string) $_GET['lexos_hub_api'];
+    $rawInput = (string) file_get_contents('php://input');
+    $body = json_decode($rawInput, true);
+    if (!is_array($body)) {
+        $body = [];
+    }
+
+    try {
+        if ($body !== []) {
+            $hubContext = $app['lexosHubBrowserCacheService']->parseHubContextFromRequest($body);
+            $app['lexosHubBrowserCacheService']->saveFromBrowser(
+                trim((string) ($body['lexos_hub_token'] ?? '')),
+                trim((string) ($body['lexos_hub_refresh_token'] ?? '')),
+                $hubContext,
+            );
+        }
+
+        if ($hubApi === 'products') {
+            $start = trim((string) ($body['lexos_start'] ?? $_GET['lexos_start'] ?? ''));
+            $end = trim((string) ($body['lexos_end'] ?? $_GET['lexos_end'] ?? ''));
+            $search = trim((string) ($body['lexos_search'] ?? $_GET['lexos_search'] ?? ''));
+            $take = max(1, min(500, (int) ($body['lexos_products_take'] ?? $_GET['lexos_products_take'] ?? 20)));
+            $pageNo = max(1, (int) ($body['lexos_products_page'] ?? $_GET['lexos_products_page'] ?? 1));
+            if ($start === '' || $end === '') {
+                $today = new DateTimeImmutable('now');
+                $start = $today->modify('first day of this month')->format('Y-m-d');
+                $end = $today->format('Y-m-d');
+            }
+
+            $app['lexosHubSessionService']->maintainHubSession();
+            $productsResp = $app['lexosDashboardService']->getProducts($start, $end, $search, $take, ($pageNo - 1) * $take);
+            echo json_encode([
+                'ok' => true,
+                'items' => $productsResp['items'] ?? [],
+                'count' => (int) ($productsResp['count'] ?? 0),
+                'page' => $pageNo,
+                'take' => $take,
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        throw new RuntimeException('Ação Hub desconhecida.');
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if (($_GET['page'] ?? '') === 'lexos-hub-connect') {
     $hubAction = (string) ($_GET['action'] ?? '');
 
     if ($hubAction === 'capture' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $access = trim((string) ($_POST['lexos_hub_token'] ?? ''));
         $refresh = trim((string) ($_POST['lexos_hub_refresh_token'] ?? ''));
-        $result = $app['lexosHubBrowserCacheService']->saveFromBrowser($access, $refresh);
+        $hubContext = $app['lexosHubBrowserCacheService']->parseHubContextFromRequest($_POST);
+        $result = $app['lexosHubBrowserCacheService']->saveFromBrowser($access, $refresh, $hubContext);
         $bootstrap = $app['lexosHubBrowserCacheService']->buildLocalStorageBootstrapScript(
             $app['lexosCredentialsService']->getHubAccessToken() !== '' ? $app['lexosCredentialsService']->getHubAccessToken() : $access,
             $app['lexosCredentialsService']->getHubRefreshToken() !== '' ? $app['lexosCredentialsService']->getHubRefreshToken() : $refresh,
+            $hubContext,
         );
         $redirectOk = portal_wct_public_path($baseUrl, 'index.php?page=lexos-hub-connect&captured=1');
         $redirectErr = portal_wct_public_path($baseUrl, 'index.php?page=lexos-hub-connect&error=' . rawurlencode($result['message']));
@@ -99,15 +152,18 @@ if (($_GET['page'] ?? '') === 'lexos-hub-connect') {
         header('Content-Type: text/html; charset=utf-8');
         $lsAccess = LexosHubBrowserCacheService::LS_ACCESS;
         $lsRefresh = LexosHubBrowserCacheService::LS_REFRESH;
+        $lsContext = LexosHubBrowserCacheService::LS_CONTEXT;
         $lsSynced = LexosHubBrowserCacheService::LS_SYNCED_AT;
         $jsAccess = json_encode($bootstrap['access'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $jsRefresh = json_encode($bootstrap['refresh'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $jsContext = json_encode($bootstrap['context'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $jsRedirect = json_encode($result['ok'] ? $redirectOk : $redirectErr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         echo '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Lexos Hub</title></head><body>';
         echo '<p>Salvando tokens do Hub…</p><script>';
         echo 'try{';
         echo 'if(' . $jsAccess . ')localStorage.setItem(' . json_encode($lsAccess) . ',' . $jsAccess . ');';
         echo 'if(' . $jsRefresh . ')localStorage.setItem(' . json_encode($lsRefresh) . ',' . $jsRefresh . ');';
+        echo 'if(' . $jsContext . ')localStorage.setItem(' . json_encode($lsContext) . ',JSON.stringify(' . $jsContext . '));';
         echo 'localStorage.setItem(' . json_encode($lsSynced) . ',String(Date.now()));';
         echo 'location.replace(' . $jsRedirect . ');';
         echo '}catch(e){document.body.innerHTML="Erro ao gravar cache: "+e.message;}</script></body></html>';
@@ -121,9 +177,11 @@ if (($_GET['page'] ?? '') === 'lexos-hub-connect') {
             $body = $_POST;
         }
         try {
+            $hubContext = $app['lexosHubBrowserCacheService']->parseHubContextFromRequest($body);
             $result = $app['lexosHubBrowserCacheService']->saveFromBrowser(
                 trim((string) ($body['lexos_hub_token'] ?? '')),
                 trim((string) ($body['lexos_hub_refresh_token'] ?? '')),
+                $hubContext,
             );
             echo json_encode($result, JSON_UNESCAPED_UNICODE);
         } catch (Throwable $e) {
@@ -183,10 +241,11 @@ if (
     try {
         $hubToken = trim((string) ($_POST['lexos_hub_token'] ?? ''));
         $hubRefresh = trim((string) ($_POST['lexos_hub_refresh_token'] ?? ''));
-        if ($hubToken === '' && $hubRefresh === '') {
+        if ($hubToken === '' && $hubRefresh === '' && trim((string) ($_POST['lexos_hub_storage'] ?? '')) === '') {
             throw new RuntimeException('missing token');
         }
-        $app['lexosHubBrowserCacheService']->saveFromBrowser($hubToken, $hubRefresh);
+        $hubContext = $app['lexosHubBrowserCacheService']->parseHubContextFromRequest($_POST);
+        $app['lexosHubBrowserCacheService']->saveFromBrowser($hubToken, $hubRefresh, $hubContext);
         echo 'ok';
     } catch (Throwable $e) {
         http_response_code(400);

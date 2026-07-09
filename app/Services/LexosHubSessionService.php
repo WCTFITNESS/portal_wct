@@ -18,7 +18,9 @@ final class LexosHubSessionService
         private SettingsRepository $settingsRepository,
         private LexosCredentialsService $lexosCredentialsService,
         private ?LexosAuthService $lexosAuthService = null,
+        private ?LexosHubContextParser $contextParser = null,
     ) {
+        $this->contextParser ??= new LexosHubContextParser();
     }
 
     /**
@@ -36,7 +38,12 @@ final class LexosHubSessionService
     public function maintainHubSession(): bool
     {
         $token = $this->lexosCredentialsService->getHubAccessToken();
-        if ($token !== '' && !$this->isJwtExpired($token) && $this->probeHubAccessToken($token)) {
+        if ($token !== '' && !$this->isJwtExpired($token)) {
+            if ($this->probeHubAccessToken($token)) {
+                return true;
+            }
+
+            // Igual plugin Faturamento: access_token JWT ainda válido → usa direto.
             return true;
         }
 
@@ -94,6 +101,7 @@ final class LexosHubSessionService
             'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
             'lexos_hub_token' => trim((string) ($existing['lexos_hub_token'] ?? '')),
             'lexos_hub_refresh_token' => $refreshToken,
+            'lexos_hub_context' => trim((string) ($existing['lexos_hub_context'] ?? '')),
             'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
             'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
             'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
@@ -105,7 +113,62 @@ final class LexosHubSessionService
 
     public function isHubAccessValid(string $accessToken): bool
     {
-        return $this->probeHubAccessToken(trim($accessToken));
+        $accessToken = trim($accessToken);
+        if ($accessToken === '') {
+            return false;
+        }
+
+        if ($this->probeHubAccessToken($accessToken)) {
+            return true;
+        }
+
+        return !$this->isJwtExpired($accessToken);
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    public function persistHubContext(array $context): void
+    {
+        if ($context === []) {
+            return;
+        }
+
+        $merged = $this->contextParser->merge('', '', $context);
+        $context = $merged['context'];
+        $json = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($json) || $json === '' || $json === '[]') {
+            return;
+        }
+
+        $existing = $this->settingsRepository->getApiConfig() ?? [];
+        $access = $merged['access'];
+        $refresh = $merged['refresh'];
+
+        $this->settingsRepository->saveApiConfig([
+            'app_id' => trim((string) ($existing['app_id'] ?? '')),
+            'client_secret' => trim((string) ($existing['client_secret'] ?? '')),
+            'redirect_uri' => trim((string) ($existing['redirect_uri'] ?? '')),
+            'seller_id' => trim((string) ($existing['seller_id'] ?? '')),
+            'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
+            'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
+            'lexos_hub_token' => $access !== '' ? $access : trim((string) ($existing['lexos_hub_token'] ?? '')),
+            'lexos_hub_refresh_token' => $refresh !== '' ? $refresh : trim((string) ($existing['lexos_hub_refresh_token'] ?? '')),
+            'lexos_hub_context' => $json,
+            'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
+            'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
+            'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
+            'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
+            'tracking_database_url' => trim((string) ($existing['tracking_database_url'] ?? '')) !== '' ? trim((string) $existing['tracking_database_url']) : null,
+            'lexos_credentials_mode' => trim((string) ($existing['lexos_credentials_mode'] ?? 'auto')),
+        ]);
+    }
+
+    public function getHubCookieHeader(): string
+    {
+        $raw = trim((string) ($this->lexosCredentialsService->getHubContext()['cookies'] ?? ''));
+
+        return $raw;
     }
 
     /**
@@ -176,7 +239,7 @@ final class LexosHubSessionService
 
     private function acceptHubAccessToken(string $accessToken, string $refreshToken = ''): bool
     {
-        if (!$this->probeHubAccessToken($accessToken)) {
+        if (!$this->isHubAccessValid($accessToken)) {
             return false;
         }
 
@@ -200,15 +263,20 @@ final class LexosHubSessionService
         ], JSON_THROW_ON_ERROR);
 
         $ch = curl_init($url);
+        $headers = [
+            'Accept: application/json',
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $accessToken,
+        ];
+        $cookieHeader = $this->getHubCookieHeader();
+        if ($cookieHeader !== '') {
+            $headers[] = 'Cookie: ' . $cookieHeader;
+        }
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $payload,
-            CURLOPT_HTTPHEADER => [
-                'Accept: application/json',
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $accessToken,
-            ],
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 30,
         ]);
         $raw = curl_exec($ch);
@@ -236,6 +304,7 @@ final class LexosHubSessionService
             'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
             'lexos_hub_token' => $accessToken !== '' ? $accessToken : trim((string) ($existing['lexos_hub_token'] ?? '')),
             'lexos_hub_refresh_token' => $refreshToken !== '' ? $refreshToken : trim((string) ($existing['lexos_hub_refresh_token'] ?? '')),
+            'lexos_hub_context' => trim((string) ($existing['lexos_hub_context'] ?? '')),
             'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
             'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
             'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),

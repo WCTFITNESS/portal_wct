@@ -26,6 +26,7 @@ use App\Services\LexosCredentialsService;
 use App\Services\LexosHubApiClient;
 use App\Services\LexosHubSessionService;
 use App\Services\LexosHubBrowserCacheService;
+use App\Services\LexosHubContextParser;
 use App\Services\LexosExpeditionDiagnosticService;
 use App\Services\LexosTransportadoraService;
 use App\Services\LexosOrderMonitorService;
@@ -103,7 +104,8 @@ $lexosAuthService = new LexosAuthService(
     $trackingLexosTokenRepository
 );
 $lexosHubSessionService = new LexosHubSessionService($settingsRepository, $lexosCredentialsService, $lexosAuthService);
-$lexosHubBrowserCacheService = new LexosHubBrowserCacheService($lexosHubSessionService, $lexosCredentialsService);
+$lexosHubContextParser = new LexosHubContextParser();
+$lexosHubBrowserCacheService = new LexosHubBrowserCacheService($lexosHubSessionService, $lexosCredentialsService, $lexosHubContextParser);
 $lexosHubApiClient = new LexosHubApiClient($lexosCredentialsService, $lexosAuthService, $lexosHubSessionService);
 $lexosDashboardService = new LexosDashboardService($lexosHubApiClient);
 $lexosOrderWebhookRepository = new LexosOrderWebhookRepository($pdo);

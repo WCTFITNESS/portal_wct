@@ -282,13 +282,18 @@ class LexosHubApiClient
         if ($authMode === self::AUTH_HUB || $authMode === self::AUTH_AUTO) {
             $hubToken = $this->getHubAccessToken();
             if ($hubToken !== '') {
+                $hubHeaders = [
+                    'Accept: application/json',
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $hubToken,
+                ];
+                $cookieHeader = $this->getHubCookieHeader();
+                if ($cookieHeader !== '') {
+                    $hubHeaders[] = 'Cookie: ' . $cookieHeader;
+                }
                 $attempts[] = [
                     'label' => 'hub_bearer',
-                    'headers' => [
-                        'Accept: application/json',
-                        'Content-Type: application/json',
-                        'Authorization: Bearer ' . $hubToken,
-                    ],
+                    'headers' => $hubHeaders,
                 ];
             }
         }
@@ -419,6 +424,15 @@ class LexosHubApiClient
     private function getHubAccessToken(): string
     {
         return $this->lexosCredentialsService->getHubAccessToken();
+    }
+
+    private function getHubCookieHeader(): string
+    {
+        if ($this->lexosHubSessionService !== null) {
+            return $this->lexosHubSessionService->getHubCookieHeader();
+        }
+
+        return trim((string) ($this->lexosCredentialsService->getHubContext()['cookies'] ?? ''));
     }
 
     private function getIntegrationToken(): string

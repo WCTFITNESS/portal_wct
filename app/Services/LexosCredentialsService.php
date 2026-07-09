@@ -143,6 +143,22 @@ final class LexosCredentialsService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function getHubContext(): array
+    {
+        $portal = $this->settingsRepository->getApiConfig() ?? [];
+        $raw = trim((string) ($portal['lexos_hub_context'] ?? ''));
+        if ($raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
      * @return array{has_hub_token: bool, hub_token_preview: string}
      */
     public function getHubStatusSummary(): array
