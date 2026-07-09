@@ -36,11 +36,19 @@ final class LexosHubSessionService
     public function maintainHubSession(): bool
     {
         $token = $this->lexosCredentialsService->getHubAccessToken();
-        if ($token !== '' && !$this->isJwtExpired($token)) {
+        if ($token !== '' && !$this->isJwtExpired($token) && $this->probeHubAccessToken($token)) {
             return true;
         }
 
-        return $this->refreshHubAccessToken();
+        if ($this->refreshHubAccessToken()) {
+            return true;
+        }
+
+        if ($token !== '' && $this->probeHubAccessToken($token)) {
+            return true;
+        }
+
+        return false;
     }
 
     public function ensureValidHubToken(): void
@@ -63,20 +71,41 @@ final class LexosHubSessionService
             }
         }
 
-        if ($this->lexosAuthService !== null) {
-            try {
-                $result = $this->lexosAuthService->refreshLexosToken();
-                $access = trim((string) ($result['access_token'] ?? ''));
-                $newRefresh = trim((string) ($result['refresh_token'] ?? ''));
-                if ($access !== '' && $this->acceptHubAccessToken($access, $newRefresh)) {
-                    return true;
-                }
-            } catch (Throwable) {
-                // OAuth Tracking não gera token válido para Hub em alguns tenants.
-            }
+        return false;
+    }
+
+    /**
+     * Salva só o refresh (ex.: captura do navegador antes de renovar o access).
+     */
+    public function persistHubRefreshToken(string $refreshToken): void
+    {
+        $refreshToken = trim($refreshToken);
+        if ($refreshToken === '') {
+            return;
         }
 
-        return false;
+        $existing = $this->settingsRepository->getApiConfig() ?? [];
+        $this->settingsRepository->saveApiConfig([
+            'app_id' => trim((string) ($existing['app_id'] ?? '')),
+            'client_secret' => trim((string) ($existing['client_secret'] ?? '')),
+            'redirect_uri' => trim((string) ($existing['redirect_uri'] ?? '')),
+            'seller_id' => trim((string) ($existing['seller_id'] ?? '')),
+            'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
+            'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
+            'lexos_hub_token' => trim((string) ($existing['lexos_hub_token'] ?? '')),
+            'lexos_hub_refresh_token' => $refreshToken,
+            'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
+            'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
+            'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
+            'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
+            'tracking_database_url' => trim((string) ($existing['tracking_database_url'] ?? '')) !== '' ? trim((string) $existing['tracking_database_url']) : null,
+            'lexos_credentials_mode' => trim((string) ($existing['lexos_credentials_mode'] ?? 'auto')),
+        ]);
+    }
+
+    public function isHubAccessValid(string $accessToken): bool
+    {
+        return $this->probeHubAccessToken(trim($accessToken));
     }
 
     /**
@@ -84,40 +113,31 @@ final class LexosHubSessionService
      */
     private function resolveRefreshCandidates(): array
     {
-        $candidates = [
-            $this->lexosCredentialsService->getHubRefreshToken(),
-        ];
-        $creds = $this->lexosCredentialsService->resolve();
-        $candidates[] = trim((string) ($creds['refresh_token'] ?? ''));
+        $refresh = trim($this->lexosCredentialsService->getHubRefreshToken());
 
-        $out = [];
-        foreach ($candidates as $candidate) {
-            $candidate = trim($candidate);
-            if ($candidate === '' || in_array($candidate, $out, true)) {
-                continue;
-            }
-            $out[] = $candidate;
-        }
-
-        return $out;
+        return $refresh !== '' ? [$refresh] : [];
     }
 
     private function refreshWithToken(string $refresh): bool
     {
         $urls = [
-            'https://api.lexos.com.br/Autenticacao/RefreshToken',
             'https://app-hub-webapi.lexos.com.br/Autenticacao/RefreshToken',
+            'https://app-hub.lexos.com.br/Autenticacao/RefreshToken',
+            'https://api.lexos.com.br/Autenticacao/RefreshToken',
         ];
         $payloads = [
             ['refreshToken' => $refresh],
             ['refresh_token' => $refresh],
             ['RefreshToken' => $refresh],
+            ['grant_type' => 'refresh_token', 'refresh_token' => $refresh],
+            ['grant_type' => 'refresh_token', 'refreshToken' => $refresh],
         ];
+        $currentAccess = trim($this->lexosCredentialsService->getHubAccessToken());
 
         foreach ($urls as $url) {
             foreach ($payloads as $payload) {
                 try {
-                    $response = $this->postWithPayloadFallbacks($url, [$payload]);
+                    $response = $this->postWithPayloadFallbacks($url, [$payload], $currentAccess);
                     $access = $this->extractTokenDeep($response, ['access_token', 'accessToken', 'token', 'Token']);
                     if ($access === '') {
                         continue;
@@ -134,6 +154,24 @@ final class LexosHubSessionService
         }
 
         return false;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeRefreshBody(string $raw): array
+    {
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        $trimmed = trim($raw, "\" \n\r\t");
+        if (str_starts_with($trimmed, 'eyJ')) {
+            return ['access_token' => $trimmed];
+        }
+
+        return [];
     }
 
     private function acceptHubAccessToken(string $accessToken, string $refreshToken = ''): bool
@@ -183,7 +221,8 @@ final class LexosHubSessionService
     public function persistHubTokens(string $accessToken, string $refreshToken = ''): void
     {
         $accessToken = trim($accessToken);
-        if ($accessToken === '') {
+        $refreshToken = trim($refreshToken);
+        if ($accessToken === '' && $refreshToken === '') {
             return;
         }
 
@@ -195,7 +234,7 @@ final class LexosHubSessionService
             'seller_id' => trim((string) ($existing['seller_id'] ?? '')),
             'oauth_code' => trim((string) ($existing['oauth_code'] ?? '')),
             'lexos_code' => trim((string) ($existing['lexos_code'] ?? '')),
-            'lexos_hub_token' => $accessToken,
+            'lexos_hub_token' => $accessToken !== '' ? $accessToken : trim((string) ($existing['lexos_hub_token'] ?? '')),
             'lexos_hub_refresh_token' => $refreshToken !== '' ? $refreshToken : trim((string) ($existing['lexos_hub_refresh_token'] ?? '')),
             'lexos_token' => trim((string) ($existing['lexos_token'] ?? '')),
             'lexos_refresh_token' => trim((string) ($existing['lexos_refresh_token'] ?? '')),
@@ -259,17 +298,17 @@ final class LexosHubSessionService
      * @param list<array<string, mixed>> $payloads
      * @return array<string, mixed>
      */
-    private function postWithPayloadFallbacks(string $url, array $payloads): array
+    private function postWithPayloadFallbacks(string $url, array $payloads, string $bearerAccess = ''): array
     {
         $lastError = '';
         foreach ($payloads as $payload) {
             try {
-                return $this->httpPostJson($url, $payload);
+                return $this->httpPostJson($url, $payload, $bearerAccess);
             } catch (RuntimeException $exception) {
                 $lastError = $exception->getMessage();
             }
             try {
-                return $this->httpPostFormUrlEncoded($url, $payload);
+                return $this->httpPostFormUrlEncoded($url, $payload, $bearerAccess);
             } catch (RuntimeException $exception) {
                 $lastError = $exception->getMessage();
             }
@@ -282,15 +321,22 @@ final class LexosHubSessionService
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    private function httpPostJson(string $url, array $payload): array
+    private function httpPostJson(string $url, array $payload, string $bearerAccess = ''): array
     {
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        $headers = ['Accept: application/json', 'Content-Type: application/json'];
+        if ($bearerAccess !== '') {
+            $headers[] = 'Authorization: Bearer ' . $bearerAccess;
+        }
+        foreach ($this->buildIntegrationHeaders() as $header) {
+            $headers[] = $header;
+        }
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body,
-            CURLOPT_HTTPHEADER => ['Accept: application/json', 'Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 30,
         ]);
         $raw = curl_exec($ch);
@@ -299,23 +345,29 @@ final class LexosHubSessionService
         if ($raw === false || $status < 200 || $status >= 300) {
             throw new RuntimeException('HTTP ' . $status);
         }
-        $decoded = json_decode((string) $raw, true);
 
-        return is_array($decoded) ? $decoded : [];
+        return $this->decodeRefreshBody((string) $raw);
     }
 
     /**
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    private function httpPostFormUrlEncoded(string $url, array $payload): array
+    private function httpPostFormUrlEncoded(string $url, array $payload, string $bearerAccess = ''): array
     {
+        $headers = ['Accept: application/json', 'Content-Type: application/x-www-form-urlencoded'];
+        if ($bearerAccess !== '') {
+            $headers[] = 'Authorization: Bearer ' . $bearerAccess;
+        }
+        foreach ($this->buildIntegrationHeaders() as $header) {
+            $headers[] = $header;
+        }
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => http_build_query($payload),
-            CURLOPT_HTTPHEADER => ['Accept: application/json', 'Content-Type: application/x-www-form-urlencoded'],
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => 30,
         ]);
         $raw = curl_exec($ch);
@@ -324,8 +376,26 @@ final class LexosHubSessionService
         if ($raw === false || $status < 200 || $status >= 300) {
             throw new RuntimeException('HTTP ' . $status);
         }
-        $decoded = json_decode((string) $raw, true);
 
-        return is_array($decoded) ? $decoded : [];
+        return $this->decodeRefreshBody((string) $raw);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildIntegrationHeaders(): array
+    {
+        $integrationKey = trim((string) ($this->lexosCredentialsService->resolve()['integration_key'] ?? ''));
+        if ($integrationKey === '') {
+            return [];
+        }
+
+        $customHeaderName = trim((string) ($this->lexosCredentialsService->resolve()['integration_header_name'] ?? ''));
+        $headers = ['Chave: ' . $integrationKey];
+        if ($customHeaderName !== '' && strcasecmp($customHeaderName, 'Chave') !== 0) {
+            $headers[] = $customHeaderName . ': ' . $integrationKey;
+        }
+
+        return $headers;
     }
 }

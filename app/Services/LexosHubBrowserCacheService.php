@@ -36,29 +36,34 @@ final class LexosHubBrowserCacheService
             ];
         }
 
-        $this->lexosHubSessionService->persistHubTokens($accessToken, $refreshToken);
-
-        if ($accessToken === '' || $this->needsRefresh($accessToken)) {
-            $this->lexosHubSessionService->refreshHubAccessToken();
+        if ($refreshToken !== '') {
+            $this->lexosHubSessionService->persistHubRefreshToken($refreshToken);
         }
 
+        if ($accessToken !== '' && $this->lexosHubSessionService->isHubAccessValid($accessToken)) {
+            $this->lexosHubSessionService->persistHubTokens($accessToken, $refreshToken);
+        } elseif ($accessToken !== '') {
+            $this->lexosHubSessionService->persistHubTokens($accessToken, $refreshToken);
+        }
+
+        $sessionOk = $this->lexosHubSessionService->maintainHubSession();
         $hasRefresh = $this->lexosCredentialsService->getHubRefreshToken() !== '';
         $hasAccess = $this->lexosCredentialsService->getHubAccessToken() !== '';
 
-        if (!$hasAccess && !$hasRefresh) {
+        if (!$sessionOk || !$hasAccess) {
             return [
                 'ok' => false,
-                'message' => 'Tokens salvos, mas o refresh não gerou sessão válida para Produtos.',
-                'has_refresh' => false,
-                'has_access' => false,
+                'message' => $hasRefresh
+                    ? 'Refresh Hub salvo, mas a renovação não gerou sessão válida para Produtos. Verifique se o refresh é de app-hub.lexos.com.br.'
+                    : 'Tokens recebidos, mas nenhum refresh Hub foi salvo.',
+                'has_refresh' => $hasRefresh,
+                'has_access' => $hasAccess,
             ];
         }
 
         return [
             'ok' => true,
-            'message' => $hasAccess
-                ? 'Token Hub salvo no servidor e pronto para a aba Produtos.'
-                : 'Refresh salvo; aguardando renovação do access token.',
+            'message' => 'Token Hub salvo no servidor e pronto para a aba Produtos.',
             'has_refresh' => $hasRefresh,
             'has_access' => $hasAccess,
         ];
@@ -109,24 +114,5 @@ JS;
             'refresh' => $refreshToken,
             'synced_at' => time(),
         ];
-    }
-
-    private function needsRefresh(string $accessToken): bool
-    {
-        $parts = explode('.', $accessToken);
-        if (count($parts) < 2) {
-            return false;
-        }
-        $payloadRaw = strtr($parts[1], '-_', '+/');
-        $pad = strlen($payloadRaw) % 4;
-        if ($pad > 0) {
-            $payloadRaw .= str_repeat('=', 4 - $pad);
-        }
-        $payload = json_decode((string) base64_decode($payloadRaw), true);
-        if (!is_array($payload) || !isset($payload['exp'])) {
-            return false;
-        }
-
-        return time() >= ((int) $payload['exp'] - 300);
     }
 }

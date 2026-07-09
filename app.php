@@ -25,6 +25,7 @@ use App\Services\LexosAuthService;
 use App\Services\LexosCredentialsService;
 use App\Services\LexosHubApiClient;
 use App\Services\LexosHubSessionService;
+use App\Services\LexosHubBrowserCacheService;
 use App\Services\LexosExpeditionDiagnosticService;
 use App\Services\LexosTransportadoraService;
 use App\Services\LexosOrderMonitorService;

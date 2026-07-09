@@ -78,7 +78,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             $feedback = 'Configurações da API Lexos salvas.';
             if ($hubRefreshInput !== '' || $hubTokenInput !== '') {
-                $app['lexosHubSessionService']->maintainHubSessionSilently();
+                $sessionOk = $app['lexosHubSessionService']->maintainHubSession();
+                if ($sessionOk) {
+                    $feedback .= ' Token Hub renovado e válido para Produtos.';
+                } elseif ($hubRefreshInput !== '') {
+                    $feedback .= ' Refresh Hub salvo, mas a renovação ainda não gerou sessão válida para Produtos — use o refresh de app-hub.lexos.com.br (não o OAuth do Tracking).';
+                    $feedbackClass = 'err';
+                } else {
+                    $app['lexosHubSessionService']->maintainHubSessionSilently();
+                }
             }
             if (trim((string) ($_POST['tracking_database_url'] ?? '')) !== '' && $trackingUrlInput === '') {
                 $feedback .= ' URL do Tracking incompleta foi ignorada — o Portal usará TRACKING_DATABASE_URL do Render.';
@@ -667,6 +675,9 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
 
             <label>Refresh token Lexos</label>
             <textarea name="lexos_refresh_token" rows="3" placeholder="Cole o refresh token da Lexos"><?= htmlspecialchars((string) ($apiConfig['lexos_refresh_token'] ?? '')) ?></textarea>
+            <p style="font-size:.85rem;color:#b45309;margin:.25rem 0 .75rem">
+                <strong>Não confundir:</strong> este refresh é do OAuth/Tracking. A aba <em>Produtos</em> exige o <strong>Refresh Token Hub</strong> acima (de <code>app-hub.lexos.com.br</code>).
+            </p>
 
             <label>Chave segura da integração Lexos (header Chave)</label>
             <textarea name="lexos_integration_key" rows="2" placeholder="Cole a chave segura gerada no Lexos Hub (integração Lexos API)"><?= htmlspecialchars((string) ($apiConfig['lexos_integration_key'] ?? '')) ?></textarea>
