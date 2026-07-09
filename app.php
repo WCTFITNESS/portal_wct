@@ -101,7 +101,8 @@ $lexosAuthService = new LexosAuthService(
     $lexosCredentialsService,
     $trackingLexosTokenRepository
 );
-$lexosHubSessionService = new LexosHubSessionService($settingsRepository, $lexosCredentialsService);
+$lexosHubSessionService = new LexosHubSessionService($settingsRepository, $lexosCredentialsService, $lexosAuthService);
+$lexosHubBrowserCacheService = new LexosHubBrowserCacheService($lexosHubSessionService, $lexosCredentialsService);
 $lexosHubApiClient = new LexosHubApiClient($lexosCredentialsService, $lexosAuthService, $lexosHubSessionService);
 $lexosDashboardService = new LexosDashboardService($lexosHubApiClient);
 $lexosOrderWebhookRepository = new LexosOrderWebhookRepository($pdo);
@@ -140,6 +141,7 @@ return [
     'lexosAuthService' => $lexosAuthService,
     'lexosCredentialsService' => $lexosCredentialsService,
     'lexosHubSessionService' => $lexosHubSessionService,
+    'lexosHubBrowserCacheService' => $lexosHubBrowserCacheService,
     'lexosHubApiClient' => $lexosHubApiClient,
     'trackingLexosTokenRepository' => $trackingLexosTokenRepository,
     'mercadopagoSettingsRepository' => $mercadopagoSettingsRepository,

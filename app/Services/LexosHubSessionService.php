@@ -17,6 +17,7 @@ final class LexosHubSessionService
     public function __construct(
         private SettingsRepository $settingsRepository,
         private LexosCredentialsService $lexosCredentialsService,
+        private ?LexosAuthService $lexosAuthService = null,
     ) {
     }
 
@@ -56,11 +57,53 @@ final class LexosHubSessionService
 
     public function refreshHubAccessToken(): bool
     {
-        $refresh = $this->lexosCredentialsService->getHubRefreshToken();
-        if ($refresh === '') {
-            return false;
+        foreach ($this->resolveRefreshCandidates() as $refresh) {
+            if ($this->refreshWithToken($refresh)) {
+                return true;
+            }
         }
 
+        if ($this->lexosAuthService !== null) {
+            try {
+                $result = $this->lexosAuthService->refreshLexosToken();
+                $access = trim((string) ($result['access_token'] ?? ''));
+                $newRefresh = trim((string) ($result['refresh_token'] ?? ''));
+                if ($access !== '' && $this->acceptHubAccessToken($access, $newRefresh)) {
+                    return true;
+                }
+            } catch (Throwable) {
+                // OAuth Tracking não gera token válido para Hub em alguns tenants.
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function resolveRefreshCandidates(): array
+    {
+        $candidates = [
+            $this->lexosCredentialsService->getHubRefreshToken(),
+        ];
+        $creds = $this->lexosCredentialsService->resolve();
+        $candidates[] = trim((string) ($creds['refresh_token'] ?? ''));
+
+        $out = [];
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '' || in_array($candidate, $out, true)) {
+                continue;
+            }
+            $out[] = $candidate;
+        }
+
+        return $out;
+    }
+
+    private function refreshWithToken(string $refresh): bool
+    {
         $urls = [
             'https://api.lexos.com.br/Autenticacao/RefreshToken',
             'https://app-hub-webapi.lexos.com.br/Autenticacao/RefreshToken',
@@ -80,9 +123,10 @@ final class LexosHubSessionService
                         continue;
                     }
                     $newRefresh = $this->extractTokenDeep($response, ['refresh_token', 'refreshToken', 'RefreshToken']);
-                    $this->persistHubTokens($access, $newRefresh !== '' ? $newRefresh : $refresh);
 
-                    return true;
+                    if ($this->acceptHubAccessToken($access, $newRefresh !== '' ? $newRefresh : $refresh)) {
+                        return true;
+                    }
                 } catch (RuntimeException) {
                     continue;
                 }
@@ -90,6 +134,50 @@ final class LexosHubSessionService
         }
 
         return false;
+    }
+
+    private function acceptHubAccessToken(string $accessToken, string $refreshToken = ''): bool
+    {
+        if (!$this->probeHubAccessToken($accessToken)) {
+            return false;
+        }
+
+        $this->persistHubTokens($accessToken, $refreshToken);
+
+        return true;
+    }
+
+    private function probeHubAccessToken(string $accessToken): bool
+    {
+        $today = (new \DateTimeImmutable('now'))->format('Y-m-d');
+        $monthStart = (new \DateTimeImmutable('first day of this month'))->format('Y-m-d');
+        $url = 'https://app-hub-webapi.lexos.com.br/api/RelatorioVendas/DataSourceCurvaAbc'
+            . '?lojaId=-1&initialDate=' . rawurlencode($monthStart . 'T00:00:00')
+            . '&finalDate=' . rawurlencode($today . 'T23:59:59');
+        $payload = json_encode([
+            'requiresCounts' => true,
+            'aggregates' => [['type' => 'sum', 'field' => 'TotalVendidoItem']],
+            'skip' => 0,
+            'take' => 1,
+        ], JSON_THROW_ON_ERROR);
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $accessToken,
+            ],
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        $raw = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return $raw !== false && $status >= 200 && $status < 300;
     }
 
     public function persistHubTokens(string $accessToken, string $refreshToken = ''): void

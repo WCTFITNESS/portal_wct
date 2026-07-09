@@ -12,6 +12,8 @@ if (!in_array($apiTab, ['ml', 'lexos', 'mp'], true)) {
     $apiTab = 'ml';
 }
 
+$hubSyncUrl = portal_wct_absolute_url($baseUrl, 'index.php?page=lexos-hub-connect&action=sync');
+
 $lexosFormTypes = ['lexos_api', 'lexos_hub_capture', 'lexos_token_from_code', 'lexos_refresh_token', 'lexos_tracking_test', 'lexos_sync_tracking', 'lexos_import_tracking_key', 'lexos_hub_test'];
 $mpFormTypes = ['mp_token'];
 
@@ -86,17 +88,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($formType === 'lexos_hub_capture') {
             $hubToken = trim((string) ($_POST['lexos_hub_token'] ?? ''));
             $hubRefresh = trim((string) ($_POST['lexos_hub_refresh_token'] ?? ''));
-            if ($hubToken === '') {
-                throw new RuntimeException('Token Hub não recebido. Faça login em app-hub.lexos.com.br.');
+            if ($hubToken === '' && $hubRefresh === '') {
+                throw new RuntimeException('Tokens Hub não recebidos. Faça login em app-hub.lexos.com.br.');
             }
-            $app['lexosHubSessionService']->persistHubTokens($hubToken, $hubRefresh);
+            $captureResult = $app['lexosHubBrowserCacheService']->saveFromBrowser($hubToken, $hubRefresh);
             $silent = ($_POST['lexos_hub_silent'] ?? '') === '1' || ($_GET['lexos_hub_silent'] ?? '') === '1';
             if ($silent) {
                 header('Content-Type: text/plain; charset=utf-8');
-                echo 'ok';
+                echo $captureResult['ok'] ? 'ok' : ('err: ' . $captureResult['message']);
                 exit;
             }
-            $feedback = 'Token Hub sincronizado automaticamente do Lexos Hub.';
+            $feedback = $captureResult['message'];
+            $feedbackClass = $captureResult['ok'] ? 'ok' : 'err';
             $apiConfig = $app['settingsRepository']->getApiConfig();
         }
 
@@ -625,19 +628,22 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
 
             <label>Lexos Hub — Produtos no Dashboard (configuração única de TI)</label>
             <?php
-                $lexosHubCaptureAction = portal_wct_public_path($baseUrl, 'index.php?page=api-config');
-                $lexosHubBookmarklet = "javascript:(function(){var t=localStorage.getItem('access_token');if(!t){alert('Faça login em app-hub.lexos.com.br primeiro.');return;}var r=localStorage.getItem('refresh_token')||localStorage.getItem('refreshToken')||'';var f=document.createElement('form');f.method='POST';f.action=" . json_encode($lexosHubCaptureAction, JSON_UNESCAPED_SLASHES) . ";f.target='_blank';[['api_tab','lexos'],['form_type','lexos_hub_capture']].forEach(function(p){var i=document.createElement('input');i.type='hidden';i.name=p[0];i.value=p[1];f.appendChild(i);});var tok=document.createElement('input');tok.type='hidden';tok.name='lexos_hub_token';tok.value=t;f.appendChild(tok);var ref=document.createElement('input');ref.type='hidden';ref.name='lexos_hub_refresh_token';ref.value=r;f.appendChild(ref);document.body.appendChild(f);f.submit();})();";
+                $hubCaptureUrl = portal_wct_absolute_url($baseUrl, 'index.php?page=lexos-hub-connect&action=capture');
+                $lexosHubBookmarklet = $app['lexosHubBrowserCacheService']->buildBookmarklet($hubCaptureUrl);
+                $hubConnectUrl = portal_wct_public_path($baseUrl, 'index.php?page=lexos-hub-connect');
+                $hubSyncUrl = portal_wct_absolute_url($baseUrl, 'index.php?page=lexos-hub-connect&action=sync');
                 $hubRefreshConfigured = trim((string) ($apiConfig['lexos_hub_refresh_token'] ?? '')) !== ''
                     || trim((string) (getenv('LEXOS_HUB_REFRESH_TOKEN') ?: '')) !== '';
             ?>
+            <div style="margin:.35rem 0 .75rem;padding:12px 14px;border:1px solid #bbf7d0;border-radius:8px;background:#f0fdf4;font-size:.88rem;color:#14532d">
+                <strong>Captura do navegador (recomendado):</strong>
+                <a href="<?= htmlspecialchars($hubConnectUrl, ENT_QUOTES, 'UTF-8') ?>">Abrir Conectar Lexos Hub</a>
+                — lê o refresh do Hub, salva em <em>cache do navegador</em> + servidor.
+            </div>
             <div style="margin:.35rem 0 .75rem;padding:12px 14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fafc;font-size:.88rem;color:#1e3a8a">
-                <strong>Usuários finais não precisam instalar nada.</strong> Configure aqui <em>uma vez</em> (ou no Render).
-                O servidor renova o token automaticamente — igual ao plugin, mas centralizado.
-                <ul style="margin:.5rem 0 0;padding-left:1.2rem">
-                    <li><strong>Recomendado:</strong> variável <code>LEXOS_HUB_REFRESH_TOKEN</code> no Render (refresh do Hub)</li>
-                    <li>Opcional: <code>LEXOS_HUB_ACCESS_TOKEN</code> (access atual, se não tiver refresh)</li>
-                    <li>Cron sugerido: <code>php cron/refresh_lexos_hub.php</code> a cada 1 hora</li>
-                </ul>
+                <strong>Usuários finais não precisam instalar nada.</strong> Configure <em>uma vez</em> (ou variável <code>LEXOS_HUB_REFRESH_TOKEN</code> no Render).
+                Cron local: <code>php cron/refresh_lexos_hub.php</code> a cada 1 hora.
+                <div id="lexos-hub-cache-status-api" style="margin-top:.5rem"></div>
             </div>
             <label>Refresh Token Hub (renovação automática)</label>
             <textarea name="lexos_hub_refresh_token" rows="2" placeholder="localStorage refresh_token de app-hub.lexos.com.br — o mais importante"><?= htmlspecialchars((string) ($apiConfig['lexos_hub_refresh_token'] ?? '')) ?></textarea>
@@ -730,3 +736,16 @@ $apiTabUrl = static function (string $tabId) use ($baseUrl): string {
         </form>
     </div>
 </section>
+<?php if ($apiTab === 'lexos'): ?>
+<script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-hub-cache.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<script>
+(function () {
+    if (typeof window.WctLexosHubCache === 'undefined') return;
+    var syncUrl = <?= json_encode($hubSyncUrl ?? '', JSON_UNESCAPED_SLASHES) ?>;
+    window.WctLexosHubCache.renderStatus('lexos-hub-cache-status-api');
+    if (syncUrl) {
+        window.WctLexosHubCache.syncToServer(syncUrl, { silent: true });
+    }
+})();
+</script>
+<?php endif; ?>

@@ -40,8 +40,16 @@ php C:\xampp\htdocs\portal_wct\cron\process_completed_orders.php
 Para manter o token sempre renovado, agende também a cada 5 horas:
 
 ```bash
-php C:\xampp\htdocs\portal_wct\cron\refresh_token.php
+php C:\xampp\htdocs\ml-portal\cron\refresh_token.php
 ```
+
+Para manter o Token Hub Lexos (aba Produtos do Dashboard), agende a cada 1 hora:
+
+```bash
+php C:\xampp\htdocs\ml-portal\cron\refresh_lexos_hub.php
+```
+
+**Atalho:** execute `cron\agendar_tarefas_windows.bat` como administrador — cria as duas tarefas de uma vez (`MLPortal-RefreshToken-5h` e `MLPortal-RefreshLexosHub-1h`).
 
 ## Observação importante da API
 

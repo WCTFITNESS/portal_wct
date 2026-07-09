@@ -218,6 +218,16 @@ Comando único (PowerShell como administrador):
 schtasks /Create /TN "MLPortal-RefreshToken-5h" /SC HOURLY /MO 5 /TR 'C:\xampp\php\php.exe C:\xampp\htdocs\ml-portal\cron\refresh_token.php' /F
 ```
 
+### 7.3.1 Token Hub Lexos (aba Produtos) — a cada 1 hora
+
+Arquivo: `cron/refresh_lexos_hub.php`
+
+```powershell
+schtasks /Create /TN "MLPortal-RefreshLexosHub-1h" /SC HOURLY /MO 1 /TR 'C:\xampp\php\php.exe C:\xampp\htdocs\ml-portal\cron\refresh_lexos_hub.php' /F
+```
+
+Ou execute `cron\agendar_tarefas_windows.bat` como administrador (cria as duas tarefas: ML + Lexos Hub).
+
 ### 7.4 Renovação com Python (nova conexão / teste)
 
 ```bash
