@@ -113,7 +113,16 @@ if (in_array($page, ['dashboard', 'ml-dashboard'], true) && ($_GET['lexos_hub_ap
                 $end = $today->format('Y-m-d');
             }
 
-            $app['lexosHubSessionService']->maintainHubSession();
+            $app['lexosHubSessionService']->maintainHubSessionSilently();
+            if ($app['lexosCredentialsService']->getHubAccessToken() === '') {
+                echo json_encode([
+                    'ok' => false,
+                    'code' => 'hub_not_configured',
+                    'message' => 'Token Hub ausente no servidor. Use Conectar Lexos Hub.',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
             $productsResp = $app['lexosDashboardService']->getProducts($start, $end, $search, $take, ($pageNo - 1) * $take);
             echo json_encode([
                 'ok' => true,

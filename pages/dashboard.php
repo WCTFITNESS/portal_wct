@@ -9,6 +9,7 @@ $lexosHubProductsApiUrl = portal_wct_public_path(
     $baseUrl,
     'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_hub_api=products'
 );
+$lexosHubConnectUrl = portal_wct_public_path($baseUrl, 'index.php?page=lexos-hub-connect');
 
 $apiConfig = $app['settingsRepository']->getApiConfig();
 $lexos = $app['lexosDashboardService'];
@@ -27,6 +28,8 @@ $productsPage = max(1, (int) ($_GET['lexos_products_page'] ?? 1));
 $productsPerPage = max(10, min(100, (int) ($_GET['lexos_products_take'] ?? 20)));
 $skuData = null;
 $lexosError = null;
+$lexosProductsError = null;
+$productsHubPending = false;
 $activeTab = trim((string) ($_GET['lexos_tab'] ?? 'dashboard'));
 if (!in_array($activeTab, ['dashboard', 'comparison', 'products', 'sku-analysis'], true)) {
     $activeTab = 'dashboard';
@@ -73,9 +76,17 @@ try {
     } elseif ($activeTab === 'comparison') {
         $comparison = $lexos->getComparisonData($selectedYears);
     } elseif ($activeTab === 'products') {
-        $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
-        $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
-        $productsTotal = (int) ($productsResp['count'] ?? count($products));
+        $productsHubPending = !$app['lexosCredentialsService']->hasHubToken();
+        if (!$productsHubPending) {
+            try {
+                $app['lexosHubSessionService']->maintainHubSessionSilently();
+                $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
+                $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
+                $productsTotal = (int) ($productsResp['count'] ?? count($products));
+            } catch (Throwable $e) {
+                $lexosProductsError = $e->getMessage();
+            }
+        }
     } elseif ($activeTab === 'sku-analysis' && $sku !== '') {
         $skuData = $lexos->getSkuAnalysis($sku, $dStart, $dEnd);
     }
@@ -223,7 +234,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
 </style>
 
 <section class="card">
-    <?php if ($lexosError): ?>
+    <?php if ($lexosError && $activeTab !== 'products'): ?>
         <div class="msg err">
             <?= htmlspecialchars($lexosError) ?>
         </div>
@@ -364,6 +375,19 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             ], '', '&', PHP_QUERY_RFC3986)), ENT_QUOTES, 'UTF-8') ?>">Exportar Excel</a>
         </div>
         <div id="lexos-products-extension-hint" style="display:none"></div>
+        <?php if ($productsHubPending || $lexosProductsError): ?>
+        <div id="lexos-products-setup" style="margin-bottom:14px;padding:14px 16px;border:1px solid #fed7aa;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:.9rem">
+            <strong>Configuração Lexos Hub pendente (feita uma vez por TI).</strong>
+            <p style="margin:.5rem 0 0">O servidor ainda não tem sessão do Hub. Escolha uma opção:</p>
+            <ol style="margin:.5rem 0 0;padding-left:1.25rem">
+                <li><a href="<?= htmlspecialchars($lexosHubConnectUrl, ENT_QUOTES, 'UTF-8') ?>" style="font-weight:700">Conectar Lexos Hub automaticamente</a> (extensão Chrome — recomendado)</li>
+                <li>Com extensão instalada: abra <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a> logado — a sincronização é automática</li>
+            </ol>
+            <?php if ($lexosProductsError): ?>
+                <p style="margin:.75rem 0 0;color:#b91c1c"><?= htmlspecialchars($lexosProductsError) ?></p>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
         <div id="lexos-products-sync-status" style="display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;font-size:.88rem"></div>
         <form method="get" class="lexos-products-filters" id="lexos-products-form">
             <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
@@ -663,15 +687,18 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
 })();
 </script>
 <script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-hub-cache.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-products-loader.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 <script>
 (function () {
     if (typeof window.WctLexosHubCache === 'undefined') return;
     var activeTab = <?= json_encode($activeTab, JSON_UNESCAPED_UNICODE) ?>;
     var syncUrl = <?= json_encode($lexosHubSyncUrl, JSON_UNESCAPED_SLASHES) ?>;
     var productsApiUrl = <?= json_encode($lexosHubProductsApiUrl, JSON_UNESCAPED_SLASHES) ?>;
-    var hadServerError = <?= json_encode($lexosError !== null) ?>;
-    var hadEmptyProducts = <?= json_encode($activeTab === 'products' && count($products) === 0) ?>;
+    var connectUrl = <?= json_encode($lexosHubConnectUrl, JSON_UNESCAPED_SLASHES) ?>;
+    var hadServerProducts = <?= json_encode(count($products) > 0) ?>;
+    var productsHubPending = <?= json_encode($productsHubPending) ?>;
     var statusEl = document.getElementById('lexos-products-sync-status');
+    var setupEl = document.getElementById('lexos-products-setup');
 
     function setStatus(text, ok) {
         if (!statusEl) return;
@@ -680,6 +707,10 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
         statusEl.style.border = '1px solid ' + (ok ? '#bbf7d0' : '#fed7aa');
         statusEl.style.color = ok ? '#14532d' : '#9a3412';
         statusEl.textContent = text;
+    }
+
+    function hideSetup() {
+        if (setupEl) setupEl.style.display = 'none';
     }
 
     function fmtCurrency(v) {
@@ -713,19 +744,30 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
         });
     }
 
+    function productQuery() {
+        return {
+            start: document.getElementById('lexos-product-start') ? document.getElementById('lexos-product-start').value : <?= json_encode($dStart) ?>,
+            end: document.getElementById('lexos-product-end') ? document.getElementById('lexos-product-end').value : <?= json_encode($dEnd) ?>,
+            search: document.getElementById('lexos-product-search') ? document.getElementById('lexos-product-search').value : <?= json_encode($search) ?>,
+            take: <?= (int) $productsPerPage ?>,
+            page: <?= (int) $productsPage ?>,
+        };
+    }
+
     function loadProductsViaApi(cache) {
         cache = cache || window.WctLexosHubCache.readCache();
+        var q = productQuery();
         var payload = {
-            lexos_start: document.getElementById('lexos-product-start') ? document.getElementById('lexos-product-start').value : <?= json_encode($dStart) ?>,
-            lexos_end: document.getElementById('lexos-product-end') ? document.getElementById('lexos-product-end').value : <?= json_encode($dEnd) ?>,
-            lexos_search: document.getElementById('lexos-product-search') ? document.getElementById('lexos-product-search').value : <?= json_encode($search) ?>,
-            lexos_products_take: <?= (int) $productsPerPage ?>,
-            lexos_products_page: <?= (int) $productsPage ?>,
+            lexos_start: q.start,
+            lexos_end: q.end,
+            lexos_search: q.search,
+            lexos_products_take: q.take,
+            lexos_products_page: q.page,
             lexos_hub_token: cache.access,
             lexos_hub_refresh_token: cache.refresh,
             lexos_hub_context: cache.context || {}
         };
-        setStatus('Sincronizando sessão Hub e carregando produtos…', true);
+        setStatus('Sincronizando sessão Hub no servidor…', true);
         return fetch(productsApiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -738,24 +780,61 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
                 throw new Error((pack.body && pack.body.message) || ('HTTP ' + pack.res.status));
             }
             renderProducts(pack.body.items || []);
-            setStatus('Produtos carregados com token Hub do cache.', true);
-        }).catch(function (err) {
-            setStatus('Não foi possível carregar Produtos automaticamente. TI: faça login em app-hub.lexos.com.br e use o favorito Capturar Hub → Portal. ' + (err.message || ''), false);
+            hideSetup();
+            setStatus('Produtos carregados (servidor).', true);
         });
     }
 
-    if (activeTab === 'products' && (hadServerError || hadEmptyProducts)) {
-        window.WctLexosHubCache.syncToServer(syncUrl, { silent: true }).then(function (syncResult) {
+    function loadProductsViaExtension() {
+        if (typeof window.WctLexosProductsLoader === 'undefined') {
+            return Promise.reject(new Error('Loader indisponível'));
+        }
+        var q = productQuery();
+        setStatus('Carregando produtos via conector Lexos (como plugin Faturamento)…', true);
+        return window.WctLexosProductsLoader.loadProductsViaExtension(q).then(function (result) {
+            renderProducts(result.items || []);
+            hideSetup();
+            setStatus('Produtos carregados via conector. Sincronizando token para o servidor…', true);
+            return window.WctLexosHubCache.syncToServer(syncUrl, { silent: true });
+        });
+    }
+
+    function runProductsFallbackChain() {
+        return window.WctLexosHubCache.syncToServer(syncUrl, { silent: true }).then(function (syncResult) {
             var cache = window.WctLexosHubCache.readCache();
             if (cache.access || cache.refresh || (cache.context && Object.keys(cache.context).length)) {
                 return loadProductsViaApi(cache);
             }
-            if (!syncResult.ok) {
-                setStatus(syncResult.message, false);
+            if (typeof window.WctLexosProductsLoader !== 'undefined') {
+                return window.WctLexosProductsLoader.pingExtension().then(function (hasExt) {
+                    if (hasExt) {
+                        return loadProductsViaExtension();
+                    }
+                    throw new Error(syncResult.message || 'Cache vazio. Configure em: ' + connectUrl);
+                });
             }
+            throw new Error(syncResult.message || 'Cache vazio. Configure em: ' + connectUrl);
+        }).catch(function (err) {
+            if (typeof window.WctLexosProductsLoader !== 'undefined') {
+                return window.WctLexosProductsLoader.pingExtension().then(function (hasExt) {
+                    if (hasExt) {
+                        return loadProductsViaExtension();
+                    }
+                    throw err;
+                });
+            }
+            throw err;
+        }).catch(function (err) {
+            setStatus((err && err.message) ? err.message : 'Falha ao carregar produtos.', false);
         });
-    } else if (activeTab === 'products') {
-        window.WctLexosHubCache.syncToServer(syncUrl, { silent: true });
+    }
+
+    if (activeTab === 'products') {
+        if (!hadServerProducts || productsHubPending) {
+            runProductsFallbackChain();
+        } else {
+            window.WctLexosHubCache.syncToServer(syncUrl, { silent: true });
+        }
     }
 })();
 </script>
