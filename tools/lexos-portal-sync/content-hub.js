@@ -42,6 +42,28 @@ function pickAccessToken() {
   return '';
 }
 
+function resolveSyncUrl(result) {
+  const direct = String(result.portalSyncUrl || '').trim();
+  if (direct) {
+    return direct;
+  }
+  const portalUrl = String(result.portalUrl || '').trim();
+  if (!portalUrl) {
+    return '';
+  }
+  if (portalUrl.includes('action=sync')) {
+    return portalUrl;
+  }
+  try {
+    const url = new URL(portalUrl);
+    url.searchParams.set('page', 'lexos-hub-connect');
+    url.searchParams.set('action', 'sync');
+    return url.toString();
+  } catch (_e) {
+    return '';
+  }
+}
+
 async function syncToPortal(syncUrl, token, refresh) {
   if (!syncUrl || !token) {
     return;
@@ -89,11 +111,7 @@ function captureHubToken() {
   chrome.storage.local.set({ lexosToken: token });
 
   chrome.storage.sync.get(['portalSyncUrl', 'portalUrl'], (result) => {
-    const syncUrl = String(
-      result.portalSyncUrl
-        || (String(result.portalUrl || '').includes('action=sync') ? result.portalUrl : '')
-        || '',
-    ).trim();
+    const syncUrl = resolveSyncUrl(result);
     if (!syncUrl) {
       return;
     }

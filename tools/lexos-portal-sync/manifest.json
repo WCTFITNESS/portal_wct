@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Portal WCT - Lexos Hub",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Conector Lexos Hub para o Portal WCT — sincronização automática (TI).",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
