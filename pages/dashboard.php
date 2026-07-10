@@ -64,12 +64,6 @@ try {
         $comparison = $lexos->getComparisonData($selectedYears);
     } elseif ($activeTab === 'products') {
         try {
-            if (!$app['lexosCredentialsService']->hasHubToken()) {
-                throw new RuntimeException(
-                    'A aba Produtos está temporariamente indisponível. '
-                    . 'Peça ao suporte para concluir a configuração do Lexos Hub (feita uma única vez).'
-                );
-            }
             $app['lexosHubSessionService']->ensureValidHubToken();
             $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
             $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
@@ -354,7 +348,13 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
         </div>
 
         <?php if ($lexosProductsError): ?>
-            <div class="msg err"><?= htmlspecialchars($lexosProductsError) ?></div>
+            <div class="msg err">
+                <?= htmlspecialchars($lexosProductsError) ?>
+                <div style="margin-top:.65rem;font-size:.9rem">
+                    TI: <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=lexos-hub-connect'), ENT_QUOTES, 'UTF-8') ?>">Conectar Lexos Hub</a>
+                    · <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=api-config&api_tab=lexos'), ENT_QUOTES, 'UTF-8') ?>">Configuração API → Testar Lexos WebAPI</a>
+                </div>
+            </div>
         <?php endif; ?>
 
         <form method="get" class="lexos-products-filters">

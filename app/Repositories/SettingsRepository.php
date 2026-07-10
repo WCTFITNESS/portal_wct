@@ -60,6 +60,7 @@ class SettingsRepository
         $existing = $this->getApiConfig();
 
         if ($existing) {
+            $data = $this->mergeApiConfigForUpdate($data, $existing);
             $stmt = $this->pdo->prepare(
                 'UPDATE api_settings
                  SET app_id = :app_id,
@@ -126,6 +127,42 @@ class SettingsRepository
             ':tracking_database_url' => (($data['tracking_database_url'] ?? '') !== '') ? (string) $data['tracking_database_url'] : null,
             ':lexos_credentials_mode' => (($data['lexos_credentials_mode'] ?? '') !== '') ? (string) $data['lexos_credentials_mode'] : null,
         ]);
+    }
+
+    /**
+     * Campos omitidos em updates parciais não devem apagar tokens Hub/OAuth já salvos.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $existing
+     * @return array<string, mixed>
+     */
+    private function mergeApiConfigForUpdate(array $data, array $existing): array
+    {
+        $preserveWhenMissing = [
+            'app_id',
+            'client_secret',
+            'redirect_uri',
+            'seller_id',
+            'oauth_code',
+            'lexos_code',
+            'lexos_token',
+            'lexos_hub_token',
+            'lexos_hub_refresh_token',
+            'lexos_hub_context',
+            'lexos_refresh_token',
+            'lexos_integration_key',
+            'lexos_integration_header_name',
+            'tracking_database_url',
+            'lexos_credentials_mode',
+        ];
+
+        foreach ($preserveWhenMissing as $key) {
+            if (!array_key_exists($key, $data)) {
+                $data[$key] = $existing[$key] ?? '';
+            }
+        }
+
+        return $data;
     }
 
     private function ensureOauthCodeColumnExists(): void

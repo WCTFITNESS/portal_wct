@@ -51,6 +51,17 @@ final class LexosHubSessionService
             return true;
         }
 
+        $contextAccess = $this->contextParser->extractAccessFromStoredContext(
+            $this->lexosCredentialsService->getHubContext()
+        );
+        if ($contextAccess !== '' && !$this->isJwtExpired($contextAccess)) {
+            if ($this->probeHubAccessToken($contextAccess) || !$this->isJwtExpired($contextAccess)) {
+                $this->persistHubTokens($contextAccess);
+
+                return true;
+            }
+        }
+
         if ($token !== '' && $this->probeHubAccessToken($token)) {
             return true;
         }
@@ -64,10 +75,69 @@ final class LexosHubSessionService
             return;
         }
 
-        throw new RuntimeException(
-            'A aba Produtos está temporariamente indisponível. '
-            . 'Peça ao suporte para concluir a configuração do Lexos Hub (feita uma única vez).'
-        );
+        throw new RuntimeException($this->buildHubUnavailableMessage());
+    }
+
+    /**
+     * @return array{
+     *   has_access: bool,
+     *   has_refresh: bool,
+     *   access_from_env: bool,
+     *   refresh_from_env: bool,
+     *   access_expired: bool,
+     *   refresh_ok: bool,
+     *   probe_ok: bool,
+     *   session_ok: bool,
+     *   message: string
+     * }
+     */
+    public function diagnoseHubSession(): array
+    {
+        $access = trim($this->lexosCredentialsService->getHubAccessToken());
+        $refresh = trim($this->lexosCredentialsService->getHubRefreshToken());
+        $accessFromEnv = trim((string) getenv('LEXOS_HUB_ACCESS_TOKEN')) !== '';
+        $refreshFromEnv = trim((string) getenv('LEXOS_HUB_REFRESH_TOKEN')) !== '';
+        $accessExpired = $access !== '' && $this->isJwtExpired($access);
+        $sessionOk = $this->maintainHubSession();
+        $accessAfter = trim($this->lexosCredentialsService->getHubAccessToken());
+        $probeOk = $accessAfter !== '' && $this->probeHubAccessToken($accessAfter);
+
+        return [
+            'has_access' => $accessAfter !== '',
+            'has_refresh' => $refresh !== '',
+            'access_from_env' => $accessFromEnv,
+            'refresh_from_env' => $refreshFromEnv,
+            'access_expired' => $accessExpired,
+            'refresh_ok' => $sessionOk && $accessAfter !== '' && ($accessAfter !== $access || $probeOk),
+            'probe_ok' => $probeOk,
+            'session_ok' => $sessionOk,
+            'message' => $sessionOk
+                ? 'Sessão Hub pronta no servidor.'
+                : $this->buildHubUnavailableMessage(),
+        ];
+    }
+
+    private function buildHubUnavailableMessage(): string
+    {
+        $hasRefresh = trim($this->lexosCredentialsService->getHubRefreshToken()) !== '';
+        $hasAccess = trim($this->lexosCredentialsService->getHubAccessToken()) !== '';
+
+        if (!$hasRefresh && !$hasAccess) {
+            return 'A aba Produtos está temporariamente indisponível. '
+                . 'TI: conecte o Lexos Hub uma vez em «Conectar Lexos Hub» no portal Render '
+                . '(ou configure LEXOS_HUB_REFRESH_TOKEN no Render).';
+        }
+
+        if (!$hasRefresh) {
+            return 'A aba Produtos está temporariamente indisponível. '
+                . 'O access token Hub expirou e não há refresh salvo no servidor. '
+                . 'TI: abra app-hub.lexos.com.br logado e use «Conectar Lexos Hub» novamente.';
+        }
+
+        return 'A aba Produtos está temporariamente indisponível. '
+            . 'O refresh token Hub no servidor não renovou a sessão (pode ter sido apagado ao salvar outra configuração, '
+            . 'ou é o refresh OAuth errado — use o de app-hub.lexos.com.br, não o do Tracking). '
+            . 'TI: reconecte em «Conectar Lexos Hub» e clique em «Testar Lexos WebAPI» em Configuração API.';
     }
 
     public function refreshHubAccessToken(): bool
@@ -400,6 +470,10 @@ final class LexosHubSessionService
         foreach ($this->buildIntegrationHeaders() as $header) {
             $headers[] = $header;
         }
+        $cookieHeader = $this->getHubCookieHeader();
+        if ($cookieHeader !== '') {
+            $headers[] = 'Cookie: ' . $cookieHeader;
+        }
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -430,6 +504,10 @@ final class LexosHubSessionService
         }
         foreach ($this->buildIntegrationHeaders() as $header) {
             $headers[] = $header;
+        }
+        $cookieHeader = $this->getHubCookieHeader();
+        if ($cookieHeader !== '') {
+            $headers[] = 'Cookie: ' . $cookieHeader;
         }
         $ch = curl_init($url);
         curl_setopt_array($ch, [

@@ -207,18 +207,16 @@ if (($_GET['page'] ?? '') === 'lexos-hub-connect') {
 
     if ($hubAction === 'status') {
         header('Content-Type: application/json; charset=utf-8');
-        $app['lexosHubSessionService']->maintainHubSessionSilently();
-        $hasAccess = $app['lexosCredentialsService']->getHubAccessToken() !== '';
-        $hasRefresh = $app['lexosCredentialsService']->getHubRefreshToken() !== '';
+        $diagnostic = $app['lexosHubSessionService']->diagnoseHubSession();
         $hubStatus = $app['lexosCredentialsService']->getHubStatusSummary();
         echo json_encode([
-            'ok' => $hasAccess,
-            'has_access' => $hasAccess,
-            'has_refresh' => $hasRefresh,
+            'ok' => (bool) ($diagnostic['session_ok'] ?? false),
+            'has_access' => (bool) ($diagnostic['has_access'] ?? false),
+            'has_refresh' => (bool) ($diagnostic['has_refresh'] ?? false),
+            'access_expired' => (bool) ($diagnostic['access_expired'] ?? false),
+            'probe_ok' => (bool) ($diagnostic['probe_ok'] ?? false),
             'hub_token_preview' => (string) ($hubStatus['hub_token_preview'] ?? ''),
-            'message' => $hasAccess
-                ? 'Sessão Hub pronta no servidor.'
-                : 'Aguardando login em app-hub.lexos.com.br (extensão ou favorito).',
+            'message' => (string) ($diagnostic['message'] ?? ''),
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }

@@ -212,6 +212,8 @@ class LexosAuthService
             'lexos_code' => trim($code),
             'lexos_token' => trim($accessToken),
             'lexos_hub_token' => trim((string) ($existing['lexos_hub_token'] ?? '')),
+            'lexos_hub_refresh_token' => trim((string) ($existing['lexos_hub_refresh_token'] ?? '')),
+            'lexos_hub_context' => trim((string) ($existing['lexos_hub_context'] ?? '')),
             'lexos_refresh_token' => trim((string) ($refreshToken ?? '')),
             'lexos_integration_key' => trim((string) ($existing['lexos_integration_key'] ?? '')),
             'lexos_integration_header_name' => trim((string) ($existing['lexos_integration_header_name'] ?? '')),
