@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 /** Rota do portal: {@code dashboard} (Lexos) ou {@code ml-dashboard} (Mercado Livre). */
 $dashboardPageId = $dashboardPageId ?? 'dashboard';
+$lexosMetabaseMetricsApiUrl = portal_wct_public_path(
+    $baseUrl,
+    'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_metabase_api=metrics'
+);
 
 $apiConfig = $app['settingsRepository']->getApiConfig();
 $lexos = $app['lexosDashboardService'];
@@ -639,5 +643,10 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
 })();
 </script>
 <?php if ($activeTab === 'dashboard'): ?>
+<script>
+window.WCT_LEXOS_DASHBOARD_CONFIG = {
+    metricsApiUrl: <?= json_encode($lexosMetabaseMetricsApiUrl, JSON_UNESCAPED_SLASHES) ?>
+};
+</script>
 <script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-dashboard-metabase.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 <?php endif; ?>

@@ -82,6 +82,32 @@ if ($page === 'repasse-mp-sync-config') {
     exit;
 }
 
+if (in_array($page, ['dashboard', 'ml-dashboard'], true) && ($_GET['lexos_metabase_api'] ?? '') === 'metrics') {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $start = trim((string) ($_GET['lexos_start'] ?? ''));
+        $end = trim((string) ($_GET['lexos_end'] ?? ''));
+        if ($start === '' || $end === '') {
+            $today = new DateTimeImmutable('now');
+            $start = $today->modify('first day of this month')->format('Y-m-d');
+            $end = $today->format('Y-m-d');
+        }
+
+        $metrics = $app['lexosDashboardService']->getDashboardMetrics($start, $end);
+        echo json_encode([
+            'ok' => true,
+            'metrics' => $metrics,
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(502);
+        echo json_encode([
+            'ok' => false,
+            'message' => $e->getMessage(),
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if (in_array($page, ['dashboard', 'ml-dashboard'], true) && ($_GET['lexos_hub_api'] ?? '') !== '') {
     header('Content-Type: application/json; charset=utf-8');
     $hubApi = (string) $_GET['lexos_hub_api'];

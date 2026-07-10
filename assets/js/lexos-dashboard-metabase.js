@@ -1,22 +1,15 @@
 /**
- * Dashboard Atual — Metabase no navegador (igual plugin Faturamento popup.js loadRealData).
- * Evita timeout do servidor Render → lexos.metabaseapp.com.
+ * Dashboard Atual — Metabase via proxy same-origin (Metabase bloqueia CORS no browser).
  */
 (function (global) {
   'use strict';
 
-  var EMBED_BASE = 'https://lexos.metabaseapp.com/api/embed/dashboard/eyJhbGciOiJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzA0L3htbGRzaWctbW9yZSNobWFjLXNoYTI1NiIsInR5cCI6IkpXVCJ9.eyJyZXNvdXJjZSI6eyJkYXNoYm9hcmQiOjMzMX0sInBhcmFtcyI6eyJ0ZW5hbnRpZCI6ODU2Nn19.KzSD6VAtepVnwJvcthpCtHpSGwj5rSC4G30fQjFBn6E';
-  var CARD_IDS = ['875/card/779', '898/card/781', '866/card/760', '870/card/793'];
   var PALETTE = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0891b2', '#ca8a04', '#4f46e5'];
   var channelChart = null;
+  var config = global.WCT_LEXOS_DASHBOARD_CONFIG || {};
 
   function fmtCurrency(v) {
     return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  function buildUrl(cardPath, dateRange) {
-    var params = encodeURIComponent(JSON.stringify({ filtro_de_data: dateRange, integração: null }));
-    return EMBED_BASE + '/dashcard/' + cardPath + '?parameters=' + params;
   }
 
   function normalizeMarketplaces(rawData) {
@@ -123,53 +116,59 @@
   }
 
   function loadDashboardMetabase(startDate, endDate) {
-    var dateRange = startDate + '~' + endDate;
+    if (!config.metricsApiUrl) {
+      showError('Configuração do dashboard indisponível.');
+      return Promise.resolve();
+    }
+
     showError('');
     setMetric('lexos-m-faturamento', 'Carregando…');
     setMetric('lexos-m-pedidos', 'Carregando…');
     setMetric('lexos-m-ticket', 'Carregando…');
 
-    var urls = CARD_IDS.map(function (card) { return buildUrl(card, dateRange); });
-    return Promise.all(urls.map(function (url) {
-      return fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        credentials: 'omit',
-      }).then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      });
-    })).then(function (results) {
-      var faturamento = results[0] && results[0].data && results[0].data.rows && results[0].data.rows[0]
-        ? results[0].data.rows[0][0] : 0;
-      var pedidos = results[1] && results[1].data && results[1].data.rows && results[1].data.rows[0]
-        ? results[1].data.rows[0][0] : 0;
-      var ticket = results[2] && results[2].data && results[2].data.rows && results[2].data.rows[0]
-        ? results[2].data.rows[0][0] : 0;
-      var canaisRaw = results[3] && results[3].data && results[3].data.rows ? results[3].data.rows : [];
-      var canais = normalizeMarketplaces(canaisRaw);
+    var url = config.metricsApiUrl
+      + '&lexos_start=' + encodeURIComponent(startDate)
+      + '&lexos_end=' + encodeURIComponent(endDate);
 
-      setMetric('lexos-m-faturamento', fmtCurrency(faturamento));
-      setMetric('lexos-m-pedidos', String(Number(pedidos || 0).toLocaleString('pt-BR')));
-      setMetric('lexos-m-ticket', fmtCurrency(ticket));
-      renderChannelsTable(canais);
-      renderChannelsChart(canais);
-    }).catch(function (err) {
-      console.error('Metabase dashboard:', err);
-      showError('Não foi possível carregar os dados do dashboard. Tente novamente em instantes.');
-      setMetric('lexos-m-faturamento', '—');
-      setMetric('lexos-m-pedidos', '—');
-      setMetric('lexos-m-ticket', '—');
-      renderChannelsTable([]);
-      renderChannelsChart([]);
-    });
+    return fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+      .then(function (r) {
+        return r.json().then(function (body) {
+          return { ok: r.ok, body: body };
+        });
+      })
+      .then(function (pack) {
+        if (!pack.ok || !pack.body.ok) {
+          throw new Error((pack.body && pack.body.message) || 'Falha ao carregar dashboard');
+        }
+        var metrics = pack.body.metrics || {};
+        var canais = normalizeMarketplaces(metrics.canais || []);
+
+        setMetric('lexos-m-faturamento', fmtCurrency(metrics.faturamento));
+        setMetric('lexos-m-pedidos', String(Number(metrics.pedidos || 0).toLocaleString('pt-BR')));
+        setMetric('lexos-m-ticket', fmtCurrency(metrics.ticket_medio));
+        renderChannelsTable(canais);
+        renderChannelsChart(canais);
+      })
+      .catch(function (err) {
+        console.error('Metabase dashboard:', err);
+        showError('Não foi possível carregar os dados do dashboard. Tente novamente em instantes.');
+        setMetric('lexos-m-faturamento', '—');
+        setMetric('lexos-m-pedidos', '—');
+        setMetric('lexos-m-ticket', '—');
+        renderChannelsTable([]);
+        renderChannelsChart([]);
+      });
   }
 
   document.addEventListener('DOMContentLoaded', function () {
     var tab = document.querySelector('.lexos-tab-content[data-content="dashboard"]');
     if (!tab || !tab.classList.contains('active')) return;
     var startEl = document.getElementById('lexos-start');
-    var endEl = document.querySelector('input[name="lexos_end"]');
+    var endEl = document.querySelector('.lexos-tab-content[data-content="dashboard"] input[name="lexos_end"]');
     if (!startEl || !endEl) return;
     loadDashboardMetabase(startEl.value, endEl.value);
   });

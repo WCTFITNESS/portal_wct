@@ -22,10 +22,11 @@ class LexosDashboardService
             'canais' => "https://lexos.metabaseapp.com/api/embed/dashboard/eyJhbGciOiJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzA0L3htbGRzaWctbW9yZSNobWFjLXNoYTI1NiIsInR5cCI6IkpXVCJ9.eyJyZXNvdXJjZSI6eyJkYXNoYm9hcmQiOjMzMX0sInBhcmFtcyI6eyJ0ZW5hbnRpZCI6ODU2Nn19.KzSD6VAtepVnwJvcthpCtHpSGwj5rSC4G30fQjFBn6E/dashcard/870/card/793?parameters=%7B%22filtro_de_data%22%3A%22{$range}%22%2C%22integra%25C3%25A7%25C3%25A3o%22%3Anull%7D",
         ];
 
-        $f = $this->httpGetJson($urls['faturamento']);
-        $p = $this->httpGetJson($urls['pedidos']);
-        $t = $this->httpGetJson($urls['ticket']);
-        $c = $this->httpGetJson($urls['canais']);
+        $results = $this->httpGetJsonParallel(array_values($urls));
+        $f = $results[0] ?? [];
+        $p = $results[1] ?? [];
+        $t = $results[2] ?? [];
+        $c = $results[3] ?? [];
 
         return [
             'faturamento' => (float) ($f['data']['rows'][0][0] ?? 0),
@@ -333,19 +334,25 @@ class LexosDashboardService
         return array_keys($arr) === range(0, count($arr) - 1);
     }
 
+    private function isMetabaseHttpOk(int $status): bool
+    {
+        return $status >= 200 && $status < 300;
+    }
+
     private function httpGetJson(string $url): array
     {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => ['Accept: application/json'],
-            CURLOPT_TIMEOUT => 40,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 30,
         ]);
         $raw = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
         curl_close($ch);
-        if ($raw === false || $status < 200 || $status >= 300) {
+        if ($raw === false || !$this->isMetabaseHttpOk($status)) {
             throw new RuntimeException('Falha consulta Lexos/Metabase. HTTP: ' . $status . ($err !== '' ? ' ' . $err : ''));
         }
         $decoded = json_decode((string) $raw, true);
@@ -397,7 +404,8 @@ class LexosDashboardService
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_HTTPHEADER => ['Accept: application/json'],
-                CURLOPT_TIMEOUT => 25,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 30,
             ]);
             curl_multi_add_handle($mh, $ch);
             $handles[$i] = $ch;
@@ -417,7 +425,7 @@ class LexosDashboardService
                 $raw = curl_multi_getcontent($ch);
                 $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 $err = curl_error($ch);
-                if ($raw === false || $status < 200 || $status >= 300) {
+                if ($raw === false || !$this->isMetabaseHttpOk($status)) {
                     throw new RuntimeException('Falha consulta Lexos/Metabase. HTTP: ' . $status . ($err !== '' ? ' ' . $err : ''));
                 }
                 $decoded = json_decode((string) $raw, true);
