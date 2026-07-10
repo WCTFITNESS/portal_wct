@@ -2,7 +2,22 @@
  * Proxy de fetch para a WebAPI Lexos — mesmo papel do popup.js do plugin Faturamento.
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== 'LEXOS_HUB_FETCH') {
+  if (!message) {
+    return false;
+  }
+
+  if (message.type === 'LEXOS_HUB_ENSURE') {
+    chrome.tabs.query({ url: 'https://app-hub.lexos.com.br/*' }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        chrome.tabs.update(tabs[0].id, { active: true });
+      } else {
+        chrome.tabs.create({ url: 'https://app-hub.lexos.com.br/' });
+      }
+    });
+    return false;
+  }
+
+  if (message.type !== 'LEXOS_HUB_FETCH') {
     return false;
   }
 

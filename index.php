@@ -258,6 +258,10 @@ if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
 }
 
+if (in_array($page, ['dashboard', 'ml-dashboard'], true)) {
+    $app['lexosHubSessionService']->maintainHubSessionSilently();
+}
+
 if (
     $page === 'api-config'
     && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'

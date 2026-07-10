@@ -14,9 +14,6 @@
   }
 
   const syncUrl = buildSyncUrl();
-  if (!syncUrl) {
-    return;
-  }
 
   chrome.storage.sync.set({
     portalSyncUrl: syncUrl,
@@ -24,6 +21,36 @@
   });
 
   document.documentElement.setAttribute('data-wct-lexos-extension', '1');
+
+  function notifyTokenReady() {
+    window.postMessage({ type: 'WCT_LEXOS_TOKEN_READY' }, '*');
+  }
+
+  function mirrorLexosTokenToPage() {
+    chrome.storage.local.get(['lexosToken'], (result) => {
+      const token = String(result.lexosToken || '').trim();
+      if (token !== '') {
+        const prev = localStorage.getItem('lexosToken') || '';
+        localStorage.setItem('lexosToken', token);
+        if (prev !== token) {
+          notifyTokenReady();
+        }
+      }
+    });
+  }
+
+  mirrorLexosTokenToPage();
+  setInterval(mirrorLexosTokenToPage, 5 * 1000);
+
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.lexosToken) {
+        mirrorLexosTokenToPage();
+      }
+    });
+  } catch (_e) {
+    /* ignore */
+  }
 })();
 
 window.addEventListener('message', (event) => {
@@ -34,7 +61,27 @@ window.addEventListener('message', (event) => {
   const data = event.data;
 
   if (data.type === 'WCT_LEXOS_PING') {
-    window.postMessage({ type: 'WCT_LEXOS_PONG', requestId: data.requestId, version: '1.2.0' }, '*');
+    window.postMessage({ type: 'WCT_LEXOS_PONG', requestId: data.requestId, version: '1.2.1' }, '*');
+    return;
+  }
+
+  if (data.type === 'WCT_LEXOS_GET_TOKEN') {
+    chrome.storage.local.get(['lexosToken'], (result) => {
+      const token = String(result.lexosToken || '').trim();
+      if (token !== '') {
+        localStorage.setItem('lexosToken', token);
+      }
+      window.postMessage({
+        type: 'WCT_LEXOS_TOKEN_RESULT',
+        requestId: data.requestId,
+        token,
+      }, '*');
+    });
+    return;
+  }
+
+  if (data.type === 'WCT_LEXOS_ENSURE_HUB') {
+    chrome.runtime.sendMessage({ type: 'LEXOS_HUB_ENSURE' });
     return;
   }
 

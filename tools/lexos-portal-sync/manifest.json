@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Portal WCT - Lexos Hub",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Conector Lexos Hub para o Portal WCT — sincronização automática (TI).",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://app-hub.lexos.com.br/*",
     "https://app-hub-webapi.lexos.com.br/*",
@@ -23,6 +23,7 @@
     {
       "matches": [
         "http://localhost/*",
+        "http://127.0.0.1/*",
         "https://*.onrender.com/*"
       ],
       "js": ["content-portal.js"],

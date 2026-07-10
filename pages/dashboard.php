@@ -4,12 +4,6 @@ declare(strict_types=1);
 
 /** Rota do portal: {@code dashboard} (Lexos) ou {@code ml-dashboard} (Mercado Livre). */
 $dashboardPageId = $dashboardPageId ?? 'dashboard';
-$lexosHubSyncUrl = portal_wct_absolute_url($baseUrl, 'index.php?page=lexos-hub-connect&action=sync');
-$lexosHubProductsApiUrl = portal_wct_public_path(
-    $baseUrl,
-    'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_hub_api=products'
-);
-$lexosHubConnectUrl = portal_wct_public_path($baseUrl, 'index.php?page=lexos-hub-connect');
 
 $apiConfig = $app['settingsRepository']->getApiConfig();
 $lexos = $app['lexosDashboardService'];
@@ -29,7 +23,6 @@ $productsPerPage = max(10, min(100, (int) ($_GET['lexos_products_take'] ?? 20)))
 $skuData = null;
 $lexosError = null;
 $lexosProductsError = null;
-$productsHubPending = false;
 $activeTab = trim((string) ($_GET['lexos_tab'] ?? 'dashboard'));
 if (!in_array($activeTab, ['dashboard', 'comparison', 'products', 'sku-analysis'], true)) {
     $activeTab = 'dashboard';
@@ -63,29 +56,22 @@ $selectedYears = array_values(array_map(static fn (mixed $y): string => (string)
 $comparison = ['months' => [], 'series' => []];
 
 try {
-    if ($activeTab === 'dashboard') {
-        $metrics = $lexos->getDashboardMetrics($dStart, $dEnd);
-        $channelsRaw = is_array($metrics['canais'] ?? null) ? $metrics['canais'] : [];
-        $channels = [];
-        foreach ($channelsRaw as $r) {
-            $pair = $normalizeChannelRow($r);
-            if ($pair !== null) {
-                $channels[] = $pair;
-            }
-        }
-    } elseif ($activeTab === 'comparison') {
+    if ($activeTab === 'comparison') {
         $comparison = $lexos->getComparisonData($selectedYears);
     } elseif ($activeTab === 'products') {
-        $productsHubPending = !$app['lexosCredentialsService']->hasHubToken();
-        if (!$productsHubPending) {
-            try {
-                $app['lexosHubSessionService']->maintainHubSessionSilently();
-                $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
-                $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
-                $productsTotal = (int) ($productsResp['count'] ?? count($products));
-            } catch (Throwable $e) {
-                $lexosProductsError = $e->getMessage();
+        try {
+            if (!$app['lexosCredentialsService']->hasHubToken()) {
+                throw new RuntimeException(
+                    'A aba Produtos está temporariamente indisponível. '
+                    . 'Peça ao suporte para concluir a configuração do Lexos Hub (feita uma única vez).'
+                );
             }
+            $app['lexosHubSessionService']->ensureValidHubToken();
+            $productsResp = $lexos->getProducts($dStart, $dEnd, $search, $productsPerPage, ($productsPage - 1) * $productsPerPage);
+            $products = is_array($productsResp['items'] ?? null) ? $productsResp['items'] : [];
+            $productsTotal = (int) ($productsResp['count'] ?? count($products));
+        } catch (Throwable $productsException) {
+            $lexosProductsError = $productsException->getMessage();
         }
     } elseif ($activeTab === 'sku-analysis' && $sku !== '') {
         $skuData = $lexos->getSkuAnalysis($sku, $dStart, $dEnd);
@@ -229,12 +215,27 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     .lexos-products-filters label { font-size:.82rem; margin:0; }
     .lexos-products-filters input, .lexos-products-filters select { width:auto; min-width:140px; margin:0; }
     .lexos-products-filters .lexos-filter-search { flex:1 1 220px; min-width:180px; }
-    a.btn-export-xlsx { display:inline-block; padding:8px 14px; background:#3483fa; color:#fff !important; border-radius:6px; text-decoration:none; font-size:.88rem; font-weight:600; }
-    a.btn-export-xlsx:hover { background:#2968c8; }
+    a.btn-export-xlsx { display:inline-block; padding:8px 14px; background:#3483fa; color:#fff !important; border-radius:6px; text-decoration:none; font-size:.88rem; font-weight:600; border:none; cursor:pointer; }
+    a.btn-export-xlsx:hover, button.btn-export-xlsx:hover { background:#2968c8; }
+    button.btn-export-xlsx { display:inline-block; padding:8px 14px; background:#3483fa; color:#fff; border-radius:6px; font-size:.88rem; font-weight:600; border:none; cursor:pointer; }
+    #lexos-products-tab .filters-row { display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap; margin-bottom:0; }
+    #lexos-products-tab .filter-group { display:flex; flex-direction:column; min-width:150px; flex:1; }
+    #lexos-products-tab .filter-group label { font-weight:600; color:#374151; font-size:12px; margin-bottom:4px; }
+    #lexos-products-tab .filter-input { padding:8px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; width:90%; }
+    #lexos-products-tab .filter-btn { height:40px; margin-top:20px; }
+    #lexos-products-tab .pagination-controls { display:flex; justify-content:center; align-items:center; gap:20px; margin-top:20px; padding:15px; }
+    #lexos-products-tab #page-info { font-weight:600; color:#374151; }
+    #lexos-products-tab .btn-primary { background:linear-gradient(135deg,#3b82f6,#1d4ed8); color:#fff; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:600; }
+    #lexos-products-tab .btn-secondary { background:#6b7280; color:#fff; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:600; }
+    #lexos-products-tab .btn-secondary:disabled { opacity:.5; cursor:not-allowed; }
+    #lexos-products-tab .products-loading { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; background:#fff; border-radius:12px; margin:20px 0; }
+    #lexos-products-tab .spinner { border:4px solid #f3f3f3; border-top:4px solid #3b82f6; border-radius:50%; width:50px; height:50px; animation:lexos-prod-spin 1s linear infinite; margin-bottom:20px; }
+    @keyframes lexos-prod-spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+    #lexos-products-tab .table-container { overflow-x:auto; border-radius:8px; border:1px solid #e2e8f0; }
 </style>
 
 <section class="card">
-    <?php if ($lexosError && $activeTab !== 'products'): ?>
+    <?php if ($lexosError && !in_array($activeTab, ['dashboard', 'products'], true)): ?>
         <div class="msg err">
             <?= htmlspecialchars($lexosError) ?>
         </div>
@@ -263,56 +264,29 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             </form>
         </div>
 
-        <?php if (is_array($metrics)): ?>
-            <div class="lexos-metrics">
-                <div class="lexos-metric">Faturamento<strong>R$ <?= htmlspecialchars(number_format((float) ($metrics['faturamento'] ?? 0), 2, ',', '.')) ?></strong></div>
-                <div class="lexos-metric">Pedidos<strong><?= htmlspecialchars((string) ($metrics['pedidos'] ?? 0)) ?></strong></div>
-                <div class="lexos-metric">Ticket Médio<strong>R$ <?= htmlspecialchars(number_format((float) ($metrics['ticket_medio'] ?? 0), 2, ',', '.')) ?></strong></div>
-            </div>
-        <?php endif; ?>
+        <div id="lexos-dashboard-metabase-error" class="msg err" style="display:none"></div>
+
+        <div class="lexos-metrics" id="lexos-metrics-row">
+            <div class="lexos-metric">Faturamento<strong id="lexos-m-faturamento">Carregando…</strong></div>
+            <div class="lexos-metric">Pedidos<strong id="lexos-m-pedidos">Carregando…</strong></div>
+            <div class="lexos-metric">Ticket Médio<strong id="lexos-m-ticket">Carregando…</strong></div>
+        </div>
 
         <h1>Faturamento por Canal</h1>
         <table>
             <thead><tr><th>Canal</th><th>Faturamento</th></tr></thead>
-            <tbody>
-            <?php if (!$channels): ?>
-                <tr><td colspan="2">Sem dados de canais no período.</td></tr>
-            <?php endif; ?>
-            <?php foreach ($channels as $row): ?>
-                <tr>
-                    <td><?= htmlspecialchars((string) ($row[0] ?? '')) ?></td>
-                    <td>R$ <?= htmlspecialchars(number_format((float) ($row[1] ?? 0), 2, ',', '.')) ?></td>
-                </tr>
-            <?php endforeach; ?>
+            <tbody id="lexos-channels-tbody">
+                <tr><td colspan="2">Carregando…</td></tr>
             </tbody>
         </table>
-        <?php if ($channels): ?>
-            <?php
-                $svgPalette = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0891b2', '#ca8a04', '#4f46e5'];
-                $channelsTotalValue = array_sum($channelsChartValues);
-            ?>
-            <div class="lexos-chart-wrap">
-                <div class="lexos-donut-center">
-                    <div class="lexos-donut-visual">
-                        <canvas id="lexos-channel-chart" aria-label="Faturamento por canal"></canvas>
-                    </div>
-                    <ul class="lexos-pie-list">
-                        <?php foreach ($channels as $i => $row): ?>
-                            <?php
-                                $label = (string) ($row[0] ?? '');
-                                $val = (float) ($row[1] ?? 0);
-                                $pct = $channelsTotalValue > 0 ? ($val / $channelsTotalValue) * 100.0 : 0.0;
-                                $fill = $svgPalette[$i % count($svgPalette)];
-                            ?>
-                            <li>
-                                <span><span class="lexos-dot" style="background:<?= htmlspecialchars($fill, ENT_QUOTES, 'UTF-8') ?>"></span><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></span>
-                                <strong><?= htmlspecialchars(number_format($pct, 1, ',', '.'), ENT_QUOTES, 'UTF-8') ?>%</strong>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
+        <div class="lexos-chart-wrap" id="lexos-channels-chart-wrap" style="display:none">
+            <div class="lexos-donut-center">
+                <div class="lexos-donut-visual">
+                    <canvas id="lexos-channel-chart" aria-label="Faturamento por canal"></canvas>
                 </div>
+                <ul class="lexos-pie-list" id="lexos-channels-pie-list"></ul>
             </div>
-        <?php endif; ?>
+        </div>
     </div>
 
     <div class="lexos-tab-content<?= $activeTab === 'comparison' ? ' active' : '' ?>" data-content="comparison">
@@ -365,7 +339,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     <div class="lexos-tab-content<?= $activeTab === 'products' ? ' active' : '' ?>" data-content="products" id="lexos-products-tab">
         <div class="lexos-products-header">
             <h1>Produtos Mais Vendidos</h1>
-            <a class="btn-export-xlsx" id="lexos-products-export" href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?' . http_build_query([
+            <a class="btn-export-xlsx" href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?' . http_build_query([
                 'page' => $dashboardPageId,
                 'lexos_tab' => 'products',
                 'export' => 'xlsx',
@@ -374,22 +348,12 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
                 'lexos_search' => $search,
             ], '', '&', PHP_QUERY_RFC3986)), ENT_QUOTES, 'UTF-8') ?>">Exportar Excel</a>
         </div>
-        <div id="lexos-products-extension-hint" style="display:none"></div>
-        <?php if ($productsHubPending || $lexosProductsError): ?>
-        <div id="lexos-products-setup" style="margin-bottom:14px;padding:14px 16px;border:1px solid #fed7aa;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:.9rem">
-            <strong>Configuração Lexos Hub pendente (feita uma vez por TI).</strong>
-            <p style="margin:.5rem 0 0">O servidor ainda não tem sessão do Hub. Escolha uma opção:</p>
-            <ol style="margin:.5rem 0 0;padding-left:1.25rem">
-                <li><a href="<?= htmlspecialchars($lexosHubConnectUrl, ENT_QUOTES, 'UTF-8') ?>" style="font-weight:700">Conectar Lexos Hub automaticamente</a> (extensão Chrome — recomendado)</li>
-                <li>Com extensão instalada: abra <a href="https://app-hub.lexos.com.br" target="_blank" rel="noopener">app-hub.lexos.com.br</a> logado — a sincronização é automática</li>
-            </ol>
-            <?php if ($lexosProductsError): ?>
-                <p style="margin:.75rem 0 0;color:#b91c1c"><?= htmlspecialchars($lexosProductsError) ?></p>
-            <?php endif; ?>
-        </div>
+
+        <?php if ($lexosProductsError): ?>
+            <div class="msg err"><?= htmlspecialchars($lexosProductsError) ?></div>
         <?php endif; ?>
-        <div id="lexos-products-sync-status" style="display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;font-size:.88rem"></div>
-        <form method="get" class="lexos-products-filters" id="lexos-products-form">
+
+        <form method="get" class="lexos-products-filters">
             <input type="hidden" name="page" value="<?= htmlspecialchars($dashboardPageId, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="lexos_tab" value="products">
             <input type="hidden" name="lexos_sku" value="<?= htmlspecialchars($sku) ?>">
@@ -415,12 +379,15 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             </div>
             <button type="submit">Filtrar</button>
         </form>
+
         <table>
             <thead>
             <tr><th>SKU</th><th>Nome</th><th>EAN</th><th>Estoque</th><th>Faturamento</th><th>Quantidade</th><th>Classificação</th></tr>
             </thead>
-            <tbody id="lexos-products-tbody">
-            <?php if (!$products): ?>
+            <tbody>
+            <?php if ($lexosProductsError): ?>
+                <tr><td colspan="7"><?= htmlspecialchars($lexosProductsError) ?></td></tr>
+            <?php elseif (!$products): ?>
                 <tr><td colspan="7">Nenhum produto encontrado.</td></tr>
             <?php endif; ?>
             <?php foreach ($products as $p): ?>
@@ -436,17 +403,13 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
             <?php endforeach; ?>
             </tbody>
         </table>
-        <?php if ($productsChartLabels): ?>
-            <div class="lexos-chart-wrap">
-                <canvas id="lexos-products-chart"></canvas>
-            </div>
-        <?php endif; ?>
+
         <?php
             $productsTotalPages = max(1, (int) ceil($productsTotal / max(1, $productsPerPage)));
             $prevPage = max(1, $productsPage - 1);
             $nextPage = min($productsTotalPages, $productsPage + 1);
         ?>
-        <div class="lexos-pagination" id="lexos-products-pagination">
+        <div class="lexos-pagination">
             <?php if ($productsPage > 1): ?>
                 <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=' . rawurlencode($dashboardPageId) . '&lexos_tab=products&lexos_start=' . urlencode($dStart) . '&lexos_end=' . urlencode($dEnd) . '&lexos_search=' . urlencode($search) . '&lexos_sku=' . urlencode($sku) . '&lexos_products_take=' . urlencode((string) $productsPerPage) . '&lexos_products_page=' . urlencode((string) $prevPage))) ?>">Anterior</a>
             <?php endif; ?>
@@ -534,7 +497,7 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
         var channelLabels = <?= $lexosJsonEmbed($channelsChartLabels) ?>;
         var channelValues = <?= $lexosJsonEmbed($channelsChartValues) ?>;
         var chCanvas = document.getElementById('lexos-channel-chart');
-        if (chCanvas && channelLabels.length) {
+        if (chCanvas && channelLabels.length && !document.getElementById('lexos-channels-pie-list')) {
             new Chart(chCanvas.getContext('2d'), {
                 type: 'doughnut',
                 data: {
@@ -563,17 +526,6 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
                         }
                     }
                 }
-            });
-        }
-
-        var prodLabels = <?= $lexosJsonEmbed($productsChartLabels) ?>;
-        var prodValues = <?= $lexosJsonEmbed($productsChartValues) ?>;
-        var pCanvas = document.getElementById('lexos-products-chart');
-        if (pCanvas && prodLabels.length) {
-            new Chart(pCanvas.getContext('2d'), {
-                type: 'bar',
-                data: { labels: prodLabels, datasets: [{ label: 'Faturamento', data: prodValues, backgroundColor: 'rgba(37,99,235,.55)' }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
             });
         }
 
@@ -686,155 +638,6 @@ $lexosTabUrl = static function (string $tabId) use ($baseUrl, $dashboardPageId, 
     }
 })();
 </script>
-<script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-hub-cache.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-<script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-products-loader.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-<script>
-(function () {
-    if (typeof window.WctLexosHubCache === 'undefined') return;
-    var activeTab = <?= json_encode($activeTab, JSON_UNESCAPED_UNICODE) ?>;
-    var syncUrl = <?= json_encode($lexosHubSyncUrl, JSON_UNESCAPED_SLASHES) ?>;
-    var productsApiUrl = <?= json_encode($lexosHubProductsApiUrl, JSON_UNESCAPED_SLASHES) ?>;
-    var connectUrl = <?= json_encode($lexosHubConnectUrl, JSON_UNESCAPED_SLASHES) ?>;
-    var hadServerProducts = <?= json_encode(count($products) > 0) ?>;
-    var productsHubPending = <?= json_encode($productsHubPending) ?>;
-    var statusEl = document.getElementById('lexos-products-sync-status');
-    var setupEl = document.getElementById('lexos-products-setup');
-
-    function setStatus(text, ok) {
-        if (!statusEl) return;
-        statusEl.style.display = 'block';
-        statusEl.style.background = ok ? '#f0fdf4' : '#fff7ed';
-        statusEl.style.border = '1px solid ' + (ok ? '#bbf7d0' : '#fed7aa');
-        statusEl.style.color = ok ? '#14532d' : '#9a3412';
-        statusEl.textContent = text;
-    }
-
-    function hideSetup() {
-        if (setupEl) setupEl.style.display = 'none';
-    }
-
-    function fmtCurrency(v) {
-        return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-
-    function fmtNumber(v) {
-        return Number(v || 0).toLocaleString('pt-BR');
-    }
-
-    function renderProducts(items) {
-        var tbody = document.getElementById('lexos-products-tbody');
-        if (!tbody) return;
-        tbody.innerHTML = '';
-        if (!items || !items.length) {
-            tbody.innerHTML = '<tr><td colspan="7">Nenhum produto encontrado.</td></tr>';
-            return;
-        }
-        items.forEach(function (p) {
-            var nome = String(p.Nome || '');
-            var tr = document.createElement('tr');
-            tr.innerHTML =
-                '<td>' + (p.Sku || '') + '</td>' +
-                '<td title="' + nome.replace(/"/g, '&quot;') + '">' + (nome.length > 50 ? nome.slice(0, 50) + '…' : nome) + '</td>' +
-                '<td>' + (p.Ean || '') + '</td>' +
-                '<td>' + fmtNumber(p.Estoque) + '</td>' +
-                '<td>' + fmtCurrency(p.TotalVendidoItem) + '</td>' +
-                '<td>' + fmtNumber(p.TotalUnidadesVendidas) + '</td>' +
-                '<td>' + (p.Classificacao || '-') + '</td>';
-            tbody.appendChild(tr);
-        });
-    }
-
-    function productQuery() {
-        return {
-            start: document.getElementById('lexos-product-start') ? document.getElementById('lexos-product-start').value : <?= json_encode($dStart) ?>,
-            end: document.getElementById('lexos-product-end') ? document.getElementById('lexos-product-end').value : <?= json_encode($dEnd) ?>,
-            search: document.getElementById('lexos-product-search') ? document.getElementById('lexos-product-search').value : <?= json_encode($search) ?>,
-            take: <?= (int) $productsPerPage ?>,
-            page: <?= (int) $productsPage ?>,
-        };
-    }
-
-    function loadProductsViaApi(cache) {
-        cache = cache || window.WctLexosHubCache.readCache();
-        var q = productQuery();
-        var payload = {
-            lexos_start: q.start,
-            lexos_end: q.end,
-            lexos_search: q.search,
-            lexos_products_take: q.take,
-            lexos_products_page: q.page,
-            lexos_hub_token: cache.access,
-            lexos_hub_refresh_token: cache.refresh,
-            lexos_hub_context: cache.context || {}
-        };
-        setStatus('Sincronizando sessão Hub no servidor…', true);
-        return fetch(productsApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify(payload)
-        }).then(function (res) {
-            return res.json().then(function (body) { return { res: res, body: body }; });
-        }).then(function (pack) {
-            if (!pack.res.ok || !pack.body.ok) {
-                throw new Error((pack.body && pack.body.message) || ('HTTP ' + pack.res.status));
-            }
-            renderProducts(pack.body.items || []);
-            hideSetup();
-            setStatus('Produtos carregados (servidor).', true);
-        });
-    }
-
-    function loadProductsViaExtension() {
-        if (typeof window.WctLexosProductsLoader === 'undefined') {
-            return Promise.reject(new Error('Loader indisponível'));
-        }
-        var q = productQuery();
-        setStatus('Carregando produtos via conector Lexos (como plugin Faturamento)…', true);
-        return window.WctLexosProductsLoader.loadProductsViaExtension(q).then(function (result) {
-            renderProducts(result.items || []);
-            hideSetup();
-            setStatus('Produtos carregados via conector. Sincronizando token para o servidor…', true);
-            return window.WctLexosHubCache.syncToServer(syncUrl, { silent: true });
-        });
-    }
-
-    function runProductsFallbackChain() {
-        return window.WctLexosHubCache.syncToServer(syncUrl, { silent: true }).then(function (syncResult) {
-            var cache = window.WctLexosHubCache.readCache();
-            if (cache.access || cache.refresh || (cache.context && Object.keys(cache.context).length)) {
-                return loadProductsViaApi(cache);
-            }
-            if (typeof window.WctLexosProductsLoader !== 'undefined') {
-                return window.WctLexosProductsLoader.pingExtension().then(function (hasExt) {
-                    if (hasExt) {
-                        return loadProductsViaExtension();
-                    }
-                    throw new Error(syncResult.message || 'Cache vazio. Configure em: ' + connectUrl);
-                });
-            }
-            throw new Error(syncResult.message || 'Cache vazio. Configure em: ' + connectUrl);
-        }).catch(function (err) {
-            if (typeof window.WctLexosProductsLoader !== 'undefined') {
-                return window.WctLexosProductsLoader.pingExtension().then(function (hasExt) {
-                    if (hasExt) {
-                        return loadProductsViaExtension();
-                    }
-                    throw err;
-                });
-            }
-            throw err;
-        }).catch(function (err) {
-            setStatus((err && err.message) ? err.message : 'Falha ao carregar produtos.', false);
-        });
-    }
-
-    if (activeTab === 'products') {
-        if (!hadServerProducts || productsHubPending) {
-            runProductsFallbackChain();
-        } else {
-            window.WctLexosHubCache.syncToServer(syncUrl, { silent: true });
-        }
-    }
-})();
-</script>
+<?php if ($activeTab === 'dashboard'): ?>
+<script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/lexos-dashboard-metabase.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<?php endif; ?>
