@@ -122,7 +122,7 @@ $canExport = is_array($summary) && $previewTotal > 0;
         <p class="msg <?= ml_ads_h($feedbackClass) ?>"><?= ml_ads_h($feedback) ?></p>
     <?php endif; ?>
 
-    <form method="post" action="<?= ml_ads_h(ml_ads_report_query()) ?>" class="protheus-filters" id="ml-ads-filter-form">
+    <form method="post" action="<?= ml_ads_h(ml_ads_report_query()) ?>" class="protheus-filters" id="ml-ads-filter-form" data-ml-loading-message="Consultando anuncios no Mercado Livre…">
         <input type="hidden" name="form_type" value="ml_ads_preview">
         <div class="filter-grid">
             <label>Limite (0 = todos)
@@ -169,8 +169,9 @@ $canExport = is_array($summary) && $previewTotal > 0;
             </p>
             <?php if ($canExport): ?>
                 <a
-                    class="btn-export-xlsx"
+                    class="btn-export-xlsx ml-trigger-loading"
                     href="<?= ml_ads_h(ml_ads_report_query(['export' => 'xlsx'])) ?>"
+                    data-ml-loading-message="Gerando Excel do relatorio de anuncios…"
                 >Exportar Excel</a>
             <?php endif; ?>
         </div>

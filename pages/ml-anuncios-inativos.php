@@ -32,7 +32,9 @@ $exportUrl = portal_wct_public_path($baseUrl, 'index.php?page=ml-anuncios-inativ
     <?php endif; ?>
 
     <p style="margin:12px 0;">
-        <a class="btn primary" href="<?= ml_inact_h($exportUrl) ?>">Exportar Excel (todos)</a>
+        <a class="btn primary ml-trigger-loading" href="<?= ml_inact_h($exportUrl) ?>" data-ml-loading-message="Exportando anuncios inativos…">
+            Exportar Excel (todos)
+        </a>
     </p>
 
     <div class="table-wrap">
@@ -91,7 +93,7 @@ $exportUrl = portal_wct_public_path($baseUrl, 'index.php?page=ml-anuncios-inativ
                 $href = portal_wct_public_path($baseUrl, 'index.php?page=ml-anuncios-inativos&p=' . $p);
                 $active = $p === (int) ($result['current_page'] ?? 1);
                 ?>
-                <a href="<?= ml_inact_h($href) ?>" class="btn<?= $active ? ' primary' : '' ?>"><?= $p ?></a>
+                <a href="<?= ml_inact_h($href) ?>" class="btn<?= $active ? ' primary' : '' ?><?= $active ? '' : ' ml-trigger-loading' ?>"<?= $active ? '' : ' data-ml-loading-message="Carregando pagina…"' ?>><?= $p ?></a>
             <?php endfor; ?>
         </nav>
     <?php endif; ?>

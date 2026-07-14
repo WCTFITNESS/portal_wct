@@ -308,6 +308,30 @@ class MlPromotionsService
     }
 
     /**
+     * Planilha de demonstração para upload (mesmas colunas esperadas pelo WCT Code / portal).
+     */
+    public function generateCampaignUploadDemo(): string
+    {
+        $rows = [
+            ['MLB', 'TYPE', 'CODE', 'ID', 'PREÇO FINAL'],
+            ['MLB1234567890', 'SMART', 'OFFER-EXEMPLO-001', 'PROMO-EXEMPLO-001', ''],
+            ['MLB0987654321', 'MARKETPLACE_CAMPAIGN', '', 'PROMO-EXEMPLO-002', ''],
+            ['MLB1122334455', 'PRICE_MATCHING', 'OFFER-EXEMPLO-003', 'PROMO-EXEMPLO-003', ''],
+            ['MLB5566778899', 'UNHEALTHY_STOCK', 'OFFER-EXEMPLO-004', 'PROMO-EXEMPLO-004', ''],
+            ['MLB9988776655', 'SELLER_CAMPAIGN', '', 'PROMO-EXEMPLO-005', '89,90'],
+        ];
+
+        $filePath = $this->exportDirectory() . DIRECTORY_SEPARATOR . 'campanha_upload_demo_' . bin2hex(random_bytes(4)) . '.xlsx';
+        require_once __DIR__ . '/../Lib/SimpleXLSXGen.php';
+        $xlsx = SimpleXLSXGen::fromArray($rows, 'Upload');
+        if (!$xlsx->saveAs($filePath)) {
+            throw new RuntimeException('Nao foi possivel gerar planilha de demonstracao.');
+        }
+
+        return $filePath;
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private function buildEnrollmentPayload(string $type, string $id, string $code, string $price): ?array

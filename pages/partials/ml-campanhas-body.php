@@ -74,6 +74,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
 }
 
 $exportUrl = portal_wct_public_path($baseUrl, 'index.php?page=' . urlencode($mlCampanhasPageId) . '&ml_campanhas_action=export');
+$uploadDemoUrl = portal_wct_public_path($baseUrl, 'index.php?page=' . urlencode($mlCampanhasPageId) . '&ml_campanhas_action=upload_demo');
 $subnavPages = [
     'ml-campanhas' => 'Gerenciar',
     'ml-campanhas-pendentes' => 'Pendentes',
@@ -90,7 +91,8 @@ $subnavPages = [
     <div class="protheus-legend" style="margin-bottom:12px;">
         <?php foreach ($subnavPages as $pid => $label): ?>
             <a href="<?= ml_camp_h(portal_wct_public_path($baseUrl, 'index.php?page=' . urlencode($pid))) ?>"
-               class="legend-item<?= $mlCampanhasPageId === $pid ? ' legend-status-active' : '' ?>"
+               class="legend-item ml-trigger-loading<?= $mlCampanhasPageId === $pid ? ' legend-status-active' : '' ?>"
+               data-ml-loading-message="Carregando campanhas…"
                style="text-decoration:none;">
                 <?= ml_camp_h($label) ?>
             </a>
@@ -121,16 +123,29 @@ $subnavPages = [
 
     <?php if ($mlCampanhasAllowUpload): ?>
         <div id="ml-camp-upload-panel" style="display:none;margin-bottom:16px;padding:16px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;">
-            <form method="post" enctype="multipart/form-data">
+            <form method="post" enctype="multipart/form-data" data-ml-loading-message="Inscrevendo anuncios nas campanhas…">
                 <input type="hidden" name="form_type" value="ml_campanhas_upload">
-                <p style="margin:0 0 8px;">Planilha editada (.xlsx) com colunas MLB, TYPE, CODE, ID.</p>
+                <p style="margin:0 0 8px;font-weight:600;">Formato de upload (igual WCT Code)</p>
+                <p style="margin:0 0 10px;font-size:.88rem;color:#475569;">
+                    Planilha <strong>.xlsx</strong> com cabeçalho na primeira linha:
+                    <code>MLB</code>, <code>TYPE</code>, <code>CODE</code>, <code>ID</code>
+                    e opcional <code>PREÇO FINAL</code> (obrigatório para <code>SELLER_CAMPAIGN</code>).
+                </p>
+                <ul style="margin:0 0 12px;padding-left:1.2rem;font-size:.85rem;color:#64748b;">
+                    <li><code>SMART</code> / <code>PRICE_MATCHING</code> / <code>UNHEALTHY_STOCK</code> — preencha <code>CODE</code> (offer_id)</li>
+                    <li><code>MARKETPLACE_CAMPAIGN</code> — <code>CODE</code> pode ficar vazio</li>
+                    <li><code>SELLER_CAMPAIGN</code> — informe <code>PREÇO FINAL</code> (ex.: 89,90)</li>
+                </ul>
+                <p style="margin:0 0 12px;">
+                    <a class="btn ml-trigger-loading" href="<?= ml_camp_h($uploadDemoUrl) ?>" data-ml-loading-message="Baixando planilha demo…">
+                        Baixar planilha demonstração
+                    </a>
+                </p>
                 <input type="file" name="campaign_file" accept=".xlsx,.xls" required>
                 <button type="submit" class="btn primary" style="margin-left:8px;">Participar</button>
             </form>
         </div>
     <?php endif; ?>
-
-    <div id="ml-camp-loading" style="display:none;margin:12px 0;color:#64748b;">Gerando relatorio…</div>
 
     <div class="table-wrap">
         <table class="data-table">
@@ -189,8 +204,32 @@ $subnavPages = [
     const btnDownload = document.getElementById('ml-camp-download');
     const btnToggle = document.getElementById('ml-camp-toggle-upload');
     const uploadPanel = document.getElementById('ml-camp-upload-panel');
-    const loading = document.getElementById('ml-camp-loading');
     const selectAll = document.getElementById('ml-camp-select-all');
+
+    function exportSelected() {
+        if (selected.length === 0) {
+            alert('Selecione ao menos 1 campanha.');
+            return;
+        }
+        if (typeof window.MlLoading === 'undefined') {
+            alert('Carregador indisponivel.');
+            return;
+        }
+        window.MlLoading.downloadBlob(exportUrl, {
+            message: 'Gerando relatorio de campanhas… pode levar alguns minutos.',
+            filename: 'campanha.xlsx',
+            fetchInit: {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                },
+                body: JSON.stringify({ selected: selected, item_status: itemStatus }),
+            },
+        }).catch(function (err) {
+            alert((err && err.message) ? err.message : 'Falha ao exportar campanhas.');
+        });
+    }
 
     function syncSelection(id, type, checked) {
         const idx = selected.findIndex(function (x) { return x.id === id; });
@@ -233,47 +272,7 @@ $subnavPages = [
     }
 
     if (btnDownload) {
-        btnDownload.addEventListener('click', function () {
-            if (selected.length === 0) {
-                alert('Selecione ao menos 1 campanha.');
-                return;
-            }
-            if (loading) {
-                loading.style.display = 'block';
-                loading.textContent = 'Gerando relatorio… pode levar alguns minutos.';
-            }
-
-            let iframe = document.getElementById('ml-camp-export-iframe');
-            if (!iframe) {
-                iframe = document.createElement('iframe');
-                iframe.id = 'ml-camp-export-iframe';
-                iframe.name = 'ml-camp-export-iframe';
-                iframe.style.display = 'none';
-                iframe.title = 'Download campanhas';
-                document.body.appendChild(iframe);
-            }
-
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = exportUrl;
-            form.target = 'ml-camp-export-iframe';
-            form.style.display = 'none';
-            form.acceptCharset = 'UTF-8';
-
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'export_payload';
-            input.value = JSON.stringify({ selected: selected, item_status: itemStatus });
-            form.appendChild(input);
-
-            document.body.appendChild(form);
-            form.submit();
-            form.remove();
-
-            window.setTimeout(function () {
-                if (loading) loading.style.display = 'none';
-            }, 5000);
-        });
+        btnDownload.addEventListener('click', exportSelected);
     }
 })();
 </script>

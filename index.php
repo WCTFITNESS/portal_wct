@@ -8,8 +8,36 @@ $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
+$mlModulePages = [
+    'ml-campanhas',
+    'ml-campanhas-pendentes',
+    'ml-campanhas-ativas',
+    'ml-anuncios-inativos',
+    'ml-ads-report',
+];
+$isMlModulePage = in_array($page, $mlModulePages, true);
 
 $mlCampanhasPagesEarly = ['ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas'];
+if (in_array($page, $mlCampanhasPagesEarly, true) && ($_GET['ml_campanhas_action'] ?? '') === 'upload_demo') {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    try {
+        $filePath = $app['mlPromotionsService']->generateCampaignUploadDemo();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="campanha_upload_demo.xlsx"');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+    } catch (Throwable $exception) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Erro ao gerar planilha demo: ' . $exception->getMessage();
+    }
+    exit;
+}
+
 if (in_array($page, $mlCampanhasPagesEarly, true) && ($_GET['ml_campanhas_action'] ?? '') === 'export') {
     while (ob_get_level() > 0) {
         ob_end_clean();
@@ -1418,6 +1446,46 @@ if (
             .menu-section-title { margin-top: 10px; }
             .content { padding: 14px; }
         }
+
+        body.ml-is-loading { overflow: hidden; }
+        .ml-loading-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 4000;
+            background: rgba(15, 23, 42, .42);
+            align-items: center;
+            justify-content: center;
+        }
+        .ml-loading-overlay.is-open { display: flex; }
+        .ml-loading-panel {
+            background: #fff;
+            border-radius: 12px;
+            padding: 22px 28px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, .18);
+            text-align: center;
+            min-width: 220px;
+        }
+        .ml-loading-spinner {
+            width: 42px;
+            height: 42px;
+            margin: 0 auto 12px;
+            border: 4px solid #e2e8f0;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: ml-spin .85s linear infinite;
+        }
+        @keyframes ml-spin {
+            to { transform: rotate(360deg); }
+        }
+        .ml-loading-text {
+            margin: 0;
+            font-size: .95rem;
+            color: #334155;
+            font-weight: 600;
+        }
+        .feedback.ok, .msg.ok { color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 10px 12px; border-radius: 8px; }
+        .feedback.err, .msg.err { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; padding: 10px 12px; border-radius: 8px; }
     </style>
 </head>
 <body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar'], true) ? 'page-protheus-monitor-full' : '' ?>">
@@ -1484,5 +1552,14 @@ if (
         </div>
     </main>
 </div>
+<?php if ($isMlModulePage): ?>
+<div id="ml-loading-overlay" class="ml-loading-overlay is-open" aria-live="polite" aria-busy="true">
+    <div class="ml-loading-panel">
+        <div class="ml-loading-spinner" role="status" aria-hidden="true"></div>
+        <p class="ml-loading-text" id="ml-loading-text">Carregando…</p>
+    </div>
+</div>
+<script src="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'assets/js/ml-loading-overlay.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<?php endif; ?>
 </body>
 </html>
