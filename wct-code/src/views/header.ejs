@@ -1,0 +1,167 @@
+<div class="header">
+    <div class="header-box">
+        <div class="navbar">
+            <a href="<%= basePath %>/dashboard" class="logo-link">
+                <img src="https://images.tcdn.com.br/files/1377803/themes/19/img/settings/Logo_Horizontal_Fundo_Preto-removebg-preview.png?62dcebcb64a219981e72ce4518fe1c0e" alt="WCT Fitness">
+            </a>
+
+            <ul class="navbar-menu">
+                <li><a href="<%= basePath %>/logout" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Sair</a></li>
+            </ul>
+        </div>
+    </div>
+    <div class="menu-submenu">
+        <ul class="menu-submenu-box">
+            <li><a href="<%= basePath %>/campanhas"><i class="fas fa-bullhorn"></i> Campanhas</a></li>
+            <li><a href="<%= basePath %>/campanhas-ativas"><i class="fas fa-chart-line"></i> Campanhas Ativas</a></li>
+            <li><a href="<%= basePath %>/campanhas-pendentes"><i class="fas fa-chart-line"></i> Campanhas Pendentes</a></li>
+            <li><a href="<%= basePath %>/inactive-ads"><i class="fas fa-eye-slash"></i> Anúncios Inativos</a></li>
+            <li><a href="<%= basePath %>/anuncios"><i class="fas fa-ad"></i> Anúncios</a></li>
+            <li><a href="<%= basePath %>/frete"><i class="fas fa-truck"></i> Frete</a></li>
+            <!--<li><a href="/images"><i class="fas fa-crop-alt"></i> Redimensionamento</a></li>-->
+        </ul>
+    </div>
+</div>
+
+<style>
+    .header {
+        background: linear-gradient(135deg, #1a2a6c 0%, #24378a 100%);
+        border-radius: 0 0 12px 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        overflow: hidden;
+        margin-bottom: 30px;
+    }
+    
+    .header-box {
+        padding: 0 20px;
+    }
+    
+    .navbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px 0;
+    }
+    
+    .navbar img {
+        height: 40px;
+        transition: transform 0.3s ease;
+    }
+    
+    .navbar img:hover {
+        transform: scale(1.05);
+    }
+    
+    .navbar-menu {
+        display: flex;
+        list-style: none;
+    }
+    
+    .navbar-menu li {
+        margin-left: 20px;
+    }
+    
+    .logout-btn {
+        color: white;
+        text-decoration: none;
+        font-weight: 500;
+        padding: 8px 15px;
+        border-radius: 6px;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.1);
+    }
+    
+    .logout-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: translateY(-2px);
+    }
+    
+    .logout-btn i {
+        margin-right: 8px;
+        font-size: 16px;
+    }
+    
+    .menu-submenu {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .menu-submenu-box {
+        display: flex;
+        list-style: none;
+        padding: 0 20px;
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+    
+    .menu-submenu-box::-webkit-scrollbar {
+        height: 6px;
+    }
+    
+    .menu-submenu-box::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 3px;
+    }
+    
+    .menu-submenu-box li {
+        flex-shrink: 0;
+    }
+    
+    .menu-submenu-box a {
+        color: white;
+        text-decoration: none;
+        display: block;
+        padding: 12px 20px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        position: relative;
+        white-space: nowrap;
+    }
+    
+    .menu-submenu-box a:hover {
+        background: rgba(255, 255, 255, 0.15);
+    }
+    
+    .menu-submenu-box a::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        width: 0;
+        height: 3px;
+        background: #fdbb2d;
+        transition: all 0.3s ease;
+        transform: translateX(-50%);
+        border-radius: 3px 3px 0 0;
+    }
+    
+    .menu-submenu-box a:hover::after {
+        width: 70%;
+    }
+    
+    /* Responsividade */
+    @media (max-width: 768px) {
+        .navbar {
+            flex-direction: column;
+            padding: 15px 0;
+        }
+        
+        .navbar-menu {
+            margin-top: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .navbar-menu li {
+            margin: 5px;
+        }
+        
+        .menu-submenu-box {
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+    }
+</style>

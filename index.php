@@ -8,6 +8,30 @@ $app = require __DIR__ . '/app.php';
 $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
+
+if (isset($_GET['wct_code_internal']) && $_GET['wct_code_internal'] === 'token') {
+    header('Content-Type: application/json; charset=utf-8');
+    $secret = getenv('WCT_CODE_INTERNAL_SECRET') ?: 'wct-internal';
+    $provided = (string) ($_SERVER['HTTP_X_WCT_INTERNAL'] ?? '');
+    if ($provided === '' || !hash_equals($secret, $provided)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'forbidden'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    try {
+        $apiConfig = $app['settingsRepository']->getApiConfig();
+        echo json_encode([
+            'access_token' => $app['tokenService']->getValidAccessToken(),
+            'seller_id' => (string) ($apiConfig['seller_id'] ?? ''),
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $mlModulePages = [
     'ml-campanhas',
     'ml-campanhas-pendentes',
@@ -16,6 +40,17 @@ $mlModulePages = [
     'ml-ads-report',
 ];
 $isMlModulePage = in_array($page, $mlModulePages, true);
+$wctCodeModulePages = [
+    'wct-code-dashboard',
+    'wct-code-campanhas',
+    'wct-code-campanhas-pendentes',
+    'wct-code-campanhas-ativas',
+    'wct-code-inactive-ads',
+    'wct-code-anuncios',
+    'wct-code-images',
+    'wct-code-frete',
+];
+$isWctCodeModulePage = in_array($page, $wctCodeModulePages, true);
 
 $mlCampanhasPagesEarly = ['ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas'];
 if (in_array($page, $mlCampanhasPagesEarly, true) && ($_GET['ml_campanhas_action'] ?? '') === 'upload_demo') {
@@ -297,6 +332,14 @@ $allowedPages = [
     'ml-campanhas-ativas',
     'ml-anuncios-inativos',
     'ml-redimensionar',
+    'wct-code-dashboard',
+    'wct-code-campanhas',
+    'wct-code-campanhas-pendentes',
+    'wct-code-campanhas-ativas',
+    'wct-code-inactive-ads',
+    'wct-code-anuncios',
+    'wct-code-images',
+    'wct-code-frete',
     'protheus-config',
     'protheus-monitor-romaneio',
     'protheus-monitor-pedidos',
@@ -657,6 +700,16 @@ $menuSections = [
             'href' => $trackingWctUrl,
         ],
         ['id' => 'tracking-reprocess', 'label' => 'Forçar integração Tracking'],
+    ],
+    'WCT CODE' => [
+        ['id' => 'wct-code-dashboard', 'label' => 'Dashboard (backup cPanel)'],
+        ['id' => 'wct-code-campanhas', 'label' => 'Campanhas'],
+        ['id' => 'wct-code-campanhas-pendentes', 'label' => 'Campanhas pendentes'],
+        ['id' => 'wct-code-campanhas-ativas', 'label' => 'Campanhas ativas'],
+        ['id' => 'wct-code-inactive-ads', 'label' => 'Anúncios inativos'],
+        ['id' => 'wct-code-anuncios', 'label' => 'Relatório de anúncios'],
+        ['id' => 'wct-code-images', 'label' => 'Redimensionar imagens'],
+        ['id' => 'wct-code-frete', 'label' => 'Relatório de frete'],
     ],
 ];
 
@@ -1486,9 +1539,14 @@ if (
         }
         .feedback.ok, .msg.ok { color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 10px 12px; border-radius: 8px; }
         .feedback.err, .msg.err { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; padding: 10px 12px; border-radius: 8px; }
+        body.page-wct-code-full .container { max-width: none; padding: 0; margin: 0; }
+        body.page-wct-code-full .content { padding: 0; }
+        body.page-wct-code-full .layout { min-height: 100vh; }
+        .wct-code-shell { height: calc(100vh - 0px); margin: 0; }
+        .wct-code-shell__frame { width: 100%; height: calc(100vh - 8px); min-height: calc(100vh - 8px); border: 0; display: block; background: #fff; }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar'], true) ? 'page-protheus-monitor-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">

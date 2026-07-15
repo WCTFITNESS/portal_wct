@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-Br">
+<head>
+    <%- include('_base_head') %>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redimencionamento de Imagens</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+<style>
+    .hidden {
+        display: none;
+    }
+</style>
+<body>
+    <%- include('header') %>
+
+    <main>
+        <div class="container">
+            <div class="header_container">
+                <div>
+                    <button id="btn_upload" class="btn_download">Subir imagens</button>
+                    <button id="btn_download" class="btn_download hidden" onclick="window.location.href=(window.WCT_CODE_BASE||'')+'/images_download_zip'">Baixar ZIP</button>
+                </div>
+                <div>
+                    <div class="drop-zone" id="dropZone">
+                        <p>Arraste e solte suas imagens ou pastas aqui, ou clique para selecionar.</p>
+                        <input type="file" id="fileInput" multiple accept="image/*" hidden>
+                    </div>
+                    <div class="status_participar">
+                        <div id="status"></div>
+                        <button id="upload_file" class="btn_download">Subir Imagens</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    <div id="trigger_box"></div>
+
+    <script src="./js/scripts.js"></script>
+    <script>
+        const btnUpload = document.getElementById('btn_upload');
+        const btnDownload = document.getElementById('btn_download');
+        
+        btnDownload.addEventListener('click', () => {
+            btnDownload.classList.add('hidden');
+        })
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+            const status = document.getElementById('status');
+
+            // Adicionar eventos de arrastar e soltar
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                handleFiles(files);
+            });
+
+            // Clique na área de upload para abrir o seletor de arquivos
+            dropZone.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                const files = e.target.files;
+                handleFiles(files);
+            });
+
+            // Lida com os arquivos recebidos
+            function handleFiles(files) {
+                if (files.length === 0) {
+                    status.textContent = 'Nenhum arquivo selecionado.';
+                    return;
+                }
+
+                const uploadBtn = document.getElementById('upload_file');
+                uploadBtn.style.display = 'flex';
+
+                let validFiles = [];
+                for (const file of files) {
+                    // Aqui você pode filtrar os arquivos se necessário (ex: apenas imagens)
+                    if (isImage(file)) {
+                        validFiles.push(file);
+                    }
+                }
+
+                status.textContent = `${validFiles.length} arquivos prontos para upload.`;
+
+                uploadBtn.addEventListener('click', function () {
+                    showTrigger('Enviando')
+                    uploadFiles(validFiles);
+                });
+            }
+
+            // Verifica se o arquivo é uma imagem
+            function isImage(file) {
+                const validTypes = [
+                    'image/jpeg', // .jpg, .jpeg
+                    'image/png',  // .png
+                    'image/gif',  // .gif
+                    'image/webp', // .webp
+                    'image/svg+xml' // .svg
+                ];
+                return validTypes.includes(file.type);
+            }
+
+        });
+
+        btnUpload.addEventListener('click', function () {
+            const dropZone = document.getElementsByClassName('drop-zone')[0];
+            // Alterna o estilo de exibição
+            if (dropZone.style.display === 'flex') {
+                dropZone.style.display = 'none'; // Esconde a drop-zone
+            } else {
+                dropZone.style.display = 'flex'; // Mostra a drop-zone
+            }
+        });
+
+        const uploadFiles = (files) => {
+            const formData = new FormData();
+            Array.from(files).forEach(file => {
+                // Verifique se a propriedade webkitRelativePath existe
+                const relativePath = file.webkitRelativePath || file.name;
+                console.log('Caminho relativo no frontend:', relativePath);
+
+                // Crie um campo no FormData para o arquivo, com o caminho relativo
+                formData.append('files', file, relativePath);  // Passando o nome com o caminho relativo
+            });
+
+            fetch(${window.WCT_CODE_BASE || ''}/upload/files', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Erro ao fazer o upload dos arquivos.');
+                }
+                return response.json();
+            })
+            .then(data => {
+                const status = document.getElementById('status');
+                status.style.display = 'none';
+                const uploadBtn = document.getElementById('upload_file');
+                uploadBtn.style.display = 'none';
+                const dropZone = document.getElementsByClassName('drop-zone')[0];
+                dropZone.style.display = 'none';
+                status.textContent = `Upload concluído com sucesso!`;
+            
+                // Limpar o fileInput para remover as imagens da memória
+                const fileInput = document.getElementById('fileInput');
+                fileInput.value = '';
+            
+                // Esconder o status de upload
+                status.textContent = '';
+                
+                // Mostra o botão de download
+                btnDownload.classList.remove('hidden');
+                
+                hideTrigger();
+            })
+            .catch(err => {
+                const status = document.getElementById('status');
+                status.textContent = `Erro: ${err.message}`;
+            });
+        };
+    </script>
+
+</body>
+</html>

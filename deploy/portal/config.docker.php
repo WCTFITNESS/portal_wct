@@ -29,11 +29,14 @@ $trackingUrl = $trackingRaw !== false && $trackingRaw !== ''
     ? (string) $trackingRaw
     : 'http://tracking.wct.local:8088/admin/dashboard';
 
+$wctCodeUrl = $baseUrl === '/' ? '/wct-code-app' : rtrim($baseUrl, '/') . '/wct-code-app';
+
 return [
     'db' => $db,
     'app' => [
         'timezone' => getenv('PORTAL_TZ') ?: 'America/Sao_Paulo',
         'base_url' => $baseUrl,
         'tracking_wct_url' => $trackingUrl,
+        'wct_code_url' => $wctCodeUrl,
     ],
 ];
