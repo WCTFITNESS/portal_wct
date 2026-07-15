@@ -21,6 +21,6 @@ php /var/www/html/portal_wct/deploy/render/bake-db-runtime.php || echo "[docker-
 # Nunca impedir Apache: falha aqui antes gerava 502 em todo o site (set -e + exit!=0 / excecao PHP).
 php /var/www/html/portal_wct/deploy/render/init-schema.php || echo "[docker-entrypoint] init-schema encerrou com erro (Apache sobe igual)." >&2
 
-/usr/local/bin/start-wct-code.sh || echo "[docker-entrypoint] WCT Code Node nao iniciou (ver /var/log/wct-code.log)." >&2
+/usr/local/bin/start-wct-code.sh &
 
 exec apache2-foreground
