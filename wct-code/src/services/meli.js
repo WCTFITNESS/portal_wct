@@ -2,6 +2,7 @@ const axios = require('axios');
 const { apiCall, dataUsaFormat } = require('../utils/utils')
 
 const BASE_URL_ML = 'https://api.mercadolibre.com';
+const PROMOTION_ITEMS_PAGE_LIMIT = 50;
 const resolveSellerId = () => String(process.env.MELI_SELLER_ID || global.seller_id || '141958250');
 /**
  * Função assíncrona para obter o SKU de um item a partir de sua resposta detalhada.
@@ -350,8 +351,8 @@ const getAllCampaignName = async () => {
 
 const fetchAllPromotions = async (searchAfter = null, data) => {    
     let response = [];
-    let url = `${BASE_URL_ML}/seller-promotions/promotions/${data.id}/items?promotion_type=${data.type}&app_version=v2&limit=100&status=${data.status}`;
-    if (searchAfter) url += `&searchAfter=${searchAfter}`;
+    let url = `${BASE_URL_ML}/seller-promotions/promotions/${encodeURIComponent(data.id)}/items?promotion_type=${encodeURIComponent(data.type)}&app_version=v2&limit=${PROMOTION_ITEMS_PAGE_LIMIT}&status=${encodeURIComponent(data.status)}`;
+    if (searchAfter) url += `&search_after=${encodeURIComponent(searchAfter)}`;
 
     const { results, paging } = await apiCall(url);
     
@@ -370,14 +371,21 @@ const fetchAllPromotions = async (searchAfter = null, data) => {
 const fetchPromotions = async (searchAfter = null, promotion_code, promotion_type, limit, status, title, status_campaing, start_date, finish_date) => {
     let r = []
     try {
-        let url = `${BASE_URL_ML}/seller-promotions/promotions/${encodeURIComponent(promotion_code)}/items?promotion_type=${encodeURIComponent(promotion_type)}&app_version=v2&limit=${limit}&status=${encodeURIComponent(status)}`;
+        const safeLimit = Math.min(
+            Math.max(Number(limit) || PROMOTION_ITEMS_PAGE_LIMIT, 1),
+            PROMOTION_ITEMS_PAGE_LIMIT
+        );
+        let url = `${BASE_URL_ML}/seller-promotions/promotions/${encodeURIComponent(promotion_code)}/items?promotion_type=${encodeURIComponent(promotion_type)}&app_version=v2&limit=${safeLimit}&status=${encodeURIComponent(status)}`;
 
         if (searchAfter) {
             url += `&search_after=${encodeURIComponent(searchAfter)}`;
         }
 
         const data = await apiCall(url);
-        if (!data || !Array.isArray(data.results)) {
+        if (!data) {
+            throw new Error(`API ML sem resposta (${status}, limit ${safeLimit})`);
+        }
+        if (!Array.isArray(data.results)) {
             return [];
         }
 
@@ -469,7 +477,6 @@ const PROMOTION_ITEM_STATUSES = ['candidate', 'pending', 'started'];
 const fetchPromotionsWithFallback = async (
     promotion_code,
     promotion_type,
-    limit,
     title,
     status_campaing,
     start_date,
@@ -484,11 +491,14 @@ const fetchPromotionsWithFallback = async (
 
     for (const status of statuses) {
         tried.push(status);
+        const countData = await campaignItens(promotion_code, promotion_type, status);
+        const expectedTotal = Number(countData?.paging?.total ?? 0);
+
         const promotions = await fetchPromotions(
             null,
             promotion_code,
             promotion_type,
-            limit,
+            PROMOTION_ITEMS_PAGE_LIMIT,
             status,
             title,
             status_campaing,
@@ -498,6 +508,12 @@ const fetchPromotionsWithFallback = async (
 
         if (Array.isArray(promotions) && promotions.length > 0) {
             return { promotions, statusUsed: status, tried };
+        }
+
+        if (expectedTotal > 0) {
+            throw new Error(
+                `API ML retornou 0 itens com status ${status}, mas a contagem indica ${expectedTotal}`
+            );
         }
     }
 

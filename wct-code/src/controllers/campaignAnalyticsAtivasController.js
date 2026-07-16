@@ -77,7 +77,6 @@ const processCampaignAnalyticsAtivas = async (req, res) => {
                 const { promotions, tried } = await fetchPromotionsWithFallback(
                     selected.id,
                     selected.type,
-                    100,
                     name,
                     status,
                     start_date,
