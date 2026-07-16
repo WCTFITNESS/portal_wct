@@ -230,7 +230,7 @@ const getModeration = async (mlb) => {
 const getCampaign = async () => {
     const url = `${BASE_URL_ML}/seller-promotions/users/${resolveSellerId()}?app_version=v2`;
     const data = await apiCall(url);
-    return data.results;
+    return Array.isArray(data?.results) ? data.results : [];
 }
 
 const getProductInfo = async (mlb) => {
@@ -372,9 +372,16 @@ const fetchPromotions = async (searchAfter = null, promotion_code, promotion_typ
     try {
         let url = `${BASE_URL_ML}/seller-promotions/promotions/${promotion_code}/items?promotion_type=${promotion_type}&app_version=v2&limit=${limit}&status=${status}`;
 
-        if (searchAfter) url += `&searchAfter=${searchAfter}`;
+        if (searchAfter) {
+            url += `&search_after=${encodeURIComponent(searchAfter)}`;
+        }
 
-            const { results, paging } = await apiCall(url);
+        const data = await apiCall(url);
+        if (!data || !Array.isArray(data.results)) {
+            return [];
+        }
+
+        const { results, paging } = data;
         
         // const { results = [], paging = {} } = response.data || {};
 
@@ -429,13 +436,15 @@ const fetchPromotions = async (searchAfter = null, promotion_code, promotion_typ
             return []
         }
 
-        if (paging && paging.searchAfter) {
-            r = r.concat(await fetchPromotions(paging.searchAfter, promotion_code, promotion_type, limit, status, title, status_campaing, start_date, finish_date));
+        const nextSearchAfter = paging?.search_after || paging?.searchAfter;
+        if (nextSearchAfter) {
+            r = r.concat(await fetchPromotions(nextSearchAfter, promotion_code, promotion_type, limit, status, title, status_campaing, start_date, finish_date));
         }
 
         return r;
     } catch (error) {
         console.error('Erro ao buscar promoções:', error);
+        return [];
     }
 
 }

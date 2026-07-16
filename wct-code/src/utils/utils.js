@@ -21,17 +21,26 @@ function formatDateTime(inputDate) {
 
 // Função para realizar chamadas à API com tratamento de erro
 const apiCall = async (url) => {
+    const token = global.access_token || process.env.MELI_ACCESS_TOKEN || '';
+    if (!token) {
+        console.warn(`Token ML ausente ao acessar ${url}`);
+        return null;
+    }
+
     try {
         const response = await axios.get(url, {
             headers: {
-                Authorization: `Bearer ${access_token}`,
+                Authorization: `Bearer ${token}`,
             },
         });
 
         return response.data;
     } catch (error) {
-        console.warn(`Erro ao acessar ${url}. Ignorando e seguindo...`, error.message);
-        return null; // Ignora e continua o fluxo
+        const detail = error.response?.data
+            ? JSON.stringify(error.response.data)
+            : error.message;
+        console.warn(`Erro ao acessar ${url}. Ignorando e seguindo...`, detail);
+        return null;
     }
 };
 

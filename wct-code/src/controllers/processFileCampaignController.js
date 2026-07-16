@@ -42,7 +42,7 @@ async function excelRead(filePath) {
 
                 // Enviar para o ML
                 const response = await axios.post(`https://api.mercadolibre.com/seller-promotions/items/${mlb}?app_version=v2`, dataType, {
-                    headers: { Authorization: `Bearer ${access_token}` },
+                    headers: { Authorization: `Bearer ${global.access_token || process.env.MELI_ACCESS_TOKEN || ''}` },
                 });
 
                 console.log(response)

@@ -81,7 +81,9 @@ rows.forEach(row => {
             const id = row.getAttribute('data-id');
             const type = row.getAttribute('data-type');
             if (checkbox.checked) {
-                selectedItems.push({ id, type });
+                if (!selectedItems.some((item) => item.id === id && item.type === type)) {
+                    selectedItems.push({ id, type });
+                }
             } else {
                 selectedItems = selectedItems.filter(item => item.id !== id);
             }
@@ -122,7 +124,19 @@ async function downloadCampaigns(selectedItems, dataId) {
         console.log(response);
 
         if (!response.ok) {
-            throw new Error(`Erro HTTP: ${response.status}`);
+            let message = `Erro HTTP: ${response.status}`;
+            try {
+                const errJson = await response.json();
+                if (errJson?.error) {
+                    message = errJson.error;
+                    if (Array.isArray(errJson.details) && errJson.details.length > 0) {
+                        message += '\n' + errJson.details.join('\n');
+                    }
+                }
+            } catch (_e) {
+                // mantem mensagem HTTP
+            }
+            throw new Error(message);
         }
 
         const blob = await response.blob(); // Recebe o conteúdo do arquivo como Blob
