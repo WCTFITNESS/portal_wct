@@ -370,7 +370,7 @@ const fetchAllPromotions = async (searchAfter = null, data) => {
 const fetchPromotions = async (searchAfter = null, promotion_code, promotion_type, limit, status, title, status_campaing, start_date, finish_date) => {
     let r = []
     try {
-        let url = `${BASE_URL_ML}/seller-promotions/promotions/${promotion_code}/items?promotion_type=${promotion_type}&app_version=v2&limit=${limit}&status=${status}`;
+        let url = `${BASE_URL_ML}/seller-promotions/promotions/${encodeURIComponent(promotion_code)}/items?promotion_type=${encodeURIComponent(promotion_type)}&app_version=v2&limit=${limit}&status=${encodeURIComponent(status)}`;
 
         if (searchAfter) {
             url += `&search_after=${encodeURIComponent(searchAfter)}`;
@@ -458,11 +458,51 @@ const campaignDetails = async (id, type) => {
 }
 
 const campaignItens = async (id, type, status) => {
-    let url = `${BASE_URL_ML}/seller-promotions/promotions/${id}/items?promotion_type=${type}&app_version=v2&limit=1&status=${status}`
+    let url = `${BASE_URL_ML}/seller-promotions/promotions/${encodeURIComponent(id)}/items?promotion_type=${encodeURIComponent(type)}&app_version=v2&limit=1&status=${encodeURIComponent(status)}`
     const response = await apiCall(url);
 
     return response;
 }
+
+const PROMOTION_ITEM_STATUSES = ['candidate', 'pending', 'started'];
+
+const fetchPromotionsWithFallback = async (
+    promotion_code,
+    promotion_type,
+    limit,
+    title,
+    status_campaing,
+    start_date,
+    finish_date,
+    preferredStatus = 'candidate'
+) => {
+    const statuses = [
+        preferredStatus,
+        ...PROMOTION_ITEM_STATUSES.filter((status) => status !== preferredStatus),
+    ];
+    const tried = [];
+
+    for (const status of statuses) {
+        tried.push(status);
+        const promotions = await fetchPromotions(
+            null,
+            promotion_code,
+            promotion_type,
+            limit,
+            status,
+            title,
+            status_campaing,
+            start_date,
+            finish_date
+        );
+
+        if (Array.isArray(promotions) && promotions.length > 0) {
+            return { promotions, statusUsed: status, tried };
+        }
+    }
+
+    return { promotions: [], statusUsed: preferredStatus, tried };
+};
 
 const pendingItems = async (page = 1, limit) => {
     const offset = (page - 1) * limit; // Calcular o deslocamento baseado na página
@@ -499,6 +539,7 @@ module.exports = {
     getAllProductsWithPeriod,
     getAllCampaignName,
     fetchPromotions,
+    fetchPromotionsWithFallback,
     campaignDetails,
     campaignItens,
     fetchItemsWithoutAutoPagination,

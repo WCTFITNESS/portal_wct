@@ -198,6 +198,12 @@
         <div id="trigger_box"></div>
 
         <script src="./js/scripts.js"></script>
+        <script>
+            window.WCT_CAMPAIGN_EXPORT = {
+                endpoint: '<%= exportEndpoint || "/api_meli/campaigns-analytics-ativas" %>',
+                itemStatus: '<%= itemStatus || "started" %>',
+            };
+        </script>
         <script src="./js/campanhas.js"></script>
 </body>
 

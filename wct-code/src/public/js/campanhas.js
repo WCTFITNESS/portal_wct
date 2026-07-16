@@ -106,19 +106,22 @@ btnDownload.addEventListener('click', async function () {
 
 async function downloadCampaigns(selectedItems, dataId) {
     showTrigger('Baixando'); // Exibe o loading
-    /*let data_id = dataId == null 
-  ? (!selectedItems.length ? '' : selectedItems[0].id)
-  : dataId;*/
+    const exportConfig = (typeof window !== 'undefined' && window.WCT_CAMPAIGN_EXPORT) || {};
+    const exportEndpoint = exportConfig.endpoint || '/api_meli/campaigns-analytics';
+    const itemStatus = exportConfig.itemStatus || 'candidate';
 
    let data_id = dataId == null ? '' : dataId;
 
     try {
-        const response = await fetch(`${wctBase}/api_meli/campaigns-analytics${data_id}?token=123456`, {
+        const response = await fetch(`${wctBase}${exportEndpoint}${data_id}?token=123456`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify(selectedItems),
+            body: JSON.stringify({
+                items: selectedItems,
+                itemStatus,
+            }),
         });
 
         console.log(response);
@@ -142,25 +145,18 @@ async function downloadCampaigns(selectedItems, dataId) {
         const blob = await response.blob(); // Recebe o conteúdo do arquivo como Blob
         const url = window.URL.createObjectURL(blob); // Cria uma URL para o Blob
 
-        // Abre uma nova janela para o download
-        const downloadWindow = window.open(); // Abre uma nova janela (pode ser uma aba ou popup)
-
-        if (downloadWindow) {
-            downloadWindow.location.href = url; // Define a URL do blob na nova janela
-        } else {
-            // Se o navegador bloquear o `window.open`, usamos o <a> como fallback
-            const a = document.createElement('a'); // Cria um elemento <a>
-            a.href = url;
-            a.download = `campanha.xlsx`; // Define o nome do arquivo
-            document.body.appendChild(a);
-            a.click(); // Simula o clique para baixar
-            document.body.removeChild(a); // Remove o <a> após o clique
-        }
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'campanha.xlsx';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
 
         window.URL.revokeObjectURL(url); // Libera o objeto URL após o uso
     } catch (error) {
         console.error("Erro na requisição:", error);
-        alert("Houve um problema ao baixar o relatório.");
+        alert(error?.message || 'Houve um problema ao baixar o relatório.');
     } finally {
         hideTrigger(); // Oculta o loading em qualquer caso (sucesso ou erro)
     }

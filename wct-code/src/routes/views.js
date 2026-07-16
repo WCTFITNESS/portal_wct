@@ -46,7 +46,11 @@ router.get("/campanhas", isAuthenticated, async (req, res) => {
         campaign.data.type !== 'SELLER_CAMPAIGN' && campaign.data.type !== 'DEAL' && campaign.total !== 0
     );
     
-    res.render('campanhas', { summary: filteredResults })
+    res.render('campanhas', {
+        summary: filteredResults,
+        itemStatus: 'candidate',
+        exportEndpoint: '/api_meli/campaigns-analytics',
+    })
 });
 
 router.get("/campanhas-pendentes", isAuthenticated, async (req, res) => {
@@ -56,7 +60,11 @@ router.get("/campanhas-pendentes", isAuthenticated, async (req, res) => {
         campaign.data.type !== 'SELLER_CAMPAIGN' && campaign.data.type !== 'DEAL' && campaign.total !== 0
     );
     
-    res.render('campanhas', { summary: filteredResults })
+    res.render('campanhas', {
+        summary: filteredResults,
+        itemStatus: 'pending',
+        exportEndpoint: '/api_meli/campaigns-analytics',
+    })
 });
 
 router.get("/campanhas-ativas", isAuthenticated, async (req, res) => {
@@ -66,7 +74,11 @@ router.get("/campanhas-ativas", isAuthenticated, async (req, res) => {
         campaign.data.type !== 'SELLER_CAMPAIGN' && campaign.data.type !== 'DEAL' && campaign.total !== 0
     );
     
-    res.render('campanhas_ativa', { summary: filteredResults })
+    res.render('campanhas_ativa', {
+        summary: filteredResults,
+        itemStatus: 'started',
+        exportEndpoint: '/api_meli/campaigns-analytics-ativas',
+    })
 });
 
 

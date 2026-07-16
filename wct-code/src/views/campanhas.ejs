@@ -250,6 +250,12 @@
         </div>
 
         <script src="./js/scripts.js"></script>
+        <script>
+            window.WCT_CAMPAIGN_EXPORT = {
+                endpoint: '<%= exportEndpoint || "/api_meli/campaigns-analytics" %>',
+                itemStatus: '<%= itemStatus || "candidate" %>',
+            };
+        </script>
         <script src="./js/campanhas.js"></script>
 </body>
 

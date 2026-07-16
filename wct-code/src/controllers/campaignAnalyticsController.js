@@ -1,4 +1,4 @@
-const { getCampaign, fetchPromotions } = require('../services/meli');
+const { getCampaign, fetchPromotionsWithFallback } = require('../services/meli');
 const { generateExcelBuffer } = require('../utils/utils');
 const { createResponse } = require('../services/campaignResponseService');
 
@@ -9,14 +9,14 @@ const header = ['SKU', 'MLB', 'SKU_2', 'VERDADEIRO', 'Preço de', 'Estoque', 'Ti
     'Status do Item', 'Status Campanha', 'Quantidade Vendida', 'Anúncio Status', 'CODE', 'ID', 'TYPE'];
 
 const normalizeSelection = (requestData) => {
-    if (!Array.isArray(requestData)) {
-        return [];
-    }
+    const source = Array.isArray(requestData)
+        ? requestData
+        : (Array.isArray(requestData?.items) ? requestData.items : []);
 
     const seen = new Set();
     const normalized = [];
 
-    for (const item of requestData) {
+    for (const item of source) {
         if (!item || typeof item !== 'object') {
             continue;
         }
@@ -44,7 +44,9 @@ const normalizeSelection = (requestData) => {
 
 const processCampaignAnalytics = async (req, res) => {
     try {
-        const mappedData = normalizeSelection(req.body);
+        const payload = req.body;
+        const mappedData = normalizeSelection(payload);
+        const itemStatus = String(payload?.itemStatus || 'candidate').trim() || 'candidate';
 
         if (mappedData.length === 0) {
             return res.status(400).json({ error: 'Selecione ao menos uma campanha valida.' });
@@ -72,22 +74,21 @@ const processCampaignAnalytics = async (req, res) => {
             const finish_date = campaign?.finish_date || campaign?.end_date || '';
 
             try {
-                const promotions = await fetchPromotions(
-                    null,
+                const { promotions, tried } = await fetchPromotionsWithFallback(
                     selected.id,
                     selected.type,
                     100,
-                    'candidate',
                     name,
                     status,
                     start_date,
-                    finish_date
+                    finish_date,
+                    itemStatus
                 );
 
                 if (Array.isArray(promotions) && promotions.length > 0) {
                     campaignResults.push(...promotions.filter((item) => item != null));
                 } else {
-                    fetchErrors.push(`${selected.id}: nenhum item candidate`);
+                    fetchErrors.push(`${selected.id}: nenhum item (${tried.join(', ')})`);
                 }
             } catch (error) {
                 fetchErrors.push(`${selected.id}: ${error.message}`);
@@ -102,6 +103,14 @@ const processCampaignAnalytics = async (req, res) => {
         }
 
         const response = await createResponse(campaignResults);
+
+        if (!Array.isArray(response) || response.length === 0) {
+            return res.status(400).json({
+                error: 'Relatorio vazio. Nao foi possivel montar as linhas dos anuncios.',
+                details: fetchErrors.slice(0, 5),
+            });
+        }
+
         const excelBuffer = await generateExcelBuffer(response, header);
 
         res.setHeader('Content-Disposition', 'attachment; filename=campanha.xlsx');
