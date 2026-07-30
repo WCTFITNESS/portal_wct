@@ -129,3 +129,33 @@ CREATE TABLE IF NOT EXISTS protheus_sql_saved_queries (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS portal_tasks (
+    id BIGSERIAL PRIMARY KEY,
+    subject VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    sector VARCHAR(80) NOT NULL,
+    requester_name VARCHAR(120) NOT NULL,
+    requester_email VARCHAR(200) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'aberta',
+    priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_portal_tasks_status ON portal_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_portal_tasks_updated ON portal_tasks (updated_at);
+CREATE INDEX IF NOT EXISTS idx_portal_tasks_sector ON portal_tasks (sector);
+
+CREATE TABLE IF NOT EXISTS portal_task_events (
+    id BIGSERIAL PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    event_type VARCHAR(40) NOT NULL,
+    message TEXT NOT NULL,
+    actor_name VARCHAR(120) DEFAULT NULL,
+    email_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    email_error TEXT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_portal_task_events_task ON portal_task_events (task_id);

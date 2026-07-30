@@ -75,6 +75,16 @@
    Cron sugerido no Render (ou agendador externo), a cada 1 hora:
    php /var/www/html/cron/refresh_lexos_hub.php
 
+   Tasks (e-mail ao solicitante — recomendado no Render):
+   PORTAL_MAIL_FROM=noreply@seudominio.com
+   PORTAL_MAIL_FROM_NAME=Portal WCT — Tasks
+   PORTAL_SMTP_HOST=smtp.seuprovedor.com
+   PORTAL_SMTP_PORT=587
+   PORTAL_SMTP_USER=usuario
+   PORTAL_SMTP_PASS=senha
+   PORTAL_SMTP_SECURE=tls
+   (sem SMTP o app tenta mail() do PHP, que no Render costuma falhar)
+
 8) Opcional: use o arquivo render.yaml na raiz como Blueprint (ajuste nome/regiao).
 
 ================================================================================

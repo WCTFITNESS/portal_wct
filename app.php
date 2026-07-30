@@ -12,6 +12,7 @@ use App\Repositories\ProtheusSettingsRepository;
 use App\Repositories\ProtheusSqlQueryHistoryRepository;
 use App\Repositories\ProtheusSqlSavedQueriesRepository;
 use App\Repositories\RepasseMpJobRepository;
+use App\Repositories\TaskRepository;
 use App\Core\TrackingDatabase;
 use App\Repositories\SettingsRepository;
 use App\Repositories\TokenRepository;
@@ -48,6 +49,8 @@ use App\Services\ProtheusZa4PedidosErroMonitorService;
 use App\Services\ProtheusAdHocQueryService;
 use App\Services\RepasseService;
 use App\Services\RepasseMpService;
+use App\Services\MailService;
+use App\Services\TaskService;
 use App\Services\TokenService;
 
 require __DIR__ . '/bootstrap.php';
@@ -121,6 +124,9 @@ $protheusNfeMonitorService = new ProtheusNfeMonitorService($protheusConnectionSe
 $protheusEdiConsultaService = new ProtheusEdiConsultaService($protheusConnectionService);
 $protheusZa4PedidosErroMonitorService = new ProtheusZa4PedidosErroMonitorService($protheusConnectionService);
 $protheusAdHocQueryService = new ProtheusAdHocQueryService($protheusConnectionService);
+$mailService = new MailService($config['mail'] ?? null);
+$taskRepository = new TaskRepository($pdo);
+$taskService = new TaskService($taskRepository, $mailService, (string) ($config['app']['base_url'] ?? '/'));
 
 return [
     'config' => $config,
@@ -166,6 +172,9 @@ return [
     'protheusEdiConsultaService' => $protheusEdiConsultaService,
     'protheusZa4PedidosErroMonitorService' => $protheusZa4PedidosErroMonitorService,
     'protheusAdHocQueryService' => $protheusAdHocQueryService,
+    'mailService' => $mailService,
+    'taskRepository' => $taskRepository,
+    'taskService' => $taskService,
 ];
 
 $lexosHubSessionService->maintainHubSessionSilently();

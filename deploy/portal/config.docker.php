@@ -39,4 +39,13 @@ return [
         'tracking_wct_url' => $trackingUrl,
         'wct_code_url' => $wctCodeUrl,
     ],
+    'mail' => [
+        'from' => getenv('PORTAL_MAIL_FROM') ?: 'noreply@portal-wct.local',
+        'from_name' => getenv('PORTAL_MAIL_FROM_NAME') ?: 'Portal WCT — Tasks',
+        'smtp_host' => getenv('PORTAL_SMTP_HOST') ?: '',
+        'smtp_port' => (int) (getenv('PORTAL_SMTP_PORT') ?: 587),
+        'smtp_user' => getenv('PORTAL_SMTP_USER') ?: '',
+        'smtp_pass' => getenv('PORTAL_SMTP_PASS') !== false ? (string) getenv('PORTAL_SMTP_PASS') : '',
+        'smtp_secure' => getenv('PORTAL_SMTP_SECURE') ?: 'tls',
+    ],
 ];

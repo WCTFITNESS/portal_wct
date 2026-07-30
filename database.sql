@@ -139,3 +139,31 @@ CREATE TABLE IF NOT EXISTS protheus_sql_saved_queries (
     updated_at DATETIME NOT NULL,
     KEY idx_sql_saved_updated (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS portal_tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    subject VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    sector VARCHAR(80) NOT NULL,
+    requester_name VARCHAR(120) NOT NULL,
+    requester_email VARCHAR(200) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'aberta',
+    priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    KEY idx_portal_tasks_status (status),
+    KEY idx_portal_tasks_updated (updated_at),
+    KEY idx_portal_tasks_sector (sector)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS portal_task_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_id INT NOT NULL,
+    event_type VARCHAR(40) NOT NULL,
+    message TEXT NOT NULL,
+    actor_name VARCHAR(120) DEFAULT NULL,
+    email_sent TINYINT(1) NOT NULL DEFAULT 0,
+    email_error TEXT DEFAULT NULL,
+    created_at DATETIME NOT NULL,
+    KEY idx_portal_task_events_task (task_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
