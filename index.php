@@ -348,6 +348,7 @@ $allowedPages = [
     'protheus-monitor-pedidos-erro',
     'protheus-consulta-sql',
     'tasks',
+    'rastreamento-ssw',
 ];
 
 if (!in_array($page, $allowedPages, true)) {
@@ -658,6 +659,7 @@ if ($page === 'repasse-mp' && isset($_GET['repasse_action']) && $_GET['repasse_a
 $menuSections = [
     'Organização' => [
         ['id' => 'tasks', 'label' => 'Tasks'],
+        ['id' => 'rastreamento-ssw', 'label' => 'Rastreamento SSW'],
     ],
     'Mercado Livre' => [
         ['id' => 'ml-dashboard', 'label' => 'Dashboard'],

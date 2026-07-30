@@ -48,4 +48,8 @@ return [
         'smtp_pass' => getenv('PORTAL_SMTP_PASS') !== false ? (string) getenv('PORTAL_SMTP_PASS') : '',
         'smtp_secure' => getenv('PORTAL_SMTP_SECURE') ?: 'tls',
     ],
+    'ssw' => [
+        'cnpj' => getenv('PORTAL_SSW_CNPJ') ?: '17751890000176',
+        'senha' => getenv('PORTAL_SSW_SENHA') !== false ? (string) getenv('PORTAL_SSW_SENHA') : '',
+    ],
 ];

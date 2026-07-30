@@ -85,6 +85,11 @@
    PORTAL_SMTP_SECURE=tls
    (sem SMTP o app tenta mail() do PHP, que no Render costuma falhar)
 
+   Rastreamento SSW (remetente WCT):
+   PORTAL_SSW_CNPJ=17751890000176
+   PORTAL_SSW_SENHA=<senha fornecida pela transportadora no SSW>
+   (a senha libera situação completa / comprovantes; pode ser digitada na tela)
+
 8) Opcional: use o arquivo render.yaml na raiz como Blueprint (ajuste nome/regiao).
 
 ================================================================================

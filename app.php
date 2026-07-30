@@ -51,6 +51,7 @@ use App\Services\RepasseService;
 use App\Services\RepasseMpService;
 use App\Services\MailService;
 use App\Services\TaskService;
+use App\Services\SswTrackingService;
 use App\Services\TokenService;
 
 require __DIR__ . '/bootstrap.php';
@@ -127,6 +128,7 @@ $protheusAdHocQueryService = new ProtheusAdHocQueryService($protheusConnectionSe
 $mailService = new MailService($config['mail'] ?? null);
 $taskRepository = new TaskRepository($pdo);
 $taskService = new TaskService($taskRepository, $mailService, (string) ($config['app']['base_url'] ?? '/'));
+$sswTrackingService = new SswTrackingService($config['ssw'] ?? null);
 
 return [
     'config' => $config,
@@ -175,6 +177,7 @@ return [
     'mailService' => $mailService,
     'taskRepository' => $taskRepository,
     'taskService' => $taskService,
+    'sswTrackingService' => $sswTrackingService,
 ];
 
 $lexosHubSessionService->maintainHubSessionSilently();
