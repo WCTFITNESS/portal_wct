@@ -1182,6 +1182,116 @@ if (
     }
     exit;
 }
+
+// Tasks: POST e API de drag-and-drop antes de qualquer HTML.
+if ($page === 'tasks' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    $taskFormType = (string) ($_POST['form_type'] ?? '');
+    $tasksApi = (string) ($_GET['tasks_api'] ?? $_POST['tasks_api'] ?? '');
+
+    if ($tasksApi === 'move' || $taskFormType === 'task_move') {
+        header('Content-Type: application/json; charset=utf-8');
+        try {
+            $taskId = (int) ($_POST['task_id'] ?? 0);
+            $result = $app['taskService']->changeStatus(
+                $taskId,
+                (string) ($_POST['status'] ?? ''),
+                trim((string) ($_POST['actor_name'] ?? '')) ?: 'Quadro Kanban',
+                null
+            );
+            portal_wct_echo_json([
+                'ok' => true,
+                'task_id' => $taskId,
+                'status' => (string) ($result['task']['status'] ?? ''),
+                'email_ok' => (bool) $result['email_ok'],
+                'email_error' => $result['email_error'],
+            ]);
+        } catch (Throwable $exception) {
+            portal_wct_echo_json(['ok' => false, 'error' => $exception->getMessage()], 400);
+        }
+        exit;
+    }
+
+    $taskRedirect = static function (string $path) use ($baseUrl): void {
+        header('Location: ' . portal_wct_public_path($baseUrl, ltrim($path, '/')), true, 302);
+        exit;
+    };
+
+    try {
+        if ($taskFormType === 'task_create') {
+            $result = $app['taskService']->create([
+                'subject' => (string) ($_POST['subject'] ?? ''),
+                'description' => (string) ($_POST['description'] ?? ''),
+                'sector' => (string) ($_POST['sector'] ?? ''),
+                'requester_name' => (string) ($_POST['requester_name'] ?? ''),
+                'requester_email' => (string) ($_POST['requester_email'] ?? ''),
+                'priority' => (string) ($_POST['priority'] ?? 'normal'),
+                'actor_name' => (string) ($_POST['actor_name'] ?? ($_POST['requester_name'] ?? '')),
+            ]);
+            $newId = (int) $result['task']['id'];
+            $msg = 'Task #' . $newId . ' criada.';
+            $msg .= $result['email_ok']
+                ? ' E-mail enviado ao solicitante.'
+                : ' Aviso: e-mail não enviado (' . ($result['email_error'] ?? 'erro') . ').';
+            $taskRedirect('index.php?page=tasks&id=' . $newId . '&ok=' . rawurlencode($msg));
+        }
+
+        if ($taskFormType === 'task_status') {
+            $taskId = (int) ($_POST['task_id'] ?? 0);
+            $result = $app['taskService']->changeStatus(
+                $taskId,
+                (string) ($_POST['status'] ?? ''),
+                trim((string) ($_POST['actor_name'] ?? '')) ?: null,
+                trim((string) ($_POST['note'] ?? '')) ?: null
+            );
+            $msg = 'Status atualizado.';
+            if (!$result['email_ok']) {
+                $msg .= ' Aviso: e-mail não enviado (' . ($result['email_error'] ?? 'erro') . ').';
+            }
+            $taskRedirect('index.php?page=tasks&id=' . $taskId . '&ok=' . rawurlencode($msg));
+        }
+
+        if ($taskFormType === 'task_comment') {
+            $taskId = (int) ($_POST['task_id'] ?? 0);
+            $result = $app['taskService']->addComment(
+                $taskId,
+                (string) ($_POST['comment'] ?? ''),
+                trim((string) ($_POST['actor_name'] ?? '')) ?: null
+            );
+            $msg = 'Comentário registrado.';
+            if (!$result['email_ok']) {
+                $msg .= ' Aviso: e-mail não enviado (' . ($result['email_error'] ?? 'erro') . ').';
+            }
+            $taskRedirect('index.php?page=tasks&id=' . $taskId . '&ok=' . rawurlencode($msg));
+        }
+
+        if ($taskFormType === 'task_update') {
+            $taskId = (int) ($_POST['task_id'] ?? 0);
+            $result = $app['taskService']->updateDetails($taskId, [
+                'subject' => (string) ($_POST['subject'] ?? ''),
+                'description' => (string) ($_POST['description'] ?? ''),
+                'sector' => (string) ($_POST['sector'] ?? ''),
+                'requester_name' => (string) ($_POST['requester_name'] ?? ''),
+                'requester_email' => (string) ($_POST['requester_email'] ?? ''),
+                'priority' => (string) ($_POST['priority'] ?? 'normal'),
+                'actor_name' => (string) ($_POST['actor_name'] ?? ''),
+            ]);
+            $msg = 'Task atualizada.';
+            if (!$result['email_ok']) {
+                $msg .= ' Aviso: e-mail não enviado (' . ($result['email_error'] ?? 'erro') . ').';
+            }
+            $taskRedirect('index.php?page=tasks&id=' . $taskId . '&ok=' . rawurlencode($msg));
+        }
+    } catch (Throwable $exception) {
+        if ($taskFormType === 'task_create') {
+            $taskRedirect('index.php?page=tasks&new=1&flash_err=' . rawurlencode($exception->getMessage()));
+        }
+        $taskId = (int) ($_POST['task_id'] ?? 0);
+        if ($taskId > 0) {
+            $taskRedirect('index.php?page=tasks&id=' . $taskId . '&flash_err=' . rawurlencode($exception->getMessage()));
+        }
+        $taskRedirect('index.php?page=tasks&flash_err=' . rawurlencode($exception->getMessage()));
+    }
+}
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -1550,7 +1660,7 @@ if (
         .wct-code-shell__frame { width: 100%; height: calc(100vh - 8px); min-height: calc(100vh - 8px); border: 0; display: block; background: #fff; }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar', 'tasks'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">
