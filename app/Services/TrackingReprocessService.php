@@ -21,9 +21,29 @@ final class TrackingReprocessService
     }
 
     /**
+     * Indexa pedido ausente. Se já existir, retorna already_indexed.
+     *
      * @return array<string, mixed>
      */
     public function reprocessByCodigo(string $codigo): array
+    {
+        return $this->runByCodigo($codigo, false);
+    }
+
+    /**
+     * Reconsulta Lexos/XML/rastreio mesmo se o pedido já estiver indexado.
+     *
+     * @return array<string, mixed>
+     */
+    public function reindexByCodigo(string $codigo): array
+    {
+        return $this->runByCodigo($codigo, true);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function runByCodigo(string $codigo, bool $force): array
     {
         $codigo = trim($codigo);
         if ($codigo === '') {
@@ -31,11 +51,11 @@ final class TrackingReprocessService
         }
 
         if (!$this->trackingDatabase->isConfigured()) {
-            return $this->reprocessViaTrackingApi($codigo);
+            return $this->reprocessViaTrackingApi($codigo, $force);
         }
 
         $existente = $this->findPedidoIndexado($codigo);
-        if ($existente !== null) {
+        if ($existente !== null && !$force) {
             return [
                 'action' => 'already_indexed',
                 'codigo' => $codigo,
@@ -43,7 +63,7 @@ final class TrackingReprocessService
             ];
         }
 
-        $pedidoIds = $this->resolvePedidoIds($codigo);
+        $pedidoIds = $this->resolvePedidoIds($codigo, $existente);
         if ($pedidoIds === []) {
             throw new RuntimeException(
                 'PedidoId Lexos não encontrado em webhook_logs nem na API Lexos. '
@@ -53,14 +73,15 @@ final class TrackingReprocessService
 
         $results = [];
         foreach ($pedidoIds as $pedidoIdLexos) {
-            $results[] = $this->callTrackingWebhook($pedidoIdLexos);
+            $results[] = $this->callTrackingWebhook($pedidoIdLexos, $force);
         }
 
         $verificacao = $this->findPedidoIndexado($codigo);
 
         return [
-            'action' => 'reprocessed',
+            'action' => $force ? 'reindexed' : 'reprocessed',
             'codigo' => $codigo,
+            'force' => $force,
             'pedido_ids' => $pedidoIds,
             'results' => $results,
             'indexado' => $verificacao !== null,
@@ -98,11 +119,21 @@ final class TrackingReprocessService
     }
 
     /**
+     * @param array<string, mixed>|null $existente
      * @return list<string>
      */
-    private function resolvePedidoIds(string $codigo): array
+    private function resolvePedidoIds(string $codigo, ?array $existente = null): array
     {
-        $ids = $this->findPedidoIdsInWebhookLogs($codigo);
+        $ids = [];
+
+        $fromPedido = trim((string) ($existente['pedido_id_lexos'] ?? ''));
+        if ($fromPedido !== '' && ctype_digit($fromPedido)) {
+            $ids[] = $fromPedido;
+        }
+
+        foreach ($this->findPedidoIdsInWebhookLogs($codigo) as $id) {
+            $ids[] = $id;
+        }
 
         if ($ids === [] && $this->lexosHubApiClient !== null) {
             $fromHub = $this->findPedidoIdViaLexosHub($codigo);
@@ -217,11 +248,15 @@ final class TrackingReprocessService
      *
      * @return array<string, mixed>
      */
-    private function reprocessViaTrackingApi(string $codigo): array
+    private function reprocessViaTrackingApi(string $codigo, bool $force = false): array
     {
         $base = rtrim($this->trackingApiBaseUrl, '/');
         $url = $base . '/api/webhook/reprocess-codigo';
-        $payload = json_encode(['codigo' => $codigo], JSON_THROW_ON_ERROR);
+        $payload = json_encode([
+            'codigo' => $codigo,
+            'force' => $force,
+            'reindex' => $force,
+        ], JSON_THROW_ON_ERROR);
 
         $ch = curl_init($url);
         if ($ch === false) {
@@ -263,13 +298,13 @@ final class TrackingReprocessService
     /**
      * @return array<string, mixed>
      */
-    private function callTrackingWebhook(string $pedidoIdLexos): array
+    private function callTrackingWebhook(string $pedidoIdLexos, bool $force = false): array
     {
         $base = rtrim($this->trackingApiBaseUrl, '/');
         $url = $base . '/api/webhook';
         $payload = json_encode([
             'pedidoId' => $pedidoIdLexos,
-            'Evento' => 'ReprocessamentoPortal',
+            'Evento' => $force ? 'ReindexacaoPortal' : 'ReprocessamentoPortal',
         ], JSON_THROW_ON_ERROR);
 
         $ch = curl_init($url);
