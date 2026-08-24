@@ -45,6 +45,7 @@ use App\Services\ProtheusRomaneioMonitorService;
 use App\Services\ProtheusPedidosMonitorService;
 use App\Services\ProtheusNfeMonitorService;
 use App\Services\ProtheusEdiConsultaService;
+use App\Services\ProtheusLerEdiService;
 use App\Services\ProtheusZa4PedidosErroMonitorService;
 use App\Services\ProtheusAdHocQueryService;
 use App\Services\RepasseService;
@@ -123,6 +124,7 @@ $protheusRomaneioMonitorService = new ProtheusRomaneioMonitorService($protheusCo
 $protheusPedidosMonitorService = new ProtheusPedidosMonitorService($protheusConnectionService);
 $protheusNfeMonitorService = new ProtheusNfeMonitorService($protheusConnectionService);
 $protheusEdiConsultaService = new ProtheusEdiConsultaService($protheusConnectionService);
+$protheusLerEdiService = new ProtheusLerEdiService($protheusConnectionService);
 $protheusZa4PedidosErroMonitorService = new ProtheusZa4PedidosErroMonitorService($protheusConnectionService);
 $protheusAdHocQueryService = new ProtheusAdHocQueryService($protheusConnectionService);
 $mailService = new MailService($config['mail'] ?? null);
@@ -172,6 +174,7 @@ return [
     'protheusPedidosMonitorService' => $protheusPedidosMonitorService,
     'protheusNfeMonitorService' => $protheusNfeMonitorService,
     'protheusEdiConsultaService' => $protheusEdiConsultaService,
+    'protheusLerEdiService' => $protheusLerEdiService,
     'protheusZa4PedidosErroMonitorService' => $protheusZa4PedidosErroMonitorService,
     'protheusAdHocQueryService' => $protheusAdHocQueryService,
     'mailService' => $mailService,

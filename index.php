@@ -345,6 +345,7 @@ $allowedPages = [
     'protheus-monitor-pedidos',
     'protheus-monitor-nfe',
     'protheus-consulta-edi',
+    'protheus-ler-edi',
     'protheus-monitor-pedidos-erro',
     'protheus-consulta-sql',
     'tasks',
@@ -695,6 +696,7 @@ $menuSections = [
         ['id' => 'protheus-monitor-pedidos', 'label' => 'Monitor de Pedidos'],
         ['id' => 'protheus-monitor-nfe', 'label' => 'Monitor NF-e SEFAZ'],
         ['id' => 'protheus-consulta-edi', 'label' => 'Monitor EDI'],
+        ['id' => 'protheus-ler-edi', 'label' => 'Ler EDI'],
         ['id' => 'protheus-monitor-pedidos-erro', 'label' => 'Erros Pedidos ZA4'],
         ['id' => 'protheus-consulta-sql', 'label' => 'Consulta SQL'],
     ],
@@ -825,6 +827,82 @@ if ($page === 'protheus-monitor-pedidos-erro' && ($_GET['export'] ?? '') === 'xl
     } catch (Throwable $e) {
         http_response_code(500);
         echo 'Erro na exportacao: ' . htmlspecialchars($e->getMessage());
+        exit;
+    }
+}
+
+if (
+    $page === 'protheus-ler-edi'
+    && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && (string) ($_POST['form_type'] ?? '') === 'ler_edi_upload'
+) {
+    $filialPost = trim((string) ($_POST['filial'] ?? '0101'));
+    $crossPost = (string) ($_POST['cross_protheus'] ?? '0') === '1';
+    $redirectBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-ler-edi');
+    try {
+        @ini_set('memory_limit', '1024M');
+        @set_time_limit(180);
+        if (!isset($_FILES['ocoren']) || !is_array($_FILES['ocoren'])) {
+            throw new RuntimeException('Selecione um arquivo OCOREN.');
+        }
+        $settings = $app['protheusSettingsRepository']->getSettings();
+        $canCross = $settings !== null && $app['protheusConnectionService']->isDriverAvailable();
+        $result = $app['protheusLerEdiService']->processUpload(
+            $_FILES['ocoren'],
+            $filialPost,
+            $crossPost && $canCross
+        );
+        if ($crossPost && !$canCross) {
+            $result['warning'] = trim((string) ($result['warning'] ?? '') . ' Cruzamento Protheus indisponivel — configure a conexao.');
+        }
+        $token = $app['protheusLerEdiService']->saveResult($result);
+        header('Location: ' . $redirectBase . '&filial=' . rawurlencode($filialPost) . '&job=' . rawurlencode($token));
+        exit;
+    } catch (Throwable $e) {
+        $msg = substr($e->getMessage(), 0, 300);
+        header('Location: ' . $redirectBase . '&filial=' . rawurlencode($filialPost) . '&err=' . rawurlencode($msg));
+        exit;
+    }
+}
+
+if ($page === 'protheus-ler-edi' && ($_GET['export'] ?? '') === 'xlsx') {
+    try {
+        @ini_set('memory_limit', '1024M');
+        @set_time_limit(180);
+        $jobExport = trim((string) ($_GET['job'] ?? ''));
+        if ($jobExport === '') {
+            throw new RuntimeException('Nenhum resultado carregado para exportar. Importe o arquivo OCOREN primeiro.');
+        }
+        $filePath = $app['protheusLerEdiService']->exportJobToXlsx($jobExport, [
+            'q' => trim((string) ($_GET['q'] ?? '')),
+            'nota_fiscal' => trim((string) ($_GET['nota_fiscal'] ?? '')),
+            'pedido' => trim((string) ($_GET['pedido'] ?? '')),
+            'ped_mar' => trim((string) ($_GET['ped_mar'] ?? '')),
+            'marketplace' => trim((string) ($_GET['marketplace'] ?? '')),
+            'idlexo' => trim((string) ($_GET['idlexo'] ?? '')),
+            'cod_ocorrencia' => trim((string) ($_GET['cod_ocorrencia'] ?? '')),
+            'ocorrencia' => trim((string) ($_GET['ocorrencia'] ?? '')),
+            'cte' => trim((string) ($_GET['cte'] ?? '')),
+            'match' => trim((string) ($_GET['match'] ?? '')),
+            'texto' => trim((string) ($_GET['texto'] ?? '')),
+        ]);
+        $fileName = basename($filePath);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . (string) filesize($filePath));
+        readfile($filePath);
+        @unlink($filePath);
+        exit;
+    } catch (Throwable $e) {
+        $redirectBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-ler-edi');
+        $jobBack = trim((string) ($_GET['job'] ?? ''));
+        $filialBack = trim((string) ($_GET['filial'] ?? '0101'));
+        $msg = substr($e->getMessage(), 0, 300);
+        $url = $redirectBase . '&filial=' . rawurlencode($filialBack) . '&err=' . rawurlencode($msg);
+        if ($jobBack !== '') {
+            $url .= '&job=' . rawurlencode($jobBack);
+        }
+        header('Location: ' . $url);
         exit;
     }
 }
@@ -1662,7 +1740,7 @@ if ($page === 'tasks' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         .wct-code-shell__frame { width: 100%; height: calc(100vh - 8px); min-height: calc(100vh - 8px); border: 0; display: block; background: #fff; }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar', 'tasks'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-ler-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar', 'tasks'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">
@@ -1709,7 +1787,7 @@ if ($page === 'tasks' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     </nav>
                 </div>
             <?php endif; ?>
-            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql'], true)): ?>
+            <?php if (in_array($page, ['protheus-config', 'protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-ler-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql'], true)): ?>
                 <div class="subnav-sticky">
                     <nav class="subnav">
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-config')) ?>" class="<?= $page === 'protheus-config' ? 'active' : '' ?>">Config Protheus</a>
@@ -1717,6 +1795,7 @@ if ($page === 'tasks' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-pedidos')) ?>" class="<?= $page === 'protheus-monitor-pedidos' ? 'active' : '' ?>">Monitor de Pedidos</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-nfe')) ?>" class="<?= $page === 'protheus-monitor-nfe' ? 'active' : '' ?>">Monitor NF-e SEFAZ</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-edi')) ?>" class="<?= $page === 'protheus-consulta-edi' ? 'active' : '' ?>">Monitor EDI</a>
+                        <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-ler-edi')) ?>" class="<?= $page === 'protheus-ler-edi' ? 'active' : '' ?>">Ler EDI</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-monitor-pedidos-erro')) ?>" class="<?= $page === 'protheus-monitor-pedidos-erro' ? 'active' : '' ?>">Erros Pedidos ZA4</a>
                         <a href="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sql')) ?>" class="<?= $page === 'protheus-consulta-sql' ? 'active' : '' ?>">Consulta SQL</a>
                     </nav>
