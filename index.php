@@ -350,6 +350,7 @@ $allowedPages = [
     'protheus-consulta-sql',
     'tasks',
     'rastreamento-ssw',
+    'find-cep',
 ];
 
 if (!in_array($page, $allowedPages, true)) {
@@ -708,6 +709,7 @@ $menuSections = [
             'href' => $trackingWctUrl,
         ],
         ['id' => 'tracking-reprocess', 'label' => 'Forçar integração Tracking'],
+        ['id' => 'find-cep', 'label' => 'Integração com Find Cep'],
     ],
     'WCT CODE' => [
         ['id' => 'wct-code-dashboard', 'label' => 'Dashboard (backup cPanel)'],

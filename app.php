@@ -8,6 +8,7 @@ use App\Repositories\MessageLogRepository;
 use App\Repositories\MessageTemplateRepository;
 use App\Repositories\RequestLogRepository;
 use App\Repositories\LexosOrderWebhookRepository;
+use App\Repositories\FindCepSettingsRepository;
 use App\Repositories\ProtheusSettingsRepository;
 use App\Repositories\ProtheusSqlQueryHistoryRepository;
 use App\Repositories\ProtheusSqlSavedQueriesRepository;
@@ -52,6 +53,7 @@ use App\Services\RepasseService;
 use App\Services\RepasseMpService;
 use App\Services\MailService;
 use App\Services\TaskService;
+use App\Services\FindCepService;
 use App\Services\SswTrackingService;
 use App\Services\TokenService;
 
@@ -68,6 +70,7 @@ $logRepository = new MessageLogRepository($pdo);
 $requestLogRepository = new RequestLogRepository($pdo);
 $repasseMpJobRepository = new RepasseMpJobRepository($pdo);
 $protheusSettingsRepository = new ProtheusSettingsRepository($pdo);
+$findCepSettingsRepository = new FindCepSettingsRepository($pdo);
 $protheusSqlQueryHistoryRepository = new ProtheusSqlQueryHistoryRepository($pdo);
 $protheusSqlSavedQueriesRepository = new ProtheusSqlSavedQueriesRepository($pdo);
 $client = new MercadoLivreClient($requestLogRepository);
@@ -131,6 +134,7 @@ $mailService = new MailService($config['mail'] ?? null);
 $taskRepository = new TaskRepository($pdo);
 $taskService = new TaskService($taskRepository, $mailService, (string) ($config['app']['base_url'] ?? '/'));
 $sswTrackingService = new SswTrackingService($config['ssw'] ?? null);
+$findCepService = new FindCepService($findCepSettingsRepository);
 
 return [
     'config' => $config,
@@ -181,6 +185,8 @@ return [
     'taskRepository' => $taskRepository,
     'taskService' => $taskService,
     'sswTrackingService' => $sswTrackingService,
+    'findCepSettingsRepository' => $findCepSettingsRepository,
+    'findCepService' => $findCepService,
 ];
 
 $lexosHubSessionService->maintainHubSessionSilently();
