@@ -357,6 +357,51 @@ if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
 }
 
+if (
+    $page === 'find-cep'
+    && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && in_array((string) ($_POST['form_type'] ?? ''), ['findcep_call', 'findcep_test'], true)
+    && (
+        (string) ($_POST['ajax'] ?? '') === '1'
+        || strcasecmp((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''), 'XMLHttpRequest') === 0
+    )
+) {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $findCep = $app['findCepService'];
+        $formType = (string) ($_POST['form_type'] ?? '');
+        if ($formType === 'findcep_test') {
+            $result = $findCep->testConnection();
+            $activeOp = 'cep';
+        } else {
+            $activeOp = trim((string) ($_POST['operation'] ?? ''));
+            $params = is_array($_POST['params'] ?? null) ? $_POST['params'] : [];
+            $result = $findCep->execute($activeOp, $params);
+        }
+
+        $summary = '';
+        foreach ($findCep->catalog() as $item) {
+            if (($item['id'] ?? '') === $activeOp) {
+                $summary = (string) ($item['summary'] ?? '');
+                break;
+            }
+        }
+
+        portal_wct_echo_json([
+            'ok' => true,
+            'operation' => $activeOp,
+            'summary' => $summary,
+            'result' => $result,
+        ]);
+    } catch (Throwable $e) {
+        portal_wct_echo_json([
+            'ok' => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+    exit;
+}
+
 if (in_array($page, ['dashboard', 'ml-dashboard'], true)) {
     $app['lexosHubSessionService']->maintainHubSessionSilently();
 }
