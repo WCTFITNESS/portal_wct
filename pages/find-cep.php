@@ -10,7 +10,7 @@ $findCep = $app['findCepService'];
 $feedback = null;
 $feedbackClass = 'ok';
 $result = null;
-$activeOp = trim((string) ($_POST['operation'] ?? $_GET['op'] ?? 'cep'));
+$activeOp = trim((string) ($_POST['operation'] ?? $_GET['op'] ?? ''));
 $formValues = is_array($_POST['params'] ?? null) ? $_POST['params'] : [];
 
 $settings = $findCep->getSettings();
@@ -75,12 +75,13 @@ $refererPreview = $findCep->resolveReferer($settings ?? []);
 $pageUrl = portal_wct_public_path($baseUrl, 'index.php?page=find-cep');
 
 $resultPretty = '';
+$resultBody = null;
 if (is_array($result)) {
-    $payload = $result['body'];
-    if (is_string($payload)) {
-        $resultPretty = $payload;
+    $resultBody = $result['body'];
+    if (is_string($resultBody)) {
+        $resultPretty = $resultBody;
     } else {
-        $resultPretty = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        $resultPretty = json_encode($resultBody, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
     }
 }
 
@@ -90,31 +91,18 @@ $groupAnchor = static function (string $groupName): string {
 
 $resultGroupName = null;
 $resultGroupAnchor = null;
+$resultOpSummary = '';
 foreach ($catalog as $item) {
     if ($item['id'] === $activeOp) {
         $resultGroupName = $item['group'];
         $resultGroupAnchor = $groupAnchor($item['group']);
+        $resultOpSummary = (string) ($item['summary'] ?? '');
         break;
     }
 }
 
-$renderResultBlock = static function () use ($result, $resultPretty): void {
-    if (!is_array($result)) {
-        return;
-    }
-    ?>
-    <div class="fc-result-block" id="fc-result">
-        <h3>Resultado</h3>
-        <p class="fc-meta">
-            <strong><?= htmlspecialchars($result['method']) ?></strong>
-            <?= htmlspecialchars($result['url']) ?>
-            · HTTP <?= (int) $result['http_code'] ?>
-            · Referer: <?= htmlspecialchars((string) $result['referer']) ?>
-        </p>
-        <pre class="fc-result"><?= htmlspecialchars($resultPretty !== '' ? $resultPretty : '(vazio)') ?></pre>
-    </div>
-    <?php
-};
+$openResultModal = is_array($result);
+$hasSettings = is_array($settings) && trim($clientId) !== '';
 ?>
 <style>
     .fc-page h1 { margin-bottom: 6px; }
@@ -197,6 +185,8 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
         border-radius: 10px;
         padding: 12px;
         background: #fff;
+        display: flex;
+        flex-direction: column;
     }
     .fc-op.active { border-color: #111; box-shadow: 0 0 0 1px #111; }
     .fc-op h3 { margin: 0 0 4px; font-size: .92rem; }
@@ -220,31 +210,142 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
     }
     .fc-op label { display: block; margin-top: 8px; font-size: .82rem; }
     .fc-op input { width: 100%; box-sizing: border-box; }
-    .fc-op button { margin-top: 10px; width: 100%; }
-    .fc-result-block {
-        margin-top: 16px;
-        padding-top: 14px;
-        border-top: 1px solid #e2e8f0;
+    .fc-op button { margin-top: auto; padding-top: 10px; width: 100%; }
+    .fc-op form { display: flex; flex-direction: column; flex: 1; gap: 0; }
+    .fc-config-note {
+        margin: 0 0 10px;
+        padding: 8px 10px;
+        background: #f8fafc;
+        border: 1px dashed #cbd5e1;
+        border-radius: 8px;
+        font-size: .8rem;
+        color: #475569;
+        line-height: 1.4;
     }
-    .fc-result-block h3 {
-        margin: 0 0 6px;
-        font-size: .95rem;
+    .fc-config-note code {
+        font-size: .78rem;
+        background: #e2e8f0;
+        padding: 1px 5px;
+        border-radius: 4px;
     }
-    .fc-result {
-        margin-top: 8px;
+
+    .fc-modal-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 5000;
+        background: rgba(15, 23, 42, .55);
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+    }
+    .fc-modal-backdrop.is-open { display: flex; }
+    .fc-modal {
+        background: #fff;
+        border-radius: 14px;
+        width: min(920px, 100%);
+        max-height: min(88vh, 900px);
+        box-shadow: 0 20px 50px rgba(0, 0, 0, .28);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .fc-modal-loading {
+        width: min(340px, 100%);
+        padding: 28px 24px;
+        text-align: center;
+    }
+    .fc-modal-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+    }
+    .fc-modal-head h3 {
+        margin: 0 0 4px;
+        font-size: 1.05rem;
+    }
+    .fc-modal-sub {
+        margin: 0;
+        font-size: .8rem;
+        color: #64748b;
+        word-break: break-all;
+    }
+    .fc-modal-close {
+        border: 0;
+        background: #111;
+        color: #f5b700;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        font-size: 1.2rem;
+        cursor: pointer;
+        flex-shrink: 0;
+    }
+    .fc-modal-body {
+        padding: 14px 18px 18px;
+        overflow: auto;
+    }
+    .fc-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: .78rem;
+        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 999px;
+        margin-bottom: 12px;
+    }
+    .fc-status.ok { background: #dcfce7; color: #166534; }
+    .fc-status.err { background: #fee2e2; color: #991b1b; }
+    .fc-kv {
+        display: grid;
+        grid-template-columns: minmax(120px, 200px) 1fr;
+        gap: 8px 12px;
+        margin-bottom: 14px;
+    }
+    .fc-kv dt {
+        font-size: .78rem;
+        font-weight: 700;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+    }
+    .fc-kv dd {
+        margin: 0;
+        font-size: .92rem;
+        color: #0f172a;
+        word-break: break-word;
+    }
+    .fc-json {
+        margin: 0;
         background: #0f172a;
         color: #e2e8f0;
         border-radius: 10px;
         padding: 14px;
         overflow: auto;
-        max-height: 480px;
+        max-height: 52vh;
         font-size: .82rem;
+        line-height: 1.45;
         white-space: pre-wrap;
         word-break: break-word;
     }
-    .fc-meta { font-size: .85rem; color: #475569; margin: 8px 0; }
+    .fc-spinner {
+        width: 42px;
+        height: 42px;
+        margin: 0 auto 14px;
+        border: 3px solid #e2e8f0;
+        border-top-color: #f5b700;
+        border-radius: 50%;
+        animation: fc-spin .8s linear infinite;
+    }
+    @keyframes fc-spin { to { transform: rotate(360deg); } }
     @media (max-width: 800px) {
         .fc-grid { grid-template-columns: 1fr; }
+        .fc-kv { grid-template-columns: 1fr; gap: 2px 0; }
     }
 </style>
 
@@ -256,7 +357,7 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
         <a href="https://www.findcep.com/docs/index.html" target="_blank" rel="noopener">OpenAPI / Swagger</a>.
     </p>
 
-    <?php if ($feedback !== null): ?>
+    <?php if ($feedback !== null && !$openResultModal): ?>
         <p class="msg <?= htmlspecialchars($feedbackClass) ?>"><?= htmlspecialchars($feedback) ?></p>
     <?php endif; ?>
 
@@ -274,9 +375,6 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
             ?>
             <a href="#fc-<?= htmlspecialchars($groupAnchor($groupName)) ?>"<?= $isFeaturedGroup ? ' class="fc-nav-featured"' : '' ?>><?= htmlspecialchars($groupName) ?></a>
         <?php endforeach; ?>
-        <?php if ($result && $resultGroupAnchor): ?>
-            <a href="#fc-<?= htmlspecialchars($resultGroupAnchor) ?>">Resultado</a>
-        <?php endif; ?>
     </div>
 
     <h2 id="fc-config">Configuração</h2>
@@ -334,9 +432,9 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
         </div>
     </form>
 
-    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>#fc-api-cep" style="margin-top:8px;">
+    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>#fc-api-cep" class="fc-call-form" style="margin-top:8px;">
         <input type="hidden" name="form_type" value="findcep_test">
-        <button type="submit"<?= $settings ? '' : ' disabled' ?>>Testar conexão (GET /v1/cep/01001000.json)</button>
+        <button type="submit"<?= $hasSettings ? '' : ' disabled' ?>>Testar conexão (GET /v1/cep/01001000.json)</button>
     </form>
 </section>
 
@@ -363,43 +461,155 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
                 <?php
                 $isActive = $activeOp === $op['id'];
                 $opValues = $isActive ? $formValues : [];
+                $fields = $op['fields'] ?? [];
+                $usesConfig = !empty($op['uses_config']) || $fields === [];
+                $configNote = trim((string) ($op['config_note'] ?? ''));
+                if ($configNote === '' && $fields === []) {
+                    $configNote = 'Sem parâmetros extras — usa apenas a configuração salva (Referer / endpoint).';
+                }
+                if (!empty($op['uses_config'])) {
+                    $configNote = $configNote !== ''
+                        ? $configNote
+                        : 'Usa automaticamente os dados salvos na configuração.';
+                    if ($clientId !== '' || $fid !== '') {
+                        $configNote .= ' Client ID: <code>' . htmlspecialchars($clientId !== '' ? $clientId : '—') . '</code>'
+                            . ' · FID: <code>' . htmlspecialchars($fid !== '' ? $fid : '—') . '</code>';
+                    }
+                }
                 ?>
                 <div class="fc-op<?= $isActive ? ' active' : '' ?><?= !empty($op['featured']) ? ' active' : '' ?>">
                     <span class="fc-method"><?= htmlspecialchars($op['method']) ?></span>
                     <h3><?= htmlspecialchars($op['summary']) ?></h3>
                     <p class="fc-path"><?= htmlspecialchars($op['path']) ?></p>
-                    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>#fc-<?= htmlspecialchars($anchor) ?>">
+                    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>#fc-<?= htmlspecialchars($anchor) ?>" class="fc-call-form">
                         <input type="hidden" name="form_type" value="findcep_call">
                         <input type="hidden" name="operation" value="<?= htmlspecialchars($op['id']) ?>">
-                        <?php foreach ($op['fields'] as $field): ?>
-                            <?php
-                            $fname = $field['name'];
-                            $ftype = $field['type'] ?? 'text';
-                            $fval = (string) ($opValues[$fname] ?? '');
-                            ?>
-                            <label>
-                                <?= htmlspecialchars($field['label']) ?>
-                                <?php if (!empty($field['required'])): ?>*<?php endif; ?>
-                            </label>
-                            <input
-                                type="<?= htmlspecialchars($ftype) ?>"
-                                name="params[<?= htmlspecialchars($fname) ?>]"
-                                value="<?= htmlspecialchars($fval) ?>"
-                                placeholder="<?= htmlspecialchars((string) ($field['placeholder'] ?? '')) ?>"
-                                <?= !empty($field['required']) ? 'required' : '' ?>
-                                autocomplete="off"
-                            >
-                            <?php if (!empty($field['hint'])): ?>
-                                <p class="fc-hint"><?= htmlspecialchars($field['hint']) ?></p>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
-                        <button type="submit"<?= $settings ? '' : ' disabled' ?>>Consultar</button>
+                        <?php if ($usesConfig && $fields === []): ?>
+                            <p class="fc-config-note">
+                                <?php if (!empty($op['uses_config'])): ?>
+                                    <?= $configNote ?>
+                                <?php else: ?>
+                                    <?= htmlspecialchars($configNote) ?>
+                                <?php endif; ?>
+                            </p>
+                        <?php else: ?>
+                            <?php foreach ($fields as $field): ?>
+                                <?php
+                                if (!empty($field['from_config'])) {
+                                    continue;
+                                }
+                                $fname = $field['name'];
+                                $ftype = $field['type'] ?? 'text';
+                                $fval = (string) ($opValues[$fname] ?? '');
+                                ?>
+                                <label>
+                                    <?= htmlspecialchars($field['label']) ?>
+                                    <?php if (!empty($field['required'])): ?>*<?php endif; ?>
+                                </label>
+                                <input
+                                    type="<?= htmlspecialchars($ftype) ?>"
+                                    name="params[<?= htmlspecialchars($fname) ?>]"
+                                    value="<?= htmlspecialchars($fval) ?>"
+                                    placeholder="<?= htmlspecialchars((string) ($field['placeholder'] ?? '')) ?>"
+                                    <?= !empty($field['required']) ? 'required' : '' ?>
+                                    autocomplete="off"
+                                >
+                                <?php if (!empty($field['hint'])): ?>
+                                    <p class="fc-hint"><?= htmlspecialchars($field['hint']) ?></p>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                        <button type="submit"<?= $hasSettings ? '' : ' disabled' ?>>Consultar</button>
                     </form>
                 </div>
             <?php endforeach; ?>
         </div>
-        <?php if (is_array($result) && $resultGroupName === $groupName): ?>
-            <?php $renderResultBlock(); ?>
-        <?php endif; ?>
     </section>
 <?php endforeach; ?>
+
+<div class="fc-modal-backdrop" id="fc-loading" aria-hidden="true">
+    <div class="fc-modal fc-modal-loading">
+        <div class="fc-spinner" aria-hidden="true"></div>
+        <h3 style="margin:0 0 6px;">Consultando FindCEP…</h3>
+        <p style="margin:0;color:#64748b;font-size:.9rem;">Aguarde o retorno da API.</p>
+    </div>
+</div>
+
+<div class="fc-modal-backdrop<?= $openResultModal ? ' is-open' : '' ?>" id="fc-result-modal" aria-hidden="<?= $openResultModal ? 'false' : 'true' ?>">
+    <?php if ($openResultModal && is_array($result)): ?>
+        <div class="fc-modal" role="dialog" aria-modal="true" aria-labelledby="fc-result-title">
+            <div class="fc-modal-head">
+                <div>
+                    <h3 id="fc-result-title"><?= htmlspecialchars($resultOpSummary !== '' ? $resultOpSummary : 'Resultado da consulta') ?></h3>
+                    <p class="fc-modal-sub">
+                        <strong><?= htmlspecialchars((string) $result['method']) ?></strong>
+                        <?= htmlspecialchars((string) $result['url']) ?>
+                    </p>
+                </div>
+                <button type="button" class="fc-modal-close" id="fc-result-close" aria-label="Fechar">&times;</button>
+            </div>
+            <div class="fc-modal-body">
+                <span class="fc-status <?= !empty($result['success']) ? 'ok' : 'err' ?>">
+                    <?= !empty($result['success']) ? 'Sucesso' : 'Falha' ?>
+                    · HTTP <?= (int) $result['http_code'] ?>
+                </span>
+
+                <?php if (is_array($resultBody) && $resultBody !== [] && array_is_list($resultBody) === false): ?>
+                    <dl class="fc-kv">
+                        <?php foreach ($resultBody as $k => $v): ?>
+                            <?php if (is_array($v) || is_object($v)) {
+                                continue;
+                            } ?>
+                            <dt><?= htmlspecialchars((string) $k) ?></dt>
+                            <dd><?= htmlspecialchars(is_bool($v) ? ($v ? 'true' : 'false') : (string) $v) ?></dd>
+                        <?php endforeach; ?>
+                    </dl>
+                <?php endif; ?>
+
+                <pre class="fc-json"><?= htmlspecialchars($resultPretty !== '' ? $resultPretty : '(vazio)') ?></pre>
+            </div>
+        </div>
+    <?php endif; ?>
+</div>
+
+<script>
+(function () {
+    var loading = document.getElementById('fc-loading');
+    var resultModal = document.getElementById('fc-result-modal');
+    var closeBtn = document.getElementById('fc-result-close');
+
+    function openLoading() {
+        if (!loading) return;
+        loading.classList.add('is-open');
+        loading.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeResult() {
+        if (!resultModal) return;
+        resultModal.classList.remove('is-open');
+        resultModal.setAttribute('aria-hidden', 'true');
+    }
+
+    document.querySelectorAll('form.fc-call-form').forEach(function (form) {
+        form.addEventListener('submit', function () {
+            openLoading();
+        });
+    });
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeResult);
+    }
+    if (resultModal) {
+        resultModal.addEventListener('click', function (ev) {
+            if (ev.target === resultModal) {
+                closeResult();
+            }
+        });
+    }
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') {
+            closeResult();
+        }
+    });
+})();
+</script>

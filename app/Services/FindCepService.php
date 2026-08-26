@@ -111,10 +111,9 @@ class FindCepService
                 'path' => '/v1/consumo/cliente/{client_id}/fid/{fid}',
                 'summary' => 'Monitor de consumo — uso do mês atual e dos 3 anteriores',
                 'featured' => true,
-                'fields' => [
-                    ['name' => 'client_id', 'label' => 'Client ID', 'hint' => 'Vazio = usa config salva (ex.: wctfitness)'],
-                    ['name' => 'fid', 'label' => 'FID', 'hint' => 'Vazio = usa config salva (ex.: E3FWVW3L9KPAIQ)'],
-                ],
+                'uses_config' => true,
+                'config_note' => 'Usa automaticamente Client ID e FID salvos na configuração.',
+                'fields' => [],
             ],
             [
                 'id' => 'endereco_pesquisa',
