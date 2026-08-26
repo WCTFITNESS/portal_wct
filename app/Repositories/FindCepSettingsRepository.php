@@ -10,6 +10,18 @@ class FindCepSettingsRepository
 {
     private ?bool $tableReady = null;
 
+    /** Credenciais WCT (mesmo ambiente local/prod). */
+    public const DEFAULTS = [
+        'scheme' => 'https',
+        'client_id' => 'wctfitness',
+        'client_url_hash' => '7154b56482a054e5',
+        'fid' => 'E3FWVW3L9KPAIQ',
+        'referer' => 'E3FWVW3L9KPAIQ',
+        'authorization' => '',
+        'custom_base_url' => '',
+        'timeout_seconds' => 30,
+    ];
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -17,6 +29,7 @@ class FindCepSettingsRepository
     public function getSettings(): ?array
     {
         $this->ensureTable();
+        $this->seedDefaultsIfEmpty();
 
         $stmt = $this->pdo->query('SELECT * FROM findcep_settings ORDER BY id ASC LIMIT 1');
         $row = $stmt->fetch();
@@ -164,6 +177,33 @@ class FindCepSettingsRepository
         $this->migrateLegacyAuthorizationColumn();
 
         $this->tableReady = true;
+    }
+
+    private function seedDefaultsIfEmpty(): void
+    {
+        $stmt = $this->pdo->query('SELECT id FROM findcep_settings ORDER BY id ASC LIMIT 1');
+        if ($stmt && $stmt->fetch()) {
+            return;
+        }
+
+        $d = self::DEFAULTS;
+        $ins = $this->pdo->prepare(
+            'INSERT INTO findcep_settings (
+                scheme, client_id, client_url_hash, fid, referer, api_authorization, custom_base_url, timeout_seconds, created_at, updated_at
+             ) VALUES (
+                :scheme, :client_id, :client_url_hash, :fid, :referer, :api_authorization, :custom_base_url, :timeout_seconds, NOW(), NOW()
+             )'
+        );
+        $ins->execute([
+            ':scheme' => $d['scheme'],
+            ':client_id' => $d['client_id'],
+            ':client_url_hash' => $d['client_url_hash'],
+            ':fid' => $d['fid'],
+            ':referer' => $d['referer'],
+            ':api_authorization' => $d['authorization'],
+            ':custom_base_url' => $d['custom_base_url'],
+            ':timeout_seconds' => $d['timeout_seconds'],
+        ]);
     }
 
     /** Ambientes MySQL locais que criaram a coluna antiga "authorization". */
