@@ -154,7 +154,33 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
         padding: 6px 12px;
     }
     .fc-nav a:hover { border-color: #111; }
+    .fc-nav a.fc-nav-featured {
+        background: #111;
+        color: #f5b700;
+        border-color: #111;
+    }
     .fc-group { margin-top: 18px; }
+    .fc-group.fc-featured {
+        border: 2px solid #111;
+        box-shadow: 0 0 0 3px rgba(245, 183, 0, .35);
+    }
+    .fc-group.fc-featured h2 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .fc-badge {
+        display: inline-block;
+        font-size: .68rem;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #f5b700;
+        color: #111;
+    }
     .fc-group h2 {
         margin: 0 0 10px;
         font-size: 1.05rem;
@@ -237,7 +263,16 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
     <div class="fc-nav">
         <a href="#fc-config">Configuração</a>
         <?php foreach (array_keys($groups) as $groupName): ?>
-            <a href="#fc-<?= htmlspecialchars($groupAnchor($groupName)) ?>"><?= htmlspecialchars($groupName) ?></a>
+            <?php
+            $isFeaturedGroup = false;
+            foreach ($groups[$groupName] as $opItem) {
+                if (!empty($opItem['featured'])) {
+                    $isFeaturedGroup = true;
+                    break;
+                }
+            }
+            ?>
+            <a href="#fc-<?= htmlspecialchars($groupAnchor($groupName)) ?>"<?= $isFeaturedGroup ? ' class="fc-nav-featured"' : '' ?>><?= htmlspecialchars($groupName) ?></a>
         <?php endforeach; ?>
         <?php if ($result && $resultGroupAnchor): ?>
             <a href="#fc-<?= htmlspecialchars($resultGroupAnchor) ?>">Resultado</a>
@@ -306,16 +341,30 @@ $renderResultBlock = static function () use ($result, $resultPretty): void {
 </section>
 
 <?php foreach ($groups as $groupName => $ops): ?>
-    <?php $anchor = $groupAnchor($groupName); ?>
-    <section class="card fc-group" id="fc-<?= htmlspecialchars($anchor) ?>">
-        <h2><?= htmlspecialchars($groupName) ?></h2>
+    <?php
+    $anchor = $groupAnchor($groupName);
+    $isFeaturedGroup = false;
+    foreach ($ops as $opItem) {
+        if (!empty($opItem['featured'])) {
+            $isFeaturedGroup = true;
+            break;
+        }
+    }
+    ?>
+    <section class="card fc-group<?= $isFeaturedGroup ? ' fc-featured' : '' ?>" id="fc-<?= htmlspecialchars($anchor) ?>">
+        <h2>
+            <?= htmlspecialchars($groupName) ?>
+            <?php if ($isFeaturedGroup): ?>
+                <span class="fc-badge">Monitor de consumo</span>
+            <?php endif; ?>
+        </h2>
         <div class="fc-ops">
             <?php foreach ($ops as $op): ?>
                 <?php
                 $isActive = $activeOp === $op['id'];
                 $opValues = $isActive ? $formValues : [];
                 ?>
-                <div class="fc-op<?= $isActive ? ' active' : '' ?>">
+                <div class="fc-op<?= $isActive ? ' active' : '' ?><?= !empty($op['featured']) ? ' active' : '' ?>">
                     <span class="fc-method"><?= htmlspecialchars($op['method']) ?></span>
                     <h3><?= htmlspecialchars($op['summary']) ?></h3>
                     <p class="fc-path"><?= htmlspecialchars($op['path']) ?></p>
