@@ -11,7 +11,7 @@ services:
     plan: starter
     region: oregon
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /index.php?page=dashboard
+    healthCheckPath: /index.php?page=health
     envVars:
       - key: PORTAL_BASE_URL
         value: /
