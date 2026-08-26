@@ -20,8 +20,16 @@ class FindCepSettingsRepository
 
         $stmt = $this->pdo->query('SELECT * FROM findcep_settings ORDER BY id ASC LIMIT 1');
         $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
 
-        return $row ?: null;
+        // Compat: app usa a chave "authorization"; coluna no banco e api_authorization (PG reserved word).
+        if (!isset($row['authorization']) && array_key_exists('api_authorization', $row)) {
+            $row['authorization'] = $row['api_authorization'];
+        }
+
+        return $row;
     }
 
     /**
@@ -70,7 +78,7 @@ class FindCepSettingsRepository
         $existing = $this->getSettings();
         if ($existing) {
             if ($authorization === '') {
-                $authorization = (string) ($existing['authorization'] ?? '');
+                $authorization = (string) ($existing['authorization'] ?? $existing['api_authorization'] ?? '');
             }
             $stmt = $this->pdo->prepare(
                 'UPDATE findcep_settings SET
@@ -79,7 +87,7 @@ class FindCepSettingsRepository
                     client_url_hash = :client_url_hash,
                     fid = :fid,
                     referer = :referer,
-                    authorization = :authorization,
+                    api_authorization = :api_authorization,
                     custom_base_url = :custom_base_url,
                     timeout_seconds = :timeout_seconds,
                     updated_at = NOW()
@@ -91,7 +99,7 @@ class FindCepSettingsRepository
                 ':client_url_hash' => $clientUrlHash,
                 ':fid' => $fid,
                 ':referer' => $referer,
-                ':authorization' => $authorization,
+                ':api_authorization' => $authorization,
                 ':custom_base_url' => $customBaseUrl,
                 ':timeout_seconds' => $timeout,
                 ':id' => $existing['id'],
@@ -102,9 +110,9 @@ class FindCepSettingsRepository
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO findcep_settings (
-                scheme, client_id, client_url_hash, fid, referer, authorization, custom_base_url, timeout_seconds, created_at, updated_at
+                scheme, client_id, client_url_hash, fid, referer, api_authorization, custom_base_url, timeout_seconds, created_at, updated_at
              ) VALUES (
-                :scheme, :client_id, :client_url_hash, :fid, :referer, :authorization, :custom_base_url, :timeout_seconds, NOW(), NOW()
+                :scheme, :client_id, :client_url_hash, :fid, :referer, :api_authorization, :custom_base_url, :timeout_seconds, NOW(), NOW()
              )'
         );
         $stmt->execute([
@@ -113,7 +121,7 @@ class FindCepSettingsRepository
             ':client_url_hash' => $clientUrlHash,
             ':fid' => $fid,
             ':referer' => $referer,
-            ':authorization' => $authorization,
+            ':api_authorization' => $authorization,
             ':custom_base_url' => $customBaseUrl,
             ':timeout_seconds' => $timeout,
         ]);
@@ -133,7 +141,7 @@ class FindCepSettingsRepository
                 client_url_hash VARCHAR(64) NOT NULL DEFAULT \'\',
                 fid VARCHAR(120) NOT NULL DEFAULT \'\',
                 referer TEXT NOT NULL DEFAULT \'\',
-                authorization TEXT NOT NULL DEFAULT \'\',
+                api_authorization TEXT NOT NULL DEFAULT \'\',
                 custom_base_url TEXT NOT NULL DEFAULT \'\',
                 timeout_seconds INT NOT NULL DEFAULT 30,
                 created_at TIMESTAMP NOT NULL,
@@ -146,15 +154,73 @@ class FindCepSettingsRepository
                 client_url_hash VARCHAR(64) NOT NULL DEFAULT \'\',
                 fid VARCHAR(120) NOT NULL DEFAULT \'\',
                 referer TEXT NOT NULL,
-                authorization TEXT NOT NULL,
+                api_authorization TEXT NOT NULL,
                 custom_base_url TEXT NOT NULL,
                 timeout_seconds INT NOT NULL DEFAULT 30,
                 created_at DATETIME NOT NULL,
                 updated_at DATETIME NOT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
         $this->pdo->exec($sql);
+        $this->migrateLegacyAuthorizationColumn();
 
         $this->tableReady = true;
+    }
+
+    /** Ambientes MySQL locais que criaram a coluna antiga "authorization". */
+    private function migrateLegacyAuthorizationColumn(): void
+    {
+        if ($this->hasColumn('api_authorization')) {
+            return;
+        }
+
+        if ($this->isPgsql()) {
+            if ($this->hasColumn('authorization')) {
+                $this->pdo->exec('ALTER TABLE findcep_settings RENAME COLUMN authorization TO api_authorization');
+            } else {
+                $this->pdo->exec(
+                    'ALTER TABLE findcep_settings ADD COLUMN api_authorization TEXT NOT NULL DEFAULT \'\''
+                );
+            }
+
+            return;
+        }
+
+        if ($this->hasColumn('authorization')) {
+            $this->pdo->exec(
+                'ALTER TABLE findcep_settings CHANGE COLUMN authorization api_authorization TEXT NOT NULL'
+            );
+        } else {
+            $this->pdo->exec(
+                'ALTER TABLE findcep_settings ADD COLUMN api_authorization TEXT NOT NULL'
+            );
+        }
+    }
+
+    private function hasColumn(string $column): bool
+    {
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->prepare(
+                'SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema()
+                   AND table_name = :table
+                   AND column_name = :column
+                 LIMIT 1'
+            );
+            $stmt->execute([':table' => 'findcep_settings', ':column' => $column]);
+
+            return (bool) $stmt->fetchColumn();
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+               AND table_name = :table
+               AND column_name = :column
+             LIMIT 1'
+        );
+        $stmt->execute([':table' => 'findcep_settings', ':column' => $column]);
+
+        return (bool) $stmt->fetchColumn();
     }
 
     private function isPgsql(): bool
