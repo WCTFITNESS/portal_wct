@@ -425,6 +425,46 @@ if (!$isAuthPublicPage) {
     redirect_to('index.php?page=' . rawurlencode($portalAuth->firstAllowedPage($currentPortalUser)));
 }
 
+// Processa POST de autenticação ANTES de qualquer HTML (evita "headers already sent").
+$authFeedback = null;
+$authFeedbackClass = 'ok';
+$authEmailValue = '';
+$authResetToken = trim((string) ($_GET['token'] ?? $_POST['token'] ?? ''));
+$authResetDone = false;
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    $authFormType = (string) ($_POST['form_type'] ?? '');
+    if ($page === 'login' && $authFormType === 'login') {
+        $authEmailValue = trim((string) ($_POST['email'] ?? ''));
+        $password = (string) ($_POST['password'] ?? '');
+        if ($portalAuth->attemptLogin($authEmailValue, $password)) {
+            $currentPortalUser = $portalAuth->currentUser();
+            redirect_to('index.php?page=' . rawurlencode($portalAuth->firstAllowedPage($currentPortalUser)));
+        }
+        $authFeedback = 'E-mail ou senha inválidos.';
+        $authFeedbackClass = 'err';
+    }
+    if ($page === 'forgot-password' && $authFormType === 'forgot') {
+        $authEmailValue = trim((string) ($_POST['email'] ?? ''));
+        $result = $portalAuth->requestPasswordReset($authEmailValue);
+        $authFeedback = $result['message'];
+        $authFeedbackClass = $result['ok'] ? 'ok' : 'err';
+    }
+    if ($page === 'reset-password' && $authFormType === 'reset') {
+        $authResetToken = trim((string) ($_POST['token'] ?? ''));
+        $password = (string) ($_POST['password'] ?? '');
+        $confirm = (string) ($_POST['password_confirm'] ?? '');
+        if ($password !== $confirm) {
+            $authFeedback = 'As senhas não conferem.';
+            $authFeedbackClass = 'err';
+        } else {
+            $result = $portalAuth->resetPasswordWithToken($authResetToken, $password);
+            $authFeedback = $result['message'];
+            $authFeedbackClass = $result['ok'] ? 'ok' : 'err';
+            $authResetDone = $result['ok'];
+        }
+    }
+}
+
 if (
     $page === 'find-cep'
     && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'

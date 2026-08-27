@@ -2,29 +2,15 @@
 
 declare(strict_types=1);
 
-use App\Services\PortalAuthService;
+/** @var string|null $authFeedback */
+/** @var string $authFeedbackClass */
+/** @var string $authResetToken */
+/** @var bool $authResetDone */
 
-/** @var PortalAuthService $auth */
-$auth = $app['portalAuthService'];
-$feedback = null;
-$feedbackClass = 'ok';
-$token = trim((string) ($_GET['token'] ?? $_POST['token'] ?? ''));
-$done = false;
-
-if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string) ($_POST['form_type'] ?? '') === 'reset') {
-    $token = trim((string) ($_POST['token'] ?? ''));
-    $password = (string) ($_POST['password'] ?? '');
-    $confirm = (string) ($_POST['password_confirm'] ?? '');
-    if ($password !== $confirm) {
-        $feedback = 'As senhas não conferem.';
-        $feedbackClass = 'err';
-    } else {
-        $result = $auth->resetPasswordWithToken($token, $password);
-        $feedback = $result['message'];
-        $feedbackClass = $result['ok'] ? 'ok' : 'err';
-        $done = $result['ok'];
-    }
-}
+$feedback = $authFeedback ?? null;
+$feedbackClass = $authFeedbackClass ?? 'ok';
+$token = $authResetToken ?? '';
+$done = !empty($authResetDone);
 
 $pageUrl = portal_wct_public_path($baseUrl, 'index.php?page=reset-password');
 $loginUrl = portal_wct_public_path($baseUrl, 'index.php?page=login');

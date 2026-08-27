@@ -2,20 +2,13 @@
 
 declare(strict_types=1);
 
-use App\Services\PortalAuthService;
+/** @var string|null $authFeedback */
+/** @var string $authFeedbackClass */
+/** @var string $authEmailValue */
 
-/** @var PortalAuthService $auth */
-$auth = $app['portalAuthService'];
-$feedback = null;
-$feedbackClass = 'ok';
-$emailValue = '';
-
-if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string) ($_POST['form_type'] ?? '') === 'forgot') {
-    $emailValue = trim((string) ($_POST['email'] ?? ''));
-    $result = $auth->requestPasswordReset($emailValue);
-    $feedback = $result['message'];
-    $feedbackClass = $result['ok'] ? 'ok' : 'err';
-}
+$feedback = $authFeedback ?? null;
+$feedbackClass = $authFeedbackClass ?? 'ok';
+$emailValue = $authEmailValue ?? '';
 
 $pageUrl = portal_wct_public_path($baseUrl, 'index.php?page=forgot-password');
 $loginUrl = portal_wct_public_path($baseUrl, 'index.php?page=login');
