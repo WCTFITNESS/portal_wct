@@ -9,6 +9,7 @@ use App\Repositories\MessageTemplateRepository;
 use App\Repositories\RequestLogRepository;
 use App\Repositories\LexosOrderWebhookRepository;
 use App\Repositories\FindCepSettingsRepository;
+use App\Repositories\PortalUserRepository;
 use App\Repositories\ProtheusSettingsRepository;
 use App\Repositories\ProtheusSqlQueryHistoryRepository;
 use App\Repositories\ProtheusSqlSavedQueriesRepository;
@@ -54,6 +55,7 @@ use App\Services\RepasseMpService;
 use App\Services\MailService;
 use App\Services\TaskService;
 use App\Services\FindCepService;
+use App\Services\PortalAuthService;
 use App\Services\SswTrackingService;
 use App\Services\TokenService;
 
@@ -135,6 +137,12 @@ $taskRepository = new TaskRepository($pdo);
 $taskService = new TaskService($taskRepository, $mailService, (string) ($config['app']['base_url'] ?? '/'));
 $sswTrackingService = new SswTrackingService($config['ssw'] ?? null);
 $findCepService = new FindCepService($findCepSettingsRepository);
+$portalUserRepository = new PortalUserRepository($pdo);
+$portalAuthService = new PortalAuthService(
+    $portalUserRepository,
+    $mailService,
+    (string) ($config['app']['base_url'] ?? '/')
+);
 
 return [
     'config' => $config,
@@ -187,6 +195,8 @@ return [
     'sswTrackingService' => $sswTrackingService,
     'findCepSettingsRepository' => $findCepSettingsRepository,
     'findCepService' => $findCepService,
+    'portalUserRepository' => $portalUserRepository,
+    'portalAuthService' => $portalAuthService,
 ];
 
 $lexosHubSessionService->maintainHubSessionSilently();

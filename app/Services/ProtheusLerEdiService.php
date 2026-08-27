@@ -707,26 +707,26 @@ class ProtheusLerEdiService
 
         $map = [];
         foreach (array_chunk($docList, self::LOOKUP_CHUNK) as $chunk) {
-            $partial = $this->lookupPedidosByNf($pdo, $filial, $chunk);
+            $partial = $this->lookupPedidosByNf($pdo, $filial, $chunk, $hasZa4);
             foreach ($partial as $key => $info) {
-                if (!isset($map[$key])) {
-                    $map[$key] = $info;
-                }
+                $map[$key] = $this->preferMarketplaceInfo($map[$key] ?? null, $info);
             }
             unset($partial);
         }
         unset($docList);
 
         if ($hasZa4) {
-            $idlexos = [];
+            $lexKeys = [];
             foreach ($map as $info) {
-                $id = trim((string) ($info['IDLEXOS'] ?? ''));
-                if ($id !== '') {
-                    $idlexos[$id] = true;
+                foreach ([$info['IDLEXOS'] ?? '', $info['F2_IDHUB'] ?? ''] as $id) {
+                    $id = trim((string) $id);
+                    if ($id !== '') {
+                        $lexKeys[$id] = true;
+                    }
                 }
             }
-            $idList = array_keys($idlexos);
-            unset($idlexos);
+            $idList = array_keys($lexKeys);
+            unset($lexKeys);
             if ($idList !== []) {
                 $pedMarByLex = [];
                 foreach (array_chunk($idList, self::LOOKUP_CHUNK) as $chunk) {
@@ -739,15 +739,84 @@ class ProtheusLerEdiService
                 unset($idList);
                 if ($pedMarByLex !== []) {
                     foreach ($map as &$info) {
-                        $id = trim((string) ($info['IDLEXOS'] ?? ''));
-                        if ($id !== '' && ($info['PED_MAR'] ?? '') === '' && isset($pedMarByLex[$id])) {
-                            $info['PED_MAR'] = $pedMarByLex[$id];
+                        if (trim((string) ($info['PED_MAR'] ?? '')) !== '') {
+                            continue;
+                        }
+                        foreach ([$info['IDLEXOS'] ?? '', $info['F2_IDHUB'] ?? ''] as $id) {
+                            $id = trim((string) $id);
+                            if ($id !== '' && isset($pedMarByLex[$id])) {
+                                $info['PED_MAR'] = $pedMarByLex[$id];
+                                break;
+                            }
                         }
                     }
                     unset($info);
                 }
                 unset($pedMarByLex);
             }
+        }
+
+        // 2a passagem: NF da serie do EDI sem ped.mar — busca outra serie/SC5 da mesma NF.
+        $sparseDocs = [];
+        foreach ($map as $key => $info) {
+            if (!str_ends_with($key, '|*')) {
+                continue;
+            }
+            if ($this->marketplaceScore($info) > 0) {
+                continue;
+            }
+            $doc = substr($key, 0, -2);
+            if ($doc !== '') {
+                $sparseDocs[$doc] = true;
+            }
+        }
+        // Tambem NFs cujo hit "any" ainda e fraco, mas alguma chave exact pode ter ficado sparse.
+        foreach ($map as $key => $info) {
+            if (str_ends_with($key, '|*')) {
+                continue;
+            }
+            if ($this->marketplaceScore($info) > 0) {
+                continue;
+            }
+            $doc = explode('|', $key, 2)[0] ?? '';
+            if ($doc !== '') {
+                $sparseDocs[$doc] = true;
+            }
+        }
+        $sparseList = array_keys($sparseDocs);
+        unset($sparseDocs);
+        if ($sparseList !== []) {
+            foreach (array_chunk($sparseList, self::LOOKUP_CHUNK) as $chunk) {
+                foreach ($this->lookupMarketplaceByNfAnySerie($pdo, $filial, $chunk) as $doc => $info) {
+                    $anyKey = $doc . '|*';
+                    $map[$anyKey] = $this->preferMarketplaceInfo($map[$anyKey] ?? null, $info);
+                    foreach ($map as $key => $existing) {
+                        if (!str_starts_with($key, $doc . '|') || $key === $anyKey) {
+                            continue;
+                        }
+                        if ($this->marketplaceScore($existing) === 0) {
+                            $map[$key] = $this->mergeMarketplaceFields($existing, $info);
+                        }
+                    }
+                }
+            }
+            if ($hasZa4) {
+                foreach (array_chunk($sparseList, self::LOOKUP_CHUNK) as $chunk) {
+                    foreach ($this->lookupMarketplaceByZa4Doc($pdo, $filial, $chunk) as $doc => $info) {
+                        $anyKey = $doc . '|*';
+                        $map[$anyKey] = $this->preferMarketplaceInfo($map[$anyKey] ?? null, $info);
+                        foreach ($map as $key => $existing) {
+                            if (!str_starts_with($key, $doc . '|') || $key === $anyKey) {
+                                continue;
+                            }
+                            if ($this->marketplaceScore($existing) === 0) {
+                                $map[$key] = $this->mergeMarketplaceFields($existing, $info);
+                            }
+                        }
+                    }
+                }
+            }
+            unset($sparseList);
         }
 
         foreach ($rows as &$row) {
@@ -768,6 +837,12 @@ class ProtheusLerEdiService
             if ($hit === null) {
                 continue;
             }
+
+            // Serie exata pode apontar SC5 sem ped.mar; completa com outro SC5 da mesma NF.
+            if ($this->marketplaceScore($hit) === 0 && isset($map[$doc . '|*'])) {
+                $hit = $this->mergeMarketplaceFields($hit, $map[$doc . '|*']);
+            }
+
             $row['PEDIDO_PROTHEUS'] = (string) ($hit['PEDIDO_PROTHEUS'] ?? '');
             $row['IDLEXOS'] = (string) ($hit['IDLEXOS'] ?? '');
             $row['PED_MAR'] = (string) ($hit['PED_MAR'] ?? '');
@@ -784,7 +859,7 @@ class ProtheusLerEdiService
      * @param list<string> $docs
      * @return array<string, array<string, string>>
      */
-    private function lookupPedidosByNf(PDO $pdo, string $filial, array $docs): array
+    private function lookupPedidosByNf(PDO $pdo, string $filial, array $docs, bool $hasZa4): array
     {
         $sf2 = ProtheusSqlHelper::tbl('SF2010', 'SF2');
         $sc5 = ProtheusSqlHelper::tbl('SC5010', 'SC5');
@@ -799,13 +874,51 @@ class ProtheusLerEdiService
         }
 
         $inList = implode(', ', $placeholders);
+        $za4Apply = '';
+        $pedMarSelect = 'RTRIM(SC5.C5_PEDMAR) AS PED_MAR';
+        if ($hasZa4) {
+            $za4 = ProtheusSqlHelper::tbl('ZA4010', 'Z');
+            $za4Meta = ProtheusZa4LexosSchema::resolveZa4JoinFromSc5($pdo);
+            $pedmarCol = $za4Meta['pedmar_col'];
+            $za4Apply = <<<SQL
+
+OUTER APPLY (
+    SELECT TOP 1 RTRIM(Z.{$pedmarCol}) AS ZA4_PEDMAR
+    FROM {$za4}
+    WHERE Z.ZA4_FILIAL = SC5.C5_FILIAL
+      AND Z.D_E_L_E_T_ = ' '
+      AND RTRIM(ISNULL(Z.{$pedmarCol}, '')) <> ''
+      AND (
+            (RTRIM(ISNULL(SC5.C5_ZIDLEX, '')) <> '' AND RTRIM(Z.ZA4_IDLEXO) = RTRIM(SC5.C5_ZIDLEX))
+         OR (RTRIM(ISNULL(SF2.F2_IDHUB, '')) <> '' AND RTRIM(Z.ZA4_IDLEXO) = RTRIM(SF2.F2_IDHUB))
+      )
+    ORDER BY CASE
+        WHEN RTRIM(ISNULL(SC5.C5_ZIDLEX, '')) <> '' AND RTRIM(Z.ZA4_IDLEXO) = RTRIM(SC5.C5_ZIDLEX) THEN 0
+        ELSE 1
+    END
+) ZA4
+SQL;
+            $pedMarSelect = "COALESCE(NULLIF(RTRIM(SC5.C5_PEDMAR), ''), NULLIF(RTRIM(ZA4.ZA4_PEDMAR), '')) AS PED_MAR";
+            $orderPed = <<<'SQL'
+CASE
+        WHEN RTRIM(ISNULL(SC5.C5_PEDMAR, '')) <> '' THEN 0
+        WHEN RTRIM(ISNULL(ZA4.ZA4_PEDMAR, '')) <> '' THEN 0
+        ELSE 1
+    END
+SQL;
+        } else {
+            $orderPed = <<<'SQL'
+CASE WHEN RTRIM(ISNULL(SC5.C5_PEDMAR, '')) <> '' THEN 0 ELSE 1 END
+SQL;
+        }
+
         $sql = <<<SQL
 SELECT
     RTRIM(SF2.F2_DOC) AS NOTAFISCAL,
     RTRIM(SF2.F2_SERIE) AS SERIE,
     RTRIM(SC5.C5_NUM) AS PEDIDO_PROTHEUS,
     RTRIM(SC5.C5_ZIDLEX) AS IDLEXOS,
-    RTRIM(SC5.C5_PEDMAR) AS PED_MAR,
+    {$pedMarSelect},
     RTRIM(SC5.C5_ZMAKET) AS MARKETPLACE,
     RTRIM(SF2.F2_IDHUB) AS F2_IDHUB
 FROM {$sf2}
@@ -816,10 +929,15 @@ INNER JOIN {$sc5}
    AND SF2.F2_CLIENTE = SC5.C5_CLIENTE
    AND SF2.F2_LOJA = SC5.C5_LOJACLI
    AND SC5.D_E_L_E_T_ = ' '
+{$za4Apply}
 WHERE SF2.F2_FILIAL = :filial_sf2
   AND SF2.D_E_L_E_T_ = ' '
   AND SF2.F2_DOC IN ({$inList})
-ORDER BY SC5.C5_NUM DESC
+ORDER BY
+    {$orderPed},
+    CASE WHEN RTRIM(ISNULL(SC5.C5_ZIDLEX, '')) <> '' THEN 0 ELSE 1 END,
+    CASE WHEN RTRIM(ISNULL(SC5.C5_ZMAKET, '')) <> '' THEN 0 ELSE 1 END,
+    SC5.C5_NUM DESC
 SQL;
 
         $stmt = $pdo->prepare($sql);
@@ -852,16 +970,207 @@ SQL;
             $exact = $doc . '|' . $serie;
             $serieAlt = $doc . '|' . ltrim($serie, '0');
             $any = $doc . '|*';
-            // ORDER BY C5_NUM DESC: primeira ocorrencia ganha.
-            if (!isset($map[$exact])) {
-                $map[$exact] = $info;
+            $map[$exact] = $this->preferMarketplaceInfo($map[$exact] ?? null, $info);
+            $map[$serieAlt] = $this->preferMarketplaceInfo($map[$serieAlt] ?? null, $info);
+            $map[$any] = $this->preferMarketplaceInfo($map[$any] ?? null, $info);
+        }
+        $stmt->closeCursor();
+
+        return $map;
+    }
+
+    /**
+     * @param array<string, string>|null $current
+     * @param array<string, string> $candidate
+     * @return array<string, string>
+     */
+    private function preferMarketplaceInfo(?array $current, array $candidate): array
+    {
+        if ($current === null) {
+            return $candidate;
+        }
+        $scoreCurrent = $this->marketplaceScore($current);
+        $scoreCandidate = $this->marketplaceScore($candidate);
+        if ($scoreCandidate > $scoreCurrent) {
+            // Candidato tem mais dados marketplace; completa gaps a partir do atual.
+            return $this->mergeMarketplaceFields($candidate, $current);
+        }
+
+        // Mantem o atual e preenche campos vazios com o candidato.
+        return $this->mergeMarketplaceFields($current, $candidate);
+    }
+
+    /**
+     * Mantem pedido/serie do preferido e completa campos marketplace vazios.
+     *
+     * @param array<string, string> $primary
+     * @param array<string, string> $secondary
+     * @return array<string, string>
+     */
+    private function mergeMarketplaceFields(array $primary, array $secondary): array
+    {
+        foreach (['PED_MAR', 'MARKETPLACE', 'IDLEXOS', 'F2_IDHUB'] as $field) {
+            if (trim((string) ($primary[$field] ?? '')) === '' && trim((string) ($secondary[$field] ?? '')) !== '') {
+                $primary[$field] = trim((string) $secondary[$field]);
             }
-            if (!isset($map[$serieAlt])) {
-                $map[$serieAlt] = $info;
+        }
+        if (trim((string) ($primary['PEDIDO_PROTHEUS'] ?? '')) === ''
+            && trim((string) ($secondary['PEDIDO_PROTHEUS'] ?? '')) !== ''
+        ) {
+            $primary['PEDIDO_PROTHEUS'] = trim((string) $secondary['PEDIDO_PROTHEUS']);
+        }
+
+        return $primary;
+    }
+
+    /**
+     * @param array<string, string> $info
+     */
+    private function marketplaceScore(array $info): int
+    {
+        $score = 0;
+        if (trim((string) ($info['PED_MAR'] ?? '')) !== '') {
+            $score += 4;
+        }
+        if (trim((string) ($info['IDLEXOS'] ?? '')) !== '') {
+            $score += 2;
+        }
+        if (trim((string) ($info['MARKETPLACE'] ?? '')) !== '') {
+            $score += 1;
+        }
+
+        return $score;
+    }
+
+    /**
+     * Para NFs sem ped.mar na serie do EDI, busca qualquer SC5 da mesma NF com ped.mar/marketplace.
+     *
+     * @param list<string> $docs
+     * @return array<string, array<string, string>> keyed by normalized doc
+     */
+    private function lookupMarketplaceByNfAnySerie(PDO $pdo, string $filial, array $docs): array
+    {
+        $sc5 = ProtheusSqlHelper::tbl('SC5010', 'SC5');
+        $placeholders = [];
+        $params = [':filial' => $filial];
+        foreach ($docs as $i => $doc) {
+            $ph = ':n' . $i;
+            $placeholders[] = $ph;
+            $params[$ph] = $this->normalizeDoc($doc);
+        }
+        $inList = implode(', ', $placeholders);
+
+        $sql = <<<SQL
+SELECT
+    RTRIM(SC5.C5_NOTA) AS NOTAFISCAL,
+    RTRIM(SC5.C5_NUM) AS PEDIDO_PROTHEUS,
+    RTRIM(SC5.C5_ZIDLEX) AS IDLEXOS,
+    RTRIM(SC5.C5_PEDMAR) AS PED_MAR,
+    RTRIM(SC5.C5_ZMAKET) AS MARKETPLACE,
+    RTRIM(SC5.C5_IDHUB) AS F2_IDHUB
+FROM {$sc5}
+WHERE SC5.C5_FILIAL = :filial
+  AND SC5.D_E_L_E_T_ = ' '
+  AND SC5.C5_NOTA IN ({$inList})
+  AND (
+        RTRIM(ISNULL(SC5.C5_PEDMAR, '')) <> ''
+     OR RTRIM(ISNULL(SC5.C5_ZIDLEX, '')) <> ''
+     OR RTRIM(ISNULL(SC5.C5_ZMAKET, '')) <> ''
+  )
+ORDER BY
+    CASE WHEN RTRIM(ISNULL(SC5.C5_PEDMAR, '')) <> '' THEN 0 ELSE 1 END,
+    CASE WHEN RTRIM(ISNULL(SC5.C5_ZIDLEX, '')) <> '' THEN 0 ELSE 1 END,
+    SC5.C5_NUM DESC
+SQL;
+
+        $stmt = $pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value);
+        }
+        $stmt->execute();
+
+        $map = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
             }
-            if (!isset($map[$any])) {
-                $map[$any] = $info;
+            $doc = $this->normalizeDoc((string) ($row['NOTAFISCAL'] ?? ''));
+            if ($doc === '') {
+                continue;
             }
+            $info = [
+                'PEDIDO_PROTHEUS' => trim((string) ($row['PEDIDO_PROTHEUS'] ?? '')),
+                'IDLEXOS' => trim((string) ($row['IDLEXOS'] ?? '')),
+                'PED_MAR' => trim((string) ($row['PED_MAR'] ?? '')),
+                'MARKETPLACE' => trim((string) ($row['MARKETPLACE'] ?? '')),
+                'F2_IDHUB' => trim((string) ($row['F2_IDHUB'] ?? '')),
+            ];
+            $map[$doc] = $this->preferMarketplaceInfo($map[$doc] ?? null, $info);
+        }
+        $stmt->closeCursor();
+
+        return $map;
+    }
+
+    /**
+     * Fallback ZA4 por numero da NF (ZA4_DOC), quando SC5 da serie do EDI nao tem ped.mar.
+     *
+     * @param list<string> $docs
+     * @return array<string, array<string, string>> keyed by normalized doc
+     */
+    private function lookupMarketplaceByZa4Doc(PDO $pdo, string $filial, array $docs): array
+    {
+        $za4 = ProtheusSqlHelper::tbl('ZA4010', 'ZA4');
+        $za4Meta = ProtheusZa4LexosSchema::resolveZa4JoinFromSc5($pdo);
+        $pedmarCol = $za4Meta['pedmar_col'];
+
+        $placeholders = [];
+        $params = [':filial' => $filial];
+        foreach ($docs as $i => $doc) {
+            $ph = ':d' . $i;
+            $placeholders[] = $ph;
+            $params[$ph] = $this->normalizeDoc($doc);
+        }
+        $inList = implode(', ', $placeholders);
+
+        $sql = <<<SQL
+SELECT
+    RTRIM(ZA4.ZA4_DOC) AS NOTAFISCAL,
+    RTRIM(ZA4.ZA4_NUM) AS PEDIDO_PROTHEUS,
+    RTRIM(ZA4.ZA4_IDLEXO) AS IDLEXOS,
+    RTRIM(ZA4.{$pedmarCol}) AS PED_MAR,
+    RTRIM(ZA4.ZA4_MARKET) AS MARKETPLACE,
+    RTRIM(ZA4.ZA4_IDHUB) AS F2_IDHUB
+FROM {$za4}
+WHERE ZA4.ZA4_FILIAL = :filial
+  AND ZA4.D_E_L_E_T_ = ' '
+  AND RTRIM(ZA4.ZA4_DOC) IN ({$inList})
+  AND RTRIM(ISNULL(ZA4.{$pedmarCol}, '')) <> ''
+SQL;
+
+        $stmt = $pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value);
+        }
+        $stmt->execute();
+
+        $map = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $doc = $this->normalizeDoc((string) ($row['NOTAFISCAL'] ?? ''));
+            if ($doc === '') {
+                continue;
+            }
+            $info = [
+                'PEDIDO_PROTHEUS' => trim((string) ($row['PEDIDO_PROTHEUS'] ?? '')),
+                'IDLEXOS' => trim((string) ($row['IDLEXOS'] ?? '')),
+                'PED_MAR' => trim((string) ($row['PED_MAR'] ?? '')),
+                'MARKETPLACE' => trim((string) ($row['MARKETPLACE'] ?? '')),
+                'F2_IDHUB' => trim((string) ($row['F2_IDHUB'] ?? '')),
+            ];
+            $map[$doc] = $this->preferMarketplaceInfo($map[$doc] ?? null, $info);
         }
         $stmt->closeCursor();
 
@@ -875,6 +1184,8 @@ SQL;
     private function lookupPedMarByIdlexo(PDO $pdo, string $filial, array $idlexos): array
     {
         $za4 = ProtheusSqlHelper::tbl('ZA4010', 'ZA4');
+        $za4Meta = ProtheusZa4LexosSchema::resolveZa4JoinFromSc5($pdo);
+        $pedmarCol = $za4Meta['pedmar_col'];
         $placeholders = [];
         $params = [':filial_za4' => $filial];
         foreach ($idlexos as $i => $id) {
@@ -887,12 +1198,12 @@ SQL;
         $sql = <<<SQL
 SELECT
     RTRIM(ZA4.ZA4_IDLEXO) AS IDLEXOS,
-    RTRIM(ZA4.ZA4_PEDMAR) AS PED_MAR
+    RTRIM(ZA4.{$pedmarCol}) AS PED_MAR
 FROM {$za4}
 WHERE ZA4.ZA4_FILIAL = :filial_za4
   AND ZA4.D_E_L_E_T_ = ' '
-  AND ZA4.ZA4_IDLEXO IN ({$inList})
-  AND RTRIM(ISNULL(ZA4.ZA4_PEDMAR, '')) <> ''
+  AND RTRIM(ZA4.ZA4_IDLEXO) IN ({$inList})
+  AND RTRIM(ISNULL(ZA4.{$pedmarCol}, '')) <> ''
 SQL;
 
         $stmt = $pdo->prepare($sql);

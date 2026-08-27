@@ -9,6 +9,17 @@ $baseUrl = $app['config']['app']['base_url'];
 $trackingWctUrl = $app['config']['app']['tracking_wct_url'] ?? 'http://localhost:3001/admin/dashboard';
 $page = $_GET['page'] ?? 'dashboard';
 
+$app['portalAuthService']->ensureSession();
+$portalAuth = $app['portalAuthService'];
+$currentPortalUser = $portalAuth->currentUser();
+
+if ($page === 'health') {
+    header('Content-Type: text/plain; charset=utf-8');
+    http_response_code(200);
+    echo "ok\n";
+    exit;
+}
+
 if (isset($_GET['wct_code_internal']) && $_GET['wct_code_internal'] === 'token') {
     header('Content-Type: application/json; charset=utf-8');
     $secret = getenv('WCT_CODE_INTERNAL_SECRET') ?: 'wct-internal';
@@ -30,6 +41,26 @@ if (isset($_GET['wct_code_internal']) && $_GET['wct_code_internal'] === 'token')
         echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
+}
+
+// Bloqueia acesso anônimo cedo (inclui exports/AJAX antes do HTML).
+// Endpoints com chave própria (máquina a máquina) passam e validam a chave depois.
+$machineAuthPages = ['repasse-mp-sync-config'];
+if (
+    !in_array($page, \App\Services\PortalAuthService::publicPages(), true)
+    && !in_array($page, $machineAuthPages, true)
+    && $currentPortalUser === null
+) {
+    $earlyWantsJson = str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+        || strcasecmp((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''), 'XMLHttpRequest') === 0
+        || (string) ($_POST['ajax'] ?? '') === '1'
+        || (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_GET['ml_campanhas_action']));
+    if ($earlyWantsJson) {
+        header('Content-Type: application/json; charset=utf-8');
+        portal_wct_echo_json(['ok' => false, 'error' => 'Faça login para continuar.'], 401);
+        exit;
+    }
+    redirect_to('index.php?page=login');
 }
 
 $mlModulePages = [
@@ -351,10 +382,92 @@ $allowedPages = [
     'tasks',
     'rastreamento-ssw',
     'find-cep',
+    'login',
+    'forgot-password',
+    'reset-password',
+    'logout',
+    'health',
+    'config-usuarios',
 ];
 
 if (!in_array($page, $allowedPages, true)) {
     $page = 'dashboard';
+}
+
+$isAuthPublicPage = in_array($page, \App\Services\PortalAuthService::publicPages(), true);
+$wantsJson = str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+    || strcasecmp((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''), 'XMLHttpRequest') === 0
+    || (string) ($_POST['ajax'] ?? '') === '1';
+
+if ($page === 'logout') {
+    $portalAuth->logout();
+    redirect_to('index.php?page=login');
+}
+
+if (!$isAuthPublicPage) {
+    if ($currentPortalUser === null) {
+        if ($wantsJson) {
+            header('Content-Type: application/json; charset=utf-8');
+            portal_wct_echo_json(['ok' => false, 'error' => 'Faça login para continuar.'], 401);
+            exit;
+        }
+        redirect_to('index.php?page=login');
+    }
+    if (!$portalAuth->canAccessPage($currentPortalUser, $page)) {
+        if ($wantsJson) {
+            header('Content-Type: application/json; charset=utf-8');
+            portal_wct_echo_json(['ok' => false, 'error' => 'Sem permissão para este módulo.'], 403);
+            exit;
+        }
+        redirect_to('index.php?page=' . rawurlencode($portalAuth->firstAllowedPage($currentPortalUser)));
+    }
+} elseif ($currentPortalUser !== null && in_array($page, ['login', 'forgot-password', 'reset-password'], true)) {
+    redirect_to('index.php?page=' . rawurlencode($portalAuth->firstAllowedPage($currentPortalUser)));
+}
+
+if (
+    $page === 'find-cep'
+    && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && in_array((string) ($_POST['form_type'] ?? ''), ['findcep_call', 'findcep_test'], true)
+    && (
+        (string) ($_POST['ajax'] ?? '') === '1'
+        || strcasecmp((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''), 'XMLHttpRequest') === 0
+    )
+) {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $findCep = $app['findCepService'];
+        $formType = (string) ($_POST['form_type'] ?? '');
+        if ($formType === 'findcep_test') {
+            $result = $findCep->testConnection();
+            $activeOp = 'cep';
+        } else {
+            $activeOp = trim((string) ($_POST['operation'] ?? ''));
+            $params = is_array($_POST['params'] ?? null) ? $_POST['params'] : [];
+            $result = $findCep->execute($activeOp, $params);
+        }
+
+        $summary = '';
+        foreach ($findCep->catalog() as $item) {
+            if (($item['id'] ?? '') === $activeOp) {
+                $summary = (string) ($item['summary'] ?? '');
+                break;
+            }
+        }
+
+        portal_wct_echo_json([
+            'ok' => true,
+            'operation' => $activeOp,
+            'summary' => $summary,
+            'result' => $result,
+        ]);
+    } catch (Throwable $e) {
+        portal_wct_echo_json([
+            'ok' => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+    exit;
 }
 
 if (in_array($page, ['dashboard', 'ml-dashboard'], true)) {
@@ -721,7 +834,20 @@ $menuSections = [
         ['id' => 'wct-code-images', 'label' => 'Redimensionar imagens'],
         ['id' => 'wct-code-frete', 'label' => 'Relatório de frete'],
     ],
+    'Configurações' => [
+        ['id' => 'config-usuarios', 'label' => 'Usuários e acessos'],
+    ],
 ];
+
+$menuSections = $portalAuth->filterMenuSections($menuSections, $currentPortalUser);
+if ($currentPortalUser !== null) {
+    $menuSections['Conta'] = [
+        [
+            'id' => 'logout',
+            'label' => 'Sair (' . (string) ($currentPortalUser['name'] ?? 'usuário') . ')',
+        ],
+    ];
+}
 
 if ($page === 'repasse-mp' && isset($_GET['download']) && $_GET['download'] !== '') {
     $jobId = isset($_GET['job']) ? trim((string) $_GET['job']) : '';
@@ -1742,7 +1868,21 @@ if ($page === 'tasks' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         .wct-code-shell__frame { width: 100%; height: calc(100vh - 8px); min-height: calc(100vh - 8px); border: 0; display: block; background: #fff; }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-ler-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar', 'tasks'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?>">
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-ler-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar', 'tasks'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?><?= !empty($isAuthPublicPage) && $page !== 'logout' && $page !== 'health' ? ' page-auth' : '' ?>">
+<?php if (!empty($isAuthPublicPage) && in_array($page, ['login', 'forgot-password', 'reset-password'], true)): ?>
+<div class="layout" style="display:block;">
+    <main class="content" style="padding:0;">
+        <div class="container" style="max-width:none;padding:0;">
+            <?php require __DIR__ . '/pages/' . $page . '.php'; ?>
+        </div>
+    </main>
+</div>
+</body>
+</html>
+<?php
+    exit;
+endif;
+?>
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">

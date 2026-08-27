@@ -105,6 +105,17 @@ class FindCepService
                 ],
             ],
             [
+                'id' => 'consumo',
+                'group' => 'API Consumo',
+                'method' => 'GET',
+                'path' => '/v1/consumo/cliente/{client_id}/fid/{fid}',
+                'summary' => 'Monitor de consumo — uso do mês atual e dos 3 anteriores',
+                'featured' => true,
+                'uses_config' => true,
+                'config_note' => 'Usa automaticamente Client ID e FID salvos na configuração.',
+                'fields' => [],
+            ],
+            [
                 'id' => 'endereco_pesquisa',
                 'group' => 'API Endereço',
                 'method' => 'POST',
@@ -540,17 +551,6 @@ class FindCepService
                     ['name' => 'origin', 'label' => 'Origem lat,lon', 'required' => true],
                     ['name' => 'destination', 'label' => 'Destino lat,lon', 'required' => true],
                     ['name' => 'model', 'label' => 'Modelo', 'required' => true, 'placeholder' => 'car'],
-                ],
-            ],
-            [
-                'id' => 'consumo',
-                'group' => 'API Consumo',
-                'method' => 'GET',
-                'path' => '/v1/consumo/cliente/{client_id}/fid/{fid}',
-                'summary' => 'Relatório de uso (mês atual + 3 anteriores)',
-                'fields' => [
-                    ['name' => 'client_id', 'label' => 'Client ID', 'hint' => 'Vazio = usa config salva'],
-                    ['name' => 'fid', 'label' => 'FID', 'hint' => 'Vazio = usa config salva'],
                 ],
             ],
         ];

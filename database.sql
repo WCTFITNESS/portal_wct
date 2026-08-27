@@ -167,3 +167,18 @@ CREATE TABLE IF NOT EXISTS portal_task_events (
     created_at DATETIME NOT NULL,
     KEY idx_portal_task_events_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS portal_users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    email VARCHAR(200) NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_admin TINYINT(1) NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    modules_json TEXT NOT NULL,
+    reset_token_hash VARCHAR(128) DEFAULT NULL,
+    reset_expires_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uq_portal_users_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

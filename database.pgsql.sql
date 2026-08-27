@@ -159,3 +159,17 @@ CREATE TABLE IF NOT EXISTS portal_task_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_portal_task_events_task ON portal_task_events (task_id);
+
+CREATE TABLE IF NOT EXISTS portal_users (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    email VARCHAR(200) NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    modules_json TEXT NOT NULL DEFAULT '[]',
+    reset_token_hash TEXT DEFAULT NULL,
+    reset_expires_at TIMESTAMP DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
