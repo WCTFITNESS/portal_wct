@@ -1500,6 +1500,46 @@ if ($page === 'tasks' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         $taskRedirect('index.php?page=tasks&flash_err=' . rawurlencode($exception->getMessage()));
     }
 }
+
+// Login / recuperação: processar e renderizar ANTES de qualquer HTML do layout
+// (senão session_regenerate_id/redirect quebram com "headers already sent").
+if (in_array($page, ['login', 'forgot-password', 'reset-password'], true)) {
+    $faviconHref = portal_wct_public_path($baseUrl, 'favicon.svg');
+    ?>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Portal WCT — Login</title>
+    <link rel="icon" type="image/svg+xml" href="<?= htmlspecialchars($faviconHref, ENT_QUOTES, 'UTF-8') ?>">
+    <link rel="shortcut icon" href="<?= htmlspecialchars($faviconHref, ENT_QUOTES, 'UTF-8') ?>">
+    <style>
+        :root {
+            --wct-bg: #f4f5f7;
+            --wct-surface: #ffffff;
+            --wct-text: #1f2937;
+            --wct-muted: #6b7280;
+            --wct-primary: #d50000;
+            --wct-border: #e5e7eb;
+        }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; margin: 0; background: var(--wct-bg); color: var(--wct-text); }
+        label { display: block; margin-top: 10px; font-weight: 600; }
+        input, select, textarea, button { width: 100%; padding: 10px; margin-top: 6px; border-radius: 8px; border: 1px solid var(--wct-border); }
+        button { background: #111; color: #f5b700; border: 0; cursor: pointer; font-weight: 700; }
+        button:hover { filter: brightness(1.05); }
+        .feedback.ok, .msg.ok { color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 10px 12px; border-radius: 8px; }
+        .feedback.err, .msg.err { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; padding: 10px 12px; border-radius: 8px; }
+    </style>
+</head>
+<body class="page-auth">
+<?php require __DIR__ . '/pages/' . $page . '.php'; ?>
+</body>
+</html>
+    <?php
+    exit;
+}
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -1868,21 +1908,7 @@ if ($page === 'tasks' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         .wct-code-shell__frame { width: 100%; height: calc(100vh - 8px); min-height: calc(100vh - 8px); border: 0; display: block; background: #fff; }
     </style>
 </head>
-<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-ler-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar', 'tasks'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?><?= !empty($isAuthPublicPage) && $page !== 'logout' && $page !== 'health' ? ' page-auth' : '' ?>">
-<?php if (!empty($isAuthPublicPage) && in_array($page, ['login', 'forgot-password', 'reset-password'], true)): ?>
-<div class="layout" style="display:block;">
-    <main class="content" style="padding:0;">
-        <div class="container" style="max-width:none;padding:0;">
-            <?php require __DIR__ . '/pages/' . $page . '.php'; ?>
-        </div>
-    </main>
-</div>
-</body>
-</html>
-<?php
-    exit;
-endif;
-?>
+<body class="<?= in_array($page, ['protheus-monitor-romaneio', 'protheus-monitor-pedidos', 'protheus-monitor-nfe', 'protheus-consulta-edi', 'protheus-ler-edi', 'protheus-monitor-pedidos-erro', 'protheus-consulta-sql', 'ml-dashboard', 'ml-ads-report', 'ml-catalogos', 'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas', 'ml-anuncios-inativos', 'ml-redimensionar', 'tasks'], true) ? 'page-protheus-monitor-full' : '' ?><?= $isWctCodeModulePage ? ' page-wct-code-full' : '' ?>">
 <div class="layout">
     <aside class="sidebar">
         <div class="brand">

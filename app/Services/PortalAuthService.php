@@ -143,7 +143,9 @@ class PortalAuthService
             return false;
         }
 
-        session_regenerate_id(true);
+        if (!headers_sent() && session_status() === PHP_SESSION_ACTIVE) {
+            session_regenerate_id(true);
+        }
         $_SESSION[self::SESSION_USER_ID] = (int) $user['id'];
 
         return true;
@@ -152,7 +154,7 @@ class PortalAuthService
     public function logout(): void
     {
         unset($_SESSION[self::SESSION_USER_ID]);
-        if (session_status() === PHP_SESSION_ACTIVE) {
+        if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
             session_regenerate_id(true);
         }
     }
