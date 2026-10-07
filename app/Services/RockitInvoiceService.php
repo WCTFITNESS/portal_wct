@@ -31,7 +31,8 @@ class RockitInvoiceService
 
     public function __construct(
         private RockitSettingsRepository $repository,
-        private SecretBox $secretBox
+        private SecretBox $secretBox,
+        private string $preferredCnpj = ''
     ) {
     }
 
@@ -69,7 +70,7 @@ class RockitInvoiceService
         $idCompany = (string) ($current['id_company'] ?? '');
         $ids = array_map(static fn (array $c): string => (string) ($c['IDCompany'] ?? ''), $companies);
         if ($idCompany === '' || !in_array($idCompany, $ids, true)) {
-            $idCompany = $ids[0] ?? '';
+            $idCompany = $this->preferredCompanyId($companies) ?? ($ids[0] ?? '');
         }
 
         $this->repository->save([
@@ -83,6 +84,39 @@ class RockitInvoiceService
         ]);
 
         return ['companies' => $companies, 'id_company' => $idCompany];
+    }
+
+    /** Empresa do login cujo CNPJ tem a mesma raiz do CNPJ da WCT. */
+    private function preferredCompanyId(array $companies): ?string
+    {
+        $root = substr(preg_replace('/\D/', '', $this->preferredCnpj) ?? '', 0, 8);
+        if (strlen($root) !== 8) {
+            return null;
+        }
+        $fallback = null;
+        foreach ($companies as $c) {
+            $doc = preg_replace('/\D/', '', (string) ($c['CompanyCpfCnpj'] ?? '')) ?? '';
+            if ($doc === preg_replace('/\D/', '', $this->preferredCnpj)) {
+                return (string) ($c['IDCompany'] ?? '');
+            }
+            if ($fallback === null && str_starts_with($doc, $root)) {
+                $fallback = (string) ($c['IDCompany'] ?? '');
+            }
+        }
+
+        return $fallback;
+    }
+
+    public function currentCompanyLabel(): string
+    {
+        $status = $this->getStatus();
+        foreach ($status['companies'] as $c) {
+            if ((string) ($c['IDCompany'] ?? '') === $status['id_company']) {
+                return trim((string) ($c['AccountName'] ?? '') . ' — CNPJ ' . (string) ($c['CompanyCpfCnpj'] ?? ''));
+            }
+        }
+
+        return $status['id_company'] !== '' ? 'IDCompany ' . $status['id_company'] : 'nenhuma';
     }
 
     public function setCompany(string $idCompany): void

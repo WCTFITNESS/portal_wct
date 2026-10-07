@@ -153,7 +153,7 @@ $secretBox = new SecretBox(
 $sefazDfeRepository = new SefazDfeRepository($pdo);
 $sefazCteDistribuicaoService = new SefazCteDistribuicaoService($sefazDfeRepository, $secretBox);
 $rockitRepository = new RockitSettingsRepository($pdo);
-$rockitService = new RockitInvoiceService($rockitRepository, $secretBox);
+$rockitService = new RockitInvoiceService($rockitRepository, $secretBox, (string) ($config['ssw']['cnpj'] ?? ''));
 $portalUserRepository = new PortalUserRepository($pdo);
 $portalAuthService = new PortalAuthService(
     $portalUserRepository,

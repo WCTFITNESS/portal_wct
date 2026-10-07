@@ -61,6 +61,9 @@ if ($listed) {
         $result = $rockit->listOrders($de, $ate, $invoiceStatus);
         $orders = array_map([RockitInvoiceService::class, 'summarizeOrder'], $result['orders']);
         $truncated = $result['truncated'];
+        if ($orders === []) {
+            $showDiag = $showDiag || $isPortalAdmin;
+        }
     } catch (Throwable $e) {
         $feedback = $e->getMessage();
         $feedbackClass = 'err';
@@ -106,10 +109,25 @@ $fmtDate = static fn (string $v): string => $v !== '' && strtotime($v) ? date('d
             Login da Rock.IT ainda não cadastrado. <?= $isPortalAdmin ? 'Cadastre no fim da página.' : 'Peça a um administrador do portal.' ?>
         </p>
     <?php else: ?>
+        <div class="cbf-actions" style="margin-bottom:6px">
+            <span>Empresa consultada na Rock.IT: <strong><?= htmlspecialchars($rockit->currentCompanyLabel()) ?></strong></span>
+            <?php if ($isPortalAdmin && count($status['companies']) > 1): ?>
+                <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" class="cbf-actions" style="margin:0">
+                    <input type="hidden" name="form_type" value="rockit_company">
+                    <select name="id_company" style="width:auto;margin-top:0">
+                        <?php foreach ($status['companies'] as $c): ?>
+                            <option value="<?= htmlspecialchars((string) ($c['IDCompany'] ?? '')) ?>"<?= (string) ($c['IDCompany'] ?? '') === $status['id_company'] ? ' selected' : '' ?>>
+                                <?= htmlspecialchars((string) ($c['AccountName'] ?? '') . ' — ' . (string) ($c['CompanyCpfCnpj'] ?? '')) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <button type="submit" style="margin-top:0">Trocar empresa</button>
+                </form>
+            <?php endif; ?>
+        </div>
         <form method="get" action="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php')) ?>">
             <input type="hidden" name="page" value="casasbahia-full">
             <input type="hidden" name="listar" value="1">
-            <?php if ($showDiag): ?><input type="hidden" name="diag" value="1"><?php endif; ?>
             <div class="cbf-grid">
                 <div><label>Compra de</label><input type="date" name="de" value="<?= htmlspecialchars($de) ?>" required></div>
                 <div><label>Compra até</label><input type="date" name="ate" value="<?= htmlspecialchars($ate) ?>" required></div>
@@ -134,7 +152,15 @@ $fmtDate = static fn (string $v): string => $v !== '' && strtotime($v) ? date('d
                     </div>
                 <?php endif; ?>
             </div>
-            <div class="cbf-actions"><button type="submit">Listar pedidos do Full</button></div>
+            <div class="cbf-actions">
+                <button type="submit">Listar pedidos do Full</button>
+                <?php if ($isPortalAdmin): ?>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:16px">
+                        <input type="checkbox" name="diag" value="1" style="width:auto;margin:0"<?= $showDiag ? ' checked' : '' ?>> mostrar resposta da Rock.IT
+                    </label>
+                <?php endif; ?>
+            </div>
+            <p class="cbf-hint">O período é pela data da compra. Se não vier nada, tente "Status da nota: Todos" e um período maior.</p>
         </form>
 
         <?php if ($listed): ?>
