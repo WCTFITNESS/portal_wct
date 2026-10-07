@@ -42,6 +42,7 @@ use App\Services\MlCatalogListService;
 use App\Services\MlPromotionsService;
 use App\Services\MlInactiveAdsService;
 use App\Services\MlImageResizeService;
+use App\Services\MlInvoiceBatchService;
 use App\Services\OrderService;
 use App\Services\ProtheusConnectionService;
 use App\Services\ProtheusRomaneioMonitorService;
@@ -91,6 +92,7 @@ $mlCatalogListService = new MlCatalogListService($tokenService, $client, $settin
 $mlPromotionsService = new MlPromotionsService($tokenService, $client, $settingsRepository);
 $mlInactiveAdsService = new MlInactiveAdsService($tokenService, $client, $settingsRepository);
 $mlImageResizeService = new MlImageResizeService();
+$mlInvoiceBatchService = new MlInvoiceBatchService($tokenService, $settingsRepository);
 $trackingDatabaseUrl = static function () use ($settingsRepository): string {
     $cfg = $settingsRepository->getApiConfig() ?? [];
     $portalUrl = trim((string) ($cfg['tracking_database_url'] ?? ''));
@@ -173,6 +175,7 @@ return [
     'mlPromotionsService' => $mlPromotionsService,
     'mlInactiveAdsService' => $mlInactiveAdsService,
     'mlImageResizeService' => $mlImageResizeService,
+    'mlInvoiceBatchService' => $mlInvoiceBatchService,
     'lexosAuthService' => $lexosAuthService,
     'lexosCredentialsService' => $lexosCredentialsService,
     'lexosHubSessionService' => $lexosHubSessionService,

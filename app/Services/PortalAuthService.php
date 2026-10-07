@@ -48,7 +48,7 @@ class PortalAuthService
                 'pages' => [
                     'ml-dashboard', 'api-config', 'orders', 'ml-catalogos',
                     'ml-campanhas', 'ml-campanhas-pendentes', 'ml-campanhas-ativas',
-                    'ml-anuncios-inativos', 'ml-ads-report', 'ml-redimensionar',
+                    'ml-anuncios-inativos', 'ml-ads-report', 'ml-redimensionar', 'ml-notas-fiscais',
                     'message-template', 'manual-send',
                 ],
             ],

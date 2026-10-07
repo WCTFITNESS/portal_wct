@@ -363,6 +363,7 @@ $allowedPages = [
     'ml-campanhas-ativas',
     'ml-anuncios-inativos',
     'ml-redimensionar',
+    'ml-notas-fiscais',
     'wct-code-dashboard',
     'wct-code-campanhas',
     'wct-code-campanhas-pendentes',
@@ -837,6 +838,7 @@ $menuSections = [
         ['id' => 'ml-anuncios-inativos', 'label' => 'Anúncios inativos'],
         ['id' => 'ml-ads-report', 'label' => 'Relatório de anúncios'],
         ['id' => 'ml-redimensionar', 'label' => 'Redimensionar imagens'],
+        ['id' => 'ml-notas-fiscais', 'label' => 'Notas fiscais (XML)'],
         ['id' => 'message-template', 'label' => 'Mensageria ML'],
     ],
     'Lexos' => [
@@ -919,6 +921,30 @@ if ($page === 'repasse-mp' && isset($_GET['download']) && $_GET['download'] !== 
     header('Content-Disposition: attachment; filename="' . $fileName . '"');
     header('Content-Length: ' . (string) filesize($filePath));
     readfile($filePath);
+    exit;
+}
+
+if ($page === 'ml-notas-fiscais' && ($_GET['download'] ?? '') === '1') {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    session_write_close();
+    ignore_user_abort(false);
+    @set_time_limit(0);
+    try {
+        $app['mlInvoiceBatchService']->streamZip(
+            (string) ($_GET['de'] ?? ''),
+            (string) ($_GET['ate'] ?? ''),
+            is_array($_GET['tipos'] ?? null) ? array_map('strval', $_GET['tipos']) : [],
+            !empty($_GET['pdf'])
+        );
+    } catch (Throwable $e) {
+        $back = $_GET;
+        unset($back['download']);
+        $back['page'] = 'ml-notas-fiscais';
+        $back['flash_err'] = $e->getMessage();
+        header('Location: ' . portal_wct_public_path($baseUrl, 'index.php?' . http_build_query($back)), true, 302);
+    }
     exit;
 }
 
