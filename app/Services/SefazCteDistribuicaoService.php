@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Lib\SecretBox;
 use App\Lib\SimpleZipWriter;
 use App\Repositories\SefazDfeRepository;
 use DOMDocument;
@@ -11,8 +12,8 @@ use DOMXPath;
 use RuntimeException;
 
 /**
- * Baixa da SEFAZ (Ambiente Nacional, serviço CTeDistribuicaoDFe) todos os CT-e e eventos em que o CNPJ da WCT
- * aparece (remetente, tomador etc.), usando o certificado A1 da empresa.
+ * Baixa da SEFAZ (Ambiente Nacional, serviço CTeDistribuicaoDFe) todos os CT-e e eventos em que cada CNPJ cadastrado
+ * aparece (remetente, tomador etc.), usando o certificado A1 daquela empresa.
  * Regras da SEFAZ: lotes de até 50 documentos, só os últimos 3 meses, e 1 hora de espera quando não há mais nada novo.
  */
 class SefazCteDistribuicaoService
@@ -33,68 +34,77 @@ class SefazCteDistribuicaoService
 
     public function __construct(
         private SefazDfeRepository $repository,
-        private string $encryptionKey,
-        private bool $keyFromEnv
+        private SecretBox $secretBox
     ) {
     }
 
     public function isKeyFromEnv(): bool
     {
-        return $this->keyFromEnv;
+        return $this->secretBox->isKeyFromEnv();
     }
 
-    /** Situação para a tela (nunca inclui o certificado). */
-    public function getStatus(): array
+    /** @return list<array<string, mixed>> situação de cada empresa (nunca inclui o certificado) */
+    public function listProfilesStatus(): array
     {
-        $settings = $this->repository->getSettings() ?? [];
-        $nextSync = !empty($settings['next_sync_at']) ? strtotime((string) $settings['next_sync_at']) : false;
-        $validTo = !empty($settings['cert_valid_to']) ? strtotime((string) $settings['cert_valid_to']) : false;
-        unset($settings['cert_blob']);
+        return array_map(fn (array $row): array => $this->statusOf($row), $this->repository->listProfiles());
+    }
 
-        return $settings + [
-            'has_cert' => $this->hasCertificate(),
+    public function getStatus(int $profileId): ?array
+    {
+        $row = $this->repository->getProfile($profileId);
+
+        return $row !== null ? $this->statusOf($row) : null;
+    }
+
+    /** @param array<string, mixed> $row */
+    private function statusOf(array $row): array
+    {
+        $nextSync = !empty($row['next_sync_at']) ? strtotime((string) $row['next_sync_at']) : false;
+        $validTo = !empty($row['cert_valid_to']) ? strtotime((string) $row['cert_valid_to']) : false;
+        $hasCert = trim((string) ($row['cert_blob'] ?? '')) !== '';
+        unset($row['cert_blob']);
+
+        return [
+            'has_cert' => $hasCert,
             'cert_expired' => $validTo !== false && $validTo < time(),
             'can_sync_now' => $nextSync === false || $nextSync <= time(),
             'next_sync_ts' => $nextSync ?: null,
-            'cnpj' => '',
-            'uf_autor' => '42',
-            'ult_nsu' => '0',
-            'max_nsu' => '0',
-        ];
+            'label' => trim((string) ($row['apelido'] ?? '')) !== '' ? (string) $row['apelido'] : (string) ($row['cert_subject'] ?? $row['cnpj'] ?? ''),
+        ] + $row;
     }
 
-    public function hasCertificate(): bool
+    public function saveConfig(int $profileId, string $cnpj, string $ufCode, string $apelido): void
     {
-        $settings = $this->repository->getSettings();
-
-        return $settings !== null && trim((string) ($settings['cert_blob'] ?? '')) !== '';
-    }
-
-    public function saveConfig(string $cnpj, string $ufCode): void
-    {
-        $cnpj = preg_replace('/\D/', '', $cnpj) ?? '';
-        if (strlen($cnpj) !== 14) {
-            throw new RuntimeException('Informe o CNPJ com 14 dígitos.');
+        $current = $this->repository->getProfile($profileId);
+        if ($current === null) {
+            throw new RuntimeException('Empresa não encontrada.');
         }
+        $cnpj = $this->normalizeCnpj($cnpj);
         if (!isset(self::UF_CODES[$ufCode])) {
             throw new RuntimeException('UF inválida.');
         }
+        $this->assertCnpjFree($cnpj, $profileId);
 
-        $current = $this->repository->getSettings() ?? [];
-        $fields = ['cnpj' => $cnpj, 'uf_autor' => $ufCode];
+        $fields = ['cnpj' => $cnpj, 'uf_autor' => $ufCode, 'apelido' => $this->cleanApelido($apelido)];
         if (($current['cnpj'] ?? '') !== '' && $current['cnpj'] !== $cnpj) {
             // NSU é sequencial por CNPJ: trocar de empresa recomeça do zero.
             $fields += ['ult_nsu' => '0', 'max_nsu' => '0', 'next_sync_at' => null];
         }
-        $this->repository->saveSettings($fields);
+        $this->repository->updateProfile($profileId, $fields);
+    }
+
+    public function deleteProfile(int $profileId): void
+    {
+        $this->repository->deleteProfile($profileId);
     }
 
     /**
      * Lê o .pfx, valida e guarda certificado + chave cifrados. A senha não é armazenada.
+     * Sem $profileId cria uma empresa nova (ou atualiza a que já usa o mesmo CNPJ).
      *
-     * @return array{subject: string, cnpj: string, valid_to: string}
+     * @return array{id: int, subject: string, cnpj: string, valid_to: string}
      */
-    public function importCertificate(string $pfxBinary, string $password): array
+    public function importCertificate(?int $profileId, string $pfxBinary, string $password, string $cnpj = '', string $ufCode = '42', string $apelido = ''): array
     {
         if ($pfxBinary === '') {
             throw new RuntimeException('Selecione o arquivo do certificado (.pfx ou .p12).');
@@ -117,7 +127,7 @@ class SefazCteDistribuicaoService
         $subject = (string) ($info['subject']['CN'] ?? $info['name'] ?? '');
         $certCnpj = preg_match('/(\d{14})/', $subject, $m) ? $m[1] : '';
 
-        $blob = $this->encrypt(json_encode([
+        $blob = $this->secretBox->encrypt(json_encode([
             'cert' => $parts['cert'],
             'pkey' => $parts['pkey'],
             'chain' => $parts['chain'],
@@ -129,22 +139,44 @@ class SefazCteDistribuicaoService
             'cert_cnpj' => $certCnpj !== '' ? $certCnpj : null,
             'cert_valid_to' => $validTo > 0 ? date('Y-m-d H:i:s', $validTo) : null,
         ];
-        $current = $this->repository->getSettings() ?? [];
-        if (trim((string) ($current['cnpj'] ?? '')) === '' && $certCnpj !== '') {
-            $fields['cnpj'] = $certCnpj;
+
+        if ($profileId !== null) {
+            if ($this->repository->getProfile($profileId) === null) {
+                throw new RuntimeException('Empresa não encontrada.');
+            }
+            $this->repository->updateProfile($profileId, $fields);
+        } else {
+            $cnpj = trim($cnpj) !== '' ? $this->normalizeCnpj($cnpj) : $certCnpj;
+            if (strlen($cnpj) !== 14) {
+                throw new RuntimeException('Não achei o CNPJ dentro do certificado. Informe o CNPJ da empresa.');
+            }
+            if (!isset(self::UF_CODES[$ufCode])) {
+                throw new RuntimeException('UF inválida.');
+            }
+            $existing = $this->findProfileByCnpj($cnpj);
+            if ($existing !== null) {
+                $profileId = (int) $existing['id'];
+                $this->repository->updateProfile($profileId, $fields + ($apelido !== '' ? ['apelido' => $this->cleanApelido($apelido)] : []));
+            } else {
+                $profileId = $this->repository->createProfile($fields + [
+                    'cnpj' => $cnpj,
+                    'uf_autor' => $ufCode,
+                    'apelido' => $this->cleanApelido($apelido),
+                ]);
+            }
         }
-        $this->repository->saveSettings($fields);
 
         return [
+            'id' => $profileId,
             'subject' => $subject,
             'cnpj' => $certCnpj,
             'valid_to' => $validTo > 0 ? date('d/m/Y', $validTo) : '',
         ];
     }
 
-    public function removeCertificate(): void
+    public function removeCertificate(int $profileId): void
     {
-        $this->repository->saveSettings([
+        $this->repository->updateProfile($profileId, [
             'cert_blob' => null,
             'cert_subject' => null,
             'cert_cnpj' => null,
@@ -153,14 +185,76 @@ class SefazCteDistribuicaoService
     }
 
     /**
+     * Busca em todas as empresas com certificado que já podem consultar.
+     *
+     * @return list<array{empresa: string, novos: int, mensagem: string}>
+     */
+    public function syncAll(): array
+    {
+        $results = [];
+        foreach ($this->listProfilesStatus() as $profile) {
+            if (!$profile['has_cert'] || $profile['cert_expired']) {
+                continue;
+            }
+            try {
+                $r = $this->sync((int) $profile['id']);
+                $results[] = ['empresa' => $profile['label'], 'novos' => $r['novos'], 'mensagem' => $r['mensagem']];
+            } catch (RuntimeException $e) {
+                $results[] = ['empresa' => $profile['label'], 'novos' => 0, 'mensagem' => $e->getMessage()];
+            }
+        }
+
+        return $results;
+    }
+
+    private function findProfileByCnpj(string $cnpj): ?array
+    {
+        foreach ($this->repository->listProfiles() as $row) {
+            if ((string) $row['cnpj'] === $cnpj) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function assertCnpjFree(string $cnpj, int $exceptId): void
+    {
+        $other = $this->findProfileByCnpj($cnpj);
+        if ($other !== null && (int) $other['id'] !== $exceptId) {
+            throw new RuntimeException('Já existe outra empresa cadastrada com esse CNPJ.');
+        }
+    }
+
+    private function normalizeCnpj(string $cnpj): string
+    {
+        $cnpj = preg_replace('/\D/', '', $cnpj) ?? '';
+        if (strlen($cnpj) !== 14) {
+            throw new RuntimeException('Informe o CNPJ com 14 dígitos.');
+        }
+
+        return $cnpj;
+    }
+
+    private function cleanApelido(string $apelido): ?string
+    {
+        $apelido = trim($apelido);
+
+        return $apelido !== '' ? mb_substr($apelido, 0, 100) : null;
+    }
+
+    /**
      * Busca lotes novos a partir do último NSU salvo.
      *
      * @return array{novos: int, lotes: int, mensagem: string, concluido: bool}
      */
-    public function sync(): array
+    public function sync(int $profileId): array
     {
-        $settings = $this->repository->getSettings();
-        if ($settings === null || trim((string) ($settings['cert_blob'] ?? '')) === '') {
+        $settings = $this->repository->getProfile($profileId);
+        if ($settings === null) {
+            throw new RuntimeException('Empresa não encontrada.');
+        }
+        if (trim((string) ($settings['cert_blob'] ?? '')) === '') {
             throw new RuntimeException('Nenhum certificado configurado. Um administrador precisa carregar o certificado A1.');
         }
         $cnpj = (string) ($settings['cnpj'] ?? '');
@@ -180,7 +274,7 @@ class SefazCteDistribuicaoService
             ];
         }
 
-        $pem = json_decode($this->decrypt((string) $settings['cert_blob']), true);
+        $pem = json_decode($this->secretBox->decrypt((string) $settings['cert_blob']), true);
         if (!is_array($pem) || empty($pem['cert']) || empty($pem['pkey'])) {
             throw new RuntimeException('Não foi possível abrir o certificado salvo. Carregue o certificado novamente.');
         }
@@ -205,13 +299,13 @@ class SefazCteDistribuicaoService
                 if ($resp['cStat'] === '138') {
                     foreach ($resp['docs'] as $doc) {
                         $parsed = $this->parseDocument($doc['nsu'], $doc['schema'], $doc['xml']);
-                        if ($this->repository->insertDocument($parsed)) {
+                        if ($this->repository->insertDocument($profileId, $parsed)) {
                             $novos++;
                         }
                     }
                     $ult = $resp['ultNSU'] !== '' ? $resp['ultNSU'] : $ult;
                     $max = $resp['maxNSU'] !== '' ? $resp['maxNSU'] : $max;
-                    $this->repository->saveSettings(['ult_nsu' => $ult, 'max_nsu' => $max]);
+                    $this->repository->updateProfile($profileId, ['ult_nsu' => $ult, 'max_nsu' => $max]);
 
                     if ((int) $ult >= (int) $max) {
                         $concluido = true;
@@ -252,7 +346,7 @@ class SefazCteDistribuicaoService
             $mensagem = 'Lote parcial baixado. Clique em buscar de novo para continuar.';
         }
 
-        $this->repository->saveSettings([
+        $this->repository->updateProfile($profileId, [
             'ult_nsu' => $ult,
             'max_nsu' => $max,
             'last_sync_at' => date('Y-m-d H:i:s'),
@@ -561,39 +655,6 @@ class SefazCteDistribuicaoService
         file_put_contents($file, $contents);
 
         return $file;
-    }
-
-    private function encrypt(string $plain): string
-    {
-        $key = hash('sha256', $this->encryptionKey, true);
-        $iv = random_bytes(12);
-        $tag = '';
-        $cipher = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
-        if ($cipher === false) {
-            throw new RuntimeException('Falha ao proteger o certificado.');
-        }
-
-        return 'v1:' . base64_encode($iv . $tag . $cipher);
-    }
-
-    private function decrypt(string $blob): string
-    {
-        if (!str_starts_with($blob, 'v1:')) {
-            throw new RuntimeException('Formato do certificado salvo desconhecido. Carregue o certificado novamente.');
-        }
-        $raw = base64_decode(substr($blob, 3), true);
-        if ($raw === false || strlen($raw) < 29) {
-            throw new RuntimeException('Certificado salvo corrompido. Carregue o certificado novamente.');
-        }
-        $key = hash('sha256', $this->encryptionKey, true);
-        $plain = openssl_decrypt(substr($raw, 28), 'aes-256-gcm', $key, OPENSSL_RAW_DATA, substr($raw, 0, 12), substr($raw, 12, 16));
-        if ($plain === false) {
-            throw new RuntimeException(
-                'Não foi possível abrir o certificado salvo (a chave de criptografia do portal mudou). Carregue o certificado novamente.'
-            );
-        }
-
-        return $plain;
     }
 
     private function toLocalDateTime(string $value): ?string

@@ -16,46 +16,82 @@ if (isset($_GET['flash_err']) && $_GET['flash_err'] !== '') {
     $feedbackClass = 'err';
 }
 
+$readUpload = static function (): string {
+    $upload = $_FILES['pfx'] ?? null;
+    if (!is_array($upload) || ($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Selecione o arquivo do certificado (.pfx ou .p12).');
+    }
+    if ((int) $upload['size'] > 200 * 1024) {
+        throw new RuntimeException('Arquivo grande demais para um certificado A1.');
+    }
+    $content = (string) file_get_contents((string) $upload['tmp_name']);
+    @unlink((string) $upload['tmp_name']);
+
+    return $content;
+};
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $formType = (string) ($_POST['form_type'] ?? '');
+    $profileId = (int) ($_POST['profile_id'] ?? 0);
     try {
-        if (in_array($formType, ['dfe_config', 'dfe_cert', 'dfe_cert_remove'], true) && !$isPortalAdmin) {
-            throw new RuntimeException('Somente administradores do portal podem alterar o certificado e a configuração.');
+        $adminForms = ['dfe_cert_new', 'dfe_cert_replace', 'dfe_config', 'dfe_cert_remove', 'dfe_profile_delete'];
+        if (in_array($formType, $adminForms, true) && !$isPortalAdmin) {
+            throw new RuntimeException('Somente administradores do portal podem alterar certificados e empresas.');
         }
 
-        if ($formType === 'dfe_config') {
-            $dfe->saveConfig((string) ($_POST['cnpj'] ?? ''), (string) ($_POST['uf_autor'] ?? ''));
-            $feedback = 'Configuração salva.';
-        }
-
-        if ($formType === 'dfe_cert') {
-            $upload = $_FILES['pfx'] ?? null;
-            if (!is_array($upload) || ($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-                throw new RuntimeException('Selecione o arquivo do certificado (.pfx ou .p12).');
-            }
-            if ((int) $upload['size'] > 200 * 1024) {
-                throw new RuntimeException('Arquivo grande demais para um certificado A1.');
-            }
+        if ($formType === 'dfe_cert_new') {
             $info = $dfe->importCertificate(
-                (string) file_get_contents((string) $upload['tmp_name']),
-                (string) ($_POST['pfx_password'] ?? '')
+                null,
+                $readUpload(),
+                (string) ($_POST['pfx_password'] ?? ''),
+                (string) ($_POST['cnpj'] ?? ''),
+                (string) ($_POST['uf_autor'] ?? '42'),
+                (string) ($_POST['apelido'] ?? '')
             );
-            @unlink((string) $upload['tmp_name']);
             $feedback = 'Certificado carregado: ' . $info['subject']
                 . ($info['valid_to'] !== '' ? ' (válido até ' . $info['valid_to'] . ')' : '') . '.';
         }
 
-        if ($formType === 'dfe_cert_remove') {
-            $dfe->removeCertificate();
-            $feedback = 'Certificado removido do portal.';
+        if ($formType === 'dfe_cert_replace') {
+            $info = $dfe->importCertificate($profileId, $readUpload(), (string) ($_POST['pfx_password'] ?? ''));
+            $feedback = 'Certificado substituído: ' . $info['subject']
+                . ($info['valid_to'] !== '' ? ' (válido até ' . $info['valid_to'] . ')' : '') . '.';
         }
 
-        if ($formType === 'dfe_sync') {
+        if ($formType === 'dfe_config') {
+            $dfe->saveConfig(
+                $profileId,
+                (string) ($_POST['cnpj'] ?? ''),
+                (string) ($_POST['uf_autor'] ?? ''),
+                (string) ($_POST['apelido'] ?? '')
+            );
+            $feedback = 'Empresa atualizada.';
+        }
+
+        if ($formType === 'dfe_cert_remove') {
+            $dfe->removeCertificate($profileId);
+            $feedback = 'Certificado removido. Os documentos já baixados continuam disponíveis.';
+        }
+
+        if ($formType === 'dfe_profile_delete') {
+            $dfe->deleteProfile($profileId);
+            $feedback = 'Empresa e documentos dela excluídos do portal.';
+        }
+
+        if ($formType === 'dfe_sync' || $formType === 'dfe_sync_all') {
             ignore_user_abort(true);
-            @set_time_limit(240);
-            $result = $dfe->sync();
-            $feedback = $result['mensagem'] . ' Documentos novos: ' . $result['novos'] . '.';
-            $feedbackClass = $result['concluido'] || $result['novos'] > 0 ? 'ok' : 'err';
+            @set_time_limit(600);
+            if ($formType === 'dfe_sync') {
+                $result = $dfe->sync($profileId);
+                $feedback = $result['mensagem'] . ' Documentos novos: ' . $result['novos'] . '.';
+                $feedbackClass = $result['concluido'] || $result['novos'] > 0 ? 'ok' : 'err';
+            } else {
+                $parts = array_map(
+                    static fn (array $r): string => $r['empresa'] . ': ' . $r['mensagem'] . ' (' . $r['novos'] . ' novos)',
+                    $dfe->syncAll()
+                );
+                $feedback = $parts === [] ? 'Nenhuma empresa com certificado válido.' : implode(' | ', $parts);
+            }
         }
     } catch (Throwable $e) {
         $feedback = $e->getMessage();
@@ -63,8 +99,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     }
 }
 
-$status = $dfe->getStatus();
+$profiles = $dfe->listProfilesStatus();
+$profileLabels = [];
+foreach ($profiles as $p) {
+    $profileLabels[(int) $p['id']] = (string) $p['label'];
+}
 $filters = [
+    'empresa' => (string) ($_GET['empresa'] ?? ''),
     'de' => (string) ($_GET['de'] ?? date('Y-m-d', strtotime('-90 days'))),
     'ate' => (string) ($_GET['ate'] ?? date('Y-m-d')),
     'busca' => trim((string) ($_GET['busca'] ?? '')),
@@ -87,11 +128,23 @@ $fmtCnpj = static function ($v): string {
         ? substr($d, 0, 2) . '.' . substr($d, 2, 3) . '.' . substr($d, 5, 3) . '/' . substr($d, 8, 4) . '-' . substr($d, 12, 2)
         : (string) $v;
 };
+$ufOptions = static function (string $selected): string {
+    $html = '';
+    foreach (SefazCteDistribuicaoService::UF_CODES as $code => $sigla) {
+        $html .= '<option value="' . $code . '"' . ($selected === (string) $code ? ' selected' : '') . '>' . $sigla . '</option>';
+    }
+
+    return $html;
+};
+$anySyncable = false;
+foreach ($profiles as $p) {
+    if ($p['has_cert'] && !$p['cert_expired'] && $p['can_sync_now']) {
+        $anySyncable = true;
+    }
+}
 ?>
 <style>
-    .dfe-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-    .dfe-stats { display: flex; flex-wrap: wrap; gap: 18px; margin: 8px 0 4px; font-size: .92rem; }
-    .dfe-stats strong { display: block; font-size: .75rem; color: #64748b; text-transform: uppercase; }
+    .dfe-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
     .dfe-hint { color: #64748b; font-size: .85rem; margin: 6px 0 0; }
     .dfe-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .dfe-actions button, .dfe-actions a.dfe-btn { width: auto; }
@@ -100,15 +153,21 @@ $fmtCnpj = static function ($v): string {
     .dfe-table th { position: sticky; top: 0; background: #f1f5f9; white-space: nowrap; font-size: .75rem; text-transform: uppercase; }
     .dfe-table td { font-size: .82rem; vertical-align: top; }
     .dfe-table input[type=checkbox] { width: auto; margin: 0; }
+    .dfe-table td button { margin-top: 0; padding: 6px 10px; font-size: .72rem; width: auto; }
     .dfe-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .72rem; background: #e2e8f0; }
     .dfe-tag.evt { background: #fef3c7; }
+    .dfe-tag.bad { background: #fee2e2; color: #991b1b; }
     .dfe-warn { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; padding: 10px 12px; border-radius: 8px; margin: 10px 0; }
+    .dfe-admin-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; margin-top: 14px; }
+    .dfe-admin-card h3 { margin: 0 0 4px; font-size: 1rem; }
+    .dfe-admin-card details { margin-top: 8px; }
+    .dfe-admin-card summary { cursor: pointer; color: #2563eb; font-size: .85rem; }
 </style>
 
 <section class="card">
     <h1>CT-e na SEFAZ (XML)</h1>
     <p class="dfe-hint" style="margin-top:0">
-        Baixa direto da SEFAZ (Ambiente Nacional) todos os CT-e em que a WCT aparece — inclusive os da Casas Bahia Entrega / Envvias.
+        Baixa direto da SEFAZ (Ambiente Nacional) todos os CT-e em que cada empresa cadastrada aparece — inclusive os da Casas Bahia Entrega / Envvias.
         A SEFAZ entrega apenas documentos dos <strong>últimos 3 meses</strong> e, quando não há nada novo, só libera nova consulta depois de 1 hora.
     </p>
 
@@ -116,34 +175,57 @@ $fmtCnpj = static function ($v): string {
         <p class="msg <?= htmlspecialchars($feedbackClass) ?>"><?= htmlspecialchars($feedback) ?></p>
     <?php endif; ?>
 
-    <?php if (!$status['has_cert']): ?>
+    <?php if ($profiles === []): ?>
         <div class="dfe-warn">
             Nenhum certificado carregado. <?= $isPortalAdmin
-                ? 'Carregue abaixo o certificado digital A1 (e-CNPJ, arquivo .pfx) da empresa.'
-                : 'Peça a um administrador do portal para carregar o certificado A1 da empresa.' ?>
+                ? 'Carregue abaixo o certificado digital A1 (e-CNPJ, arquivo .pfx) de cada empresa.'
+                : 'Peça a um administrador do portal para carregar os certificados A1.' ?>
         </div>
-    <?php elseif ($status['cert_expired']): ?>
-        <div class="dfe-warn">O certificado carregado está vencido. Um administrador precisa carregar o novo.</div>
-    <?php endif; ?>
-
-    <div class="dfe-stats">
-        <div><strong>Certificado</strong><?= $status['has_cert'] ? htmlspecialchars((string) ($status['cert_subject'] ?? 'carregado')) : '—' ?></div>
-        <div><strong>Validade</strong><?= htmlspecialchars($fmtDate($status['cert_valid_to'] ?? null)) ?></div>
-        <div><strong>CNPJ consultado</strong><?= htmlspecialchars($fmtCnpj($status['cnpj'])) ?: '—' ?></div>
-        <div><strong>Última busca</strong><?= htmlspecialchars($fmtDate($status['last_sync_at'] ?? null)) ?></div>
-        <div><strong>NSU</strong><?= htmlspecialchars((string) $status['ult_nsu']) ?> / <?= htmlspecialchars((string) $status['max_nsu']) ?></div>
-    </div>
-    <?php if (!empty($status['last_status'])): ?>
-        <p class="dfe-hint">Último resultado: <?= htmlspecialchars((string) $status['last_status']) ?></p>
-    <?php endif; ?>
-
-    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" class="dfe-actions" data-dfe-loading="Consultando a SEFAZ... pode levar até 2 minutos.">
-        <input type="hidden" name="form_type" value="dfe_sync">
-        <button type="submit"<?= (!$status['has_cert'] || !$status['can_sync_now']) ? ' disabled' : '' ?>>Buscar CT-e novos na SEFAZ</button>
-        <?php if (!$status['can_sync_now'] && $status['next_sync_ts']): ?>
-            <span class="dfe-hint" style="margin-top:16px">Liberado a partir de <?= date('d/m/Y H:i', (int) $status['next_sync_ts']) ?>.</span>
+    <?php else: ?>
+        <div class="dfe-table-wrap" style="max-height:none">
+            <table class="dfe-table">
+                <thead>
+                <tr><th>Empresa</th><th>CNPJ</th><th>Certificado</th><th>Validade</th><th>Última busca</th><th>NSU</th><th></th></tr>
+                </thead>
+                <tbody>
+                <?php foreach ($profiles as $p): ?>
+                    <tr>
+                        <td><strong><?= htmlspecialchars((string) $p['label']) ?></strong>
+                            <?php if (!empty($p['last_status'])): ?><br><small class="dfe-hint"><?= htmlspecialchars((string) $p['last_status']) ?></small><?php endif; ?>
+                        </td>
+                        <td style="white-space:nowrap"><?= htmlspecialchars($fmtCnpj($p['cnpj'])) ?></td>
+                        <td>
+                            <?php if (!$p['has_cert']): ?><span class="dfe-tag bad">sem certificado</span>
+                            <?php else: ?><?= htmlspecialchars((string) ($p['cert_subject'] ?? '')) ?><?php endif; ?>
+                        </td>
+                        <td style="white-space:nowrap">
+                            <?= htmlspecialchars($fmtDate($p['cert_valid_to'] ?? null)) ?>
+                            <?php if ($p['cert_expired']): ?><br><span class="dfe-tag bad">vencido</span><?php endif; ?>
+                        </td>
+                        <td style="white-space:nowrap"><?= htmlspecialchars($fmtDate($p['last_sync_at'] ?? null)) ?></td>
+                        <td style="white-space:nowrap"><?= htmlspecialchars((string) $p['ult_nsu']) ?> / <?= htmlspecialchars((string) $p['max_nsu']) ?></td>
+                        <td style="white-space:nowrap">
+                            <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" data-dfe-loading="Consultando...">
+                                <input type="hidden" name="form_type" value="dfe_sync">
+                                <input type="hidden" name="profile_id" value="<?= (int) $p['id'] ?>">
+                                <button type="submit"<?= (!$p['has_cert'] || $p['cert_expired'] || !$p['can_sync_now']) ? ' disabled' : '' ?>>Buscar</button>
+                            </form>
+                            <?php if (!$p['can_sync_now'] && $p['next_sync_ts']): ?>
+                                <small class="dfe-hint">a partir de <?= date('d/m H:i', (int) $p['next_sync_ts']) ?></small>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php if (count($profiles) > 1): ?>
+            <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" class="dfe-actions" data-dfe-loading="Consultando a SEFAZ para todas as empresas... pode levar alguns minutos.">
+                <input type="hidden" name="form_type" value="dfe_sync_all">
+                <button type="submit"<?= $anySyncable ? '' : ' disabled' ?>>Buscar CT-e novos de todas as empresas</button>
+            </form>
         <?php endif; ?>
-    </form>
+    <?php endif; ?>
 </section>
 
 <section class="card">
@@ -151,6 +233,17 @@ $fmtCnpj = static function ($v): string {
     <form method="get" action="<?= htmlspecialchars(portal_wct_public_path($baseUrl, 'index.php')) ?>">
         <input type="hidden" name="page" value="sefaz-cte-dfe">
         <div class="dfe-grid">
+            <?php if (count($profiles) > 1): ?>
+                <div>
+                    <label>Empresa</label>
+                    <select name="empresa">
+                        <option value="">Todas</option>
+                        <?php foreach ($profileLabels as $pid => $plabel): ?>
+                            <option value="<?= $pid ?>"<?= $filters['empresa'] === (string) $pid ? ' selected' : '' ?>><?= htmlspecialchars($plabel) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            <?php endif; ?>
             <div><label>Emissão de</label><input type="date" name="de" value="<?= htmlspecialchars($filters['de']) ?>"></div>
             <div><label>Emissão até</label><input type="date" name="ate" value="<?= htmlspecialchars($filters['ate']) ?>"></div>
             <div>
@@ -184,6 +277,7 @@ $fmtCnpj = static function ($v): string {
                     <thead>
                     <tr>
                         <th><input type="checkbox" data-dfe-all title="Selecionar todos"></th>
+                        <?php if (count($profiles) > 1): ?><th>Empresa</th><?php endif; ?>
                         <th>Emissão</th>
                         <th>Tipo</th>
                         <th>Nº / Série</th>
@@ -199,6 +293,7 @@ $fmtCnpj = static function ($v): string {
                     <?php foreach ($docs as $d): ?>
                         <tr>
                             <td><input type="checkbox" name="ids[]" value="<?= (int) $d['id'] ?>"></td>
+                            <?php if (count($profiles) > 1): ?><td><?= htmlspecialchars($profileLabels[(int) $d['settings_id']] ?? '—') ?></td><?php endif; ?>
                             <td style="white-space:nowrap"><?= htmlspecialchars($fmtDate($d['dh_emi'])) ?></td>
                             <td>
                                 <?php if ($d['tipo'] === 'evento'): ?>
@@ -230,52 +325,76 @@ $fmtCnpj = static function ($v): string {
 
 <?php if ($isPortalAdmin): ?>
 <section class="card">
-    <h2 style="margin-top:0">Certificado e configuração <small style="font-weight:normal;color:#64748b">(somente administradores)</small></h2>
+    <h2 style="margin-top:0">Certificados e empresas <small style="font-weight:normal;color:#64748b">(somente administradores)</small></h2>
     <p class="dfe-hint" style="margin-top:0">
-        Use o certificado <strong>A1 (arquivo .pfx/.p12) do e-CNPJ da empresa</strong>. Certificado A3 (token/cartão) não funciona aqui.
-        O arquivo fica guardado criptografado no portal, a senha não é armazenada e ninguém consegue baixar o certificado de volta pela tela.
-        <?= $dfe->isKeyFromEnv() ? '' : 'Para reforçar a proteção, defina a variável de ambiente PORTAL_DFE_KEY no servidor antes de carregar o certificado.' ?>
+        Use o certificado <strong>A1 (arquivo .pfx/.p12) do e-CNPJ</strong> de cada empresa. Certificado A3 (token/cartão) não funciona aqui.
+        Os arquivos ficam guardados criptografados no portal, a senha não é armazenada e ninguém consegue baixar o certificado de volta pela tela.
+        <?= $dfe->isKeyFromEnv() ? '' : 'Para reforçar a proteção, defina a variável de ambiente PORTAL_DFE_KEY no servidor antes de carregar os certificados.' ?>
     </p>
 
-    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" enctype="multipart/form-data" autocomplete="off">
-        <input type="hidden" name="form_type" value="dfe_cert">
-        <div class="dfe-grid">
-            <div><label>Arquivo do certificado (.pfx / .p12)</label><input type="file" name="pfx" accept=".pfx,.p12" required></div>
-            <div><label>Senha do certificado</label><input type="password" name="pfx_password" autocomplete="new-password" required></div>
-        </div>
-        <div class="dfe-actions">
-            <button type="submit"><?= $status['has_cert'] ? 'Substituir certificado' : 'Carregar certificado' ?></button>
-        </div>
-    </form>
-
-    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" style="margin-top:14px">
-        <input type="hidden" name="form_type" value="dfe_config">
-        <div class="dfe-grid">
-            <div>
-                <label>CNPJ consultado</label>
-                <input type="text" name="cnpj" value="<?= htmlspecialchars($fmtCnpj($status['cnpj'] ?: ($status['cert_cnpj'] ?? '17751890000176'))) ?>" required>
-                <p class="dfe-hint">Precisa ser o mesmo CNPJ (ou da mesma raiz) do certificado.</p>
+    <div class="dfe-admin-card">
+        <h3>Adicionar certificado</h3>
+        <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" enctype="multipart/form-data" autocomplete="off">
+            <input type="hidden" name="form_type" value="dfe_cert_new">
+            <div class="dfe-grid">
+                <div><label>Arquivo do certificado (.pfx / .p12)</label><input type="file" name="pfx" accept=".pfx,.p12" required></div>
+                <div><label>Senha do certificado</label><input type="password" name="pfx_password" autocomplete="new-password" required></div>
+                <div><label>Nome para identificar</label><input type="text" name="apelido" placeholder="Ex.: WCT Matriz SC" maxlength="100"></div>
+                <div>
+                    <label>CNPJ consultado (opcional)</label>
+                    <input type="text" name="cnpj" placeholder="Em branco = CNPJ do certificado">
+                </div>
+                <div><label>UF da empresa</label><select name="uf_autor"><?= $ufOptions('42') ?></select></div>
             </div>
-            <div>
-                <label>UF da empresa</label>
-                <select name="uf_autor">
-                    <?php foreach (SefazCteDistribuicaoService::UF_CODES as $code => $sigla): ?>
-                        <option value="<?= $code ?>"<?= (string) $status['uf_autor'] === (string) $code ? ' selected' : '' ?>><?= $sigla ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-        </div>
-        <div class="dfe-actions">
-            <button type="submit">Salvar configuração</button>
-        </div>
-    </form>
-
-    <?php if ($status['has_cert']): ?>
-        <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" onsubmit="return confirm('Remover o certificado do portal? As buscas param até carregar outro.');">
-            <input type="hidden" name="form_type" value="dfe_cert_remove">
-            <div class="dfe-actions"><button type="submit" style="background:#fff;color:#a12323;border-color:#a12323">Remover certificado</button></div>
+            <p class="dfe-hint">Para uma filial, use o certificado da matriz e informe o CNPJ da filial (precisa ter a mesma raiz). Se o CNPJ já estiver cadastrado, o certificado dele é substituído.</p>
+            <div class="dfe-actions"><button type="submit">Carregar certificado</button></div>
         </form>
-    <?php endif; ?>
+    </div>
+
+    <?php foreach ($profiles as $p): ?>
+        <div class="dfe-admin-card">
+            <h3><?= htmlspecialchars((string) $p['label']) ?> <small style="font-weight:normal;color:#64748b"><?= htmlspecialchars($fmtCnpj($p['cnpj'])) ?></small></h3>
+            <details>
+                <summary>Substituir certificado</summary>
+                <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" enctype="multipart/form-data" autocomplete="off">
+                    <input type="hidden" name="form_type" value="dfe_cert_replace">
+                    <input type="hidden" name="profile_id" value="<?= (int) $p['id'] ?>">
+                    <div class="dfe-grid">
+                        <div><label>Arquivo (.pfx / .p12)</label><input type="file" name="pfx" accept=".pfx,.p12" required></div>
+                        <div><label>Senha</label><input type="password" name="pfx_password" autocomplete="new-password" required></div>
+                    </div>
+                    <div class="dfe-actions"><button type="submit">Substituir</button></div>
+                </form>
+            </details>
+            <details>
+                <summary>Editar nome, CNPJ e UF</summary>
+                <form method="post" action="<?= htmlspecialchars($pageUrl) ?>">
+                    <input type="hidden" name="form_type" value="dfe_config">
+                    <input type="hidden" name="profile_id" value="<?= (int) $p['id'] ?>">
+                    <div class="dfe-grid">
+                        <div><label>Nome</label><input type="text" name="apelido" value="<?= htmlspecialchars((string) ($p['apelido'] ?? '')) ?>" maxlength="100"></div>
+                        <div><label>CNPJ consultado</label><input type="text" name="cnpj" value="<?= htmlspecialchars($fmtCnpj($p['cnpj'])) ?>" required></div>
+                        <div><label>UF</label><select name="uf_autor"><?= $ufOptions((string) $p['uf_autor']) ?></select></div>
+                    </div>
+                    <div class="dfe-actions"><button type="submit">Salvar</button></div>
+                </form>
+            </details>
+            <div class="dfe-actions">
+                <?php if ($p['has_cert']): ?>
+                    <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" onsubmit="return confirm('Remover o certificado desta empresa? Os documentos já baixados continuam.');">
+                        <input type="hidden" name="form_type" value="dfe_cert_remove">
+                        <input type="hidden" name="profile_id" value="<?= (int) $p['id'] ?>">
+                        <button type="submit" style="background:#fff;color:#a12323;border-color:#a12323">Remover certificado</button>
+                    </form>
+                <?php endif; ?>
+                <form method="post" action="<?= htmlspecialchars($pageUrl) ?>" onsubmit="return confirm('Excluir esta empresa E todos os documentos baixados dela?');">
+                    <input type="hidden" name="form_type" value="dfe_profile_delete">
+                    <input type="hidden" name="profile_id" value="<?= (int) $p['id'] ?>">
+                    <button type="submit" style="background:#fff;color:#a12323;border-color:#a12323">Excluir empresa</button>
+                </form>
+            </div>
+        </div>
+    <?php endforeach; ?>
 </section>
 <?php endif; ?>
 
@@ -290,7 +409,7 @@ $fmtCnpj = static function ($v): string {
     document.querySelectorAll('form[data-dfe-loading]').forEach(function (form) {
         form.addEventListener('submit', function () {
             var btn = form.querySelector('button[type=submit]');
-            if (btn) { btn.disabled = true; btn.textContent = form.getAttribute('data-dfe-loading'); }
+            if (btn) { setTimeout(function () { btn.disabled = true; btn.textContent = form.getAttribute('data-dfe-loading'); }, 0); }
         });
     });
 })();

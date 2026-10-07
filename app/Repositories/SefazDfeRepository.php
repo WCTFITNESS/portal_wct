@@ -7,17 +7,17 @@ namespace App\Repositories;
 use PDO;
 
 /**
- * Configuração (certificado A1 cifrado + controle de NSU) e documentos da Distribuição DF-e de CT-e.
+ * Empresas/certificados A1 (cada uma com seu controle de NSU) e documentos da Distribuição DF-e de CT-e.
  */
 class SefazDfeRepository
 {
-    private const SETTINGS_COLUMNS = [
-        'cnpj', 'uf_autor', 'cert_blob', 'cert_subject', 'cert_cnpj', 'cert_valid_to',
+    private const PROFILE_COLUMNS = [
+        'apelido', 'cnpj', 'uf_autor', 'cert_blob', 'cert_subject', 'cert_cnpj', 'cert_valid_to',
         'ult_nsu', 'max_nsu', 'last_sync_at', 'next_sync_at', 'last_status',
     ];
 
     private const DOC_COLUMNS = [
-        'nsu', 'schema_name', 'tipo', 'chave', 'numero', 'serie', 'modelo', 'dh_emi',
+        'settings_id', 'nsu', 'schema_name', 'tipo', 'chave', 'numero', 'serie', 'modelo', 'dh_emi',
         'emit_cnpj', 'emit_nome', 'rem_cnpj', 'rem_nome', 'dest_nome', 'toma_cnpj',
         'valor', 'tp_evento', 'desc_evento', 'xml',
     ];
@@ -28,59 +28,86 @@ class SefazDfeRepository
     {
     }
 
-    public function getSettings(): ?array
+    /** @return list<array<string, mixed>> */
+    public function listProfiles(): array
     {
         $this->ensureTables();
-        $row = $this->pdo->query('SELECT * FROM sefaz_dfe_settings ORDER BY id ASC LIMIT 1')->fetch();
+
+        return $this->pdo->query('SELECT * FROM sefaz_dfe_settings ORDER BY id ASC')->fetchAll();
+    }
+
+    public function getProfile(int $id): ?array
+    {
+        $this->ensureTables();
+        $stmt = $this->pdo->prepare('SELECT * FROM sefaz_dfe_settings WHERE id = :id');
+        $stmt->execute([':id' => $id]);
+        $row = $stmt->fetch();
 
         return $row ?: null;
     }
 
     /** @param array<string, mixed> $fields */
-    public function saveSettings(array $fields): void
+    public function createProfile(array $fields): int
     {
         $this->ensureTables();
-        $fields = array_intersect_key($fields, array_flip(self::SETTINGS_COLUMNS));
-        if ($fields === []) {
-            return;
-        }
-
+        $fields = array_intersect_key($fields, array_flip(self::PROFILE_COLUMNS));
+        $cols = array_keys($fields);
         $params = [];
         foreach ($fields as $col => $value) {
             $params[':' . $col] = $value;
         }
+        $sql = 'INSERT INTO sefaz_dfe_settings (' . implode(', ', array_merge($cols, ['updated_at'])) . ')
+                VALUES (' . implode(', ', array_merge(array_keys($params), ['NOW()'])) . ')';
 
-        $existing = $this->getSettings();
-        if ($existing === null) {
-            $cols = array_keys($fields);
-            $this->pdo->prepare(
-                'INSERT INTO sefaz_dfe_settings (' . implode(', ', $cols) . ', updated_at)
-                 VALUES (' . implode(', ', array_keys($params)) . ', NOW())'
-            )->execute($params);
+        if ($this->isPgsql()) {
+            $stmt = $this->pdo->prepare($sql . ' RETURNING id');
+            $stmt->execute($params);
 
+            return (int) $stmt->fetchColumn();
+        }
+        $this->pdo->prepare($sql)->execute($params);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /** @param array<string, mixed> $fields */
+    public function updateProfile(int $id, array $fields): void
+    {
+        $this->ensureTables();
+        $fields = array_intersect_key($fields, array_flip(self::PROFILE_COLUMNS));
+        if ($fields === []) {
             return;
         }
-
+        $params = [':id' => $id];
+        foreach ($fields as $col => $value) {
+            $params[':' . $col] = $value;
+        }
         $sets = implode(', ', array_map(static fn (string $c): string => $c . ' = :' . $c, array_keys($fields)));
-        $params[':id'] = $existing['id'];
-        $this->pdo->prepare('UPDATE sefaz_dfe_settings SET ' . $sets . ', updated_at = NOW() WHERE id = :id')
-            ->execute($params);
+        $this->pdo->prepare('UPDATE sefaz_dfe_settings SET ' . $sets . ', updated_at = NOW() WHERE id = :id')->execute($params);
+    }
+
+    public function deleteProfile(int $id): void
+    {
+        $this->ensureTables();
+        $this->pdo->prepare('DELETE FROM sefaz_dfe_cte_docs WHERE settings_id = :id')->execute([':id' => $id]);
+        $this->pdo->prepare('DELETE FROM sefaz_dfe_settings WHERE id = :id')->execute([':id' => $id]);
     }
 
     /**
-     * Grava o documento se o NSU ainda não existir. Retorna true quando inseriu.
+     * Grava o documento se o NSU ainda não existir para a empresa. Retorna true quando inseriu.
      *
      * @param array<string, mixed> $doc
      */
-    public function insertDocument(array $doc): bool
+    public function insertDocument(int $profileId, array $doc): bool
     {
         $this->ensureTables();
-        $exists = $this->pdo->prepare('SELECT 1 FROM sefaz_dfe_cte_docs WHERE nsu = :nsu');
-        $exists->execute([':nsu' => (string) $doc['nsu']]);
+        $exists = $this->pdo->prepare('SELECT 1 FROM sefaz_dfe_cte_docs WHERE settings_id = :p AND nsu = :nsu');
+        $exists->execute([':p' => $profileId, ':nsu' => (string) $doc['nsu']]);
         if ($exists->fetchColumn()) {
             return false;
         }
 
+        $doc['settings_id'] = $profileId;
         $params = [];
         foreach (self::DOC_COLUMNS as $col) {
             $params[':' . $col] = $doc[$col] ?? null;
@@ -94,14 +121,14 @@ class SefazDfeRepository
     }
 
     /**
-     * @param array{de?: string, ate?: string, busca?: string, tipo?: string} $filters
+     * @param array{de?: string, ate?: string, busca?: string, tipo?: string, empresa?: string|int} $filters
      * @return list<array<string, mixed>>
      */
     public function listDocuments(array $filters, int $limit = 500): array
     {
         [$where, $params] = $this->buildWhere($filters);
         $stmt = $this->pdo->prepare(
-            'SELECT id, nsu, schema_name, tipo, chave, numero, serie, modelo, dh_emi, emit_cnpj, emit_nome,
+            'SELECT id, settings_id, nsu, schema_name, tipo, chave, numero, serie, modelo, dh_emi, emit_cnpj, emit_nome,
                     rem_cnpj, rem_nome, dest_nome, toma_cnpj, valor, tp_evento, desc_evento, created_at
              FROM sefaz_dfe_cte_docs' . $where . '
              ORDER BY dh_emi DESC, id DESC
@@ -112,7 +139,7 @@ class SefazDfeRepository
         return $stmt->fetchAll();
     }
 
-    /** @param array{de?: string, ate?: string, busca?: string, tipo?: string} $filters */
+    /** @param array{de?: string, ate?: string, busca?: string, tipo?: string, empresa?: string|int} $filters */
     public function countDocuments(array $filters): int
     {
         [$where, $params] = $this->buildWhere($filters);
@@ -123,7 +150,7 @@ class SefazDfeRepository
     }
 
     /**
-     * @param array{de?: string, ate?: string, busca?: string, tipo?: string} $filters
+     * @param array{de?: string, ate?: string, busca?: string, tipo?: string, empresa?: string|int} $filters
      * @return list<int>
      */
     public function findIds(array $filters, int $limit = 5000): array
@@ -159,14 +186,20 @@ class SefazDfeRepository
     }
 
     /**
-     * @param array{de?: string, ate?: string, busca?: string, tipo?: string} $filters
-     * @return array{0: string, 1: array<string, string>}
+     * @param array{de?: string, ate?: string, busca?: string, tipo?: string, empresa?: string|int} $filters
+     * @return array{0: string, 1: array<string, string|int>}
      */
     private function buildWhere(array $filters): array
     {
         $this->ensureTables();
         $conds = [];
         $params = [];
+
+        $empresa = (int) ($filters['empresa'] ?? 0);
+        if ($empresa > 0) {
+            $conds[] = 'settings_id = :empresa';
+            $params[':empresa'] = $empresa;
+        }
 
         $de = trim((string) ($filters['de'] ?? ''));
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $de)) {
@@ -218,6 +251,7 @@ class SefazDfeRepository
         $this->pdo->exec(
             "CREATE TABLE IF NOT EXISTS sefaz_dfe_settings (
                 {$id},
+                apelido VARCHAR(100) NULL,
                 cnpj VARCHAR(14) NOT NULL DEFAULT '',
                 uf_autor VARCHAR(2) NOT NULL DEFAULT '42',
                 cert_blob {$bigText} NULL,
@@ -236,6 +270,7 @@ class SefazDfeRepository
         $this->pdo->exec(
             "CREATE TABLE IF NOT EXISTS sefaz_dfe_cte_docs (
                 {$id},
+                settings_id BIGINT NULL,
                 nsu VARCHAR(15) NOT NULL,
                 schema_name VARCHAR(60) NOT NULL DEFAULT '',
                 tipo VARCHAR(20) NOT NULL DEFAULT 'outro',
@@ -258,8 +293,20 @@ class SefazDfeRepository
             ){$engine}"
         );
 
+        // Tabelas criadas pela versão de um certificado só.
+        if (!$this->hasColumn('sefaz_dfe_settings', 'apelido')) {
+            $this->pdo->exec('ALTER TABLE sefaz_dfe_settings ADD COLUMN apelido VARCHAR(100) NULL');
+        }
+        if (!$this->hasColumn('sefaz_dfe_cte_docs', 'settings_id')) {
+            $this->pdo->exec('ALTER TABLE sefaz_dfe_cte_docs ADD COLUMN settings_id BIGINT NULL');
+            $this->pdo->exec('UPDATE sefaz_dfe_cte_docs SET settings_id = (SELECT MIN(id) FROM sefaz_dfe_settings) WHERE settings_id IS NULL');
+        }
+        if ($this->hasIndex('uq_sefaz_dfe_cte_docs_nsu')) {
+            $this->pdo->exec($pg ? 'DROP INDEX uq_sefaz_dfe_cte_docs_nsu' : 'DROP INDEX uq_sefaz_dfe_cte_docs_nsu ON sefaz_dfe_cte_docs');
+        }
+
         $indexes = [
-            'uq_sefaz_dfe_cte_docs_nsu' => 'CREATE UNIQUE INDEX uq_sefaz_dfe_cte_docs_nsu ON sefaz_dfe_cte_docs (nsu)',
+            'uq_sefaz_dfe_cte_docs_perfil_nsu' => 'CREATE UNIQUE INDEX uq_sefaz_dfe_cte_docs_perfil_nsu ON sefaz_dfe_cte_docs (settings_id, nsu)',
             'idx_sefaz_dfe_cte_docs_dh_emi' => 'CREATE INDEX idx_sefaz_dfe_cte_docs_dh_emi ON sefaz_dfe_cte_docs (dh_emi)',
             'idx_sefaz_dfe_cte_docs_chave' => 'CREATE INDEX idx_sefaz_dfe_cte_docs_chave ON sefaz_dfe_cte_docs (chave)',
         ];
@@ -270,6 +317,17 @@ class SefazDfeRepository
         }
 
         $this->tablesReady = true;
+    }
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        $schema = $this->isPgsql() ? 'current_schema()' : 'DATABASE()';
+        $stmt = $this->pdo->prepare(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = {$schema} AND table_name = :t AND column_name = :c"
+        );
+        $stmt->execute([':t' => $table, ':c' => $column]);
+
+        return (bool) $stmt->fetchColumn();
     }
 
     private function hasIndex(string $name): bool

@@ -384,6 +384,7 @@ $allowedPages = [
     'rastreamento-ssw',
     'find-cep',
     'sefaz-cte-dfe',
+    'casasbahia-full',
     'login',
     'forgot-password',
     'reset-password',
@@ -868,6 +869,7 @@ $menuSections = [
     ],
     'Fiscal' => [
         ['id' => 'sefaz-cte-dfe', 'label' => 'CT-e SEFAZ (XML)'],
+        ['id' => 'casasbahia-full', 'label' => 'Notas Full Casas Bahia'],
     ],
     'Integração' => [
         [
@@ -948,6 +950,32 @@ if ($page === 'ml-notas-fiscais' && ($_GET['download'] ?? '') === '1') {
     exit;
 }
 
+if ($page === 'casasbahia-full' && in_array((string) ($_GET['download'] ?? ''), ['xml', 'cancel'], true)) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    session_write_close();
+    @set_time_limit(900);
+    try {
+        $file = $app['rockitService']->downloadZip(
+            array_map('strval', is_array($_POST['ids'] ?? null) ? $_POST['ids'] : []),
+            $_GET['download'] === 'cancel'
+        );
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $file['filename'] . '"');
+        header('Cache-Control: no-store');
+        header('Content-Length: ' . (string) strlen($file['content']));
+        echo $file['content'];
+    } catch (Throwable $e) {
+        header(
+            'Location: ' . portal_wct_public_path($baseUrl, 'index.php?page=casasbahia-full&flash_err=' . rawurlencode($e->getMessage())),
+            true,
+            302
+        );
+    }
+    exit;
+}
+
 if ($page === 'sefaz-cte-dfe' && in_array((string) ($_GET['download'] ?? ''), ['xml', 'zip'], true)) {
     while (ob_get_level() > 0) {
         ob_end_clean();
@@ -967,6 +995,7 @@ if ($page === 'sefaz-cte-dfe' && in_array((string) ($_GET['download'] ?? ''), ['
             @set_time_limit(300);
             $ids = !empty($_GET['todos'])
                 ? $app['sefazDfeRepository']->findIds([
+                    'empresa' => (string) ($_GET['empresa'] ?? ''),
                     'de' => (string) ($_GET['de'] ?? ''),
                     'ate' => (string) ($_GET['ate'] ?? ''),
                     'busca' => (string) ($_GET['busca'] ?? ''),

@@ -73,7 +73,7 @@ class PortalAuthService
             ],
             'fiscal' => [
                 'label' => 'Fiscal',
-                'pages' => ['sefaz-cte-dfe'],
+                'pages' => ['sefaz-cte-dfe', 'casasbahia-full'],
             ],
             'integracao' => [
                 'label' => 'Integração',

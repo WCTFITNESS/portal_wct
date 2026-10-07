@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use App\Core\Database;
+use App\Lib\SecretBox;
+use App\Repositories\RockitSettingsRepository;
+use App\Services\RockitInvoiceService;
 use App\Repositories\MercadoPagoSettingsRepository;
 use App\Repositories\MessageLogRepository;
 use App\Repositories\MessageTemplateRepository;
@@ -141,14 +144,16 @@ $taskRepository = new TaskRepository($pdo);
 $taskService = new TaskService($taskRepository, $mailService, (string) ($config['app']['base_url'] ?? '/'));
 $sswTrackingService = new SswTrackingService($config['ssw'] ?? null);
 $findCepService = new FindCepService($findCepSettingsRepository);
-$sefazDfeRepository = new SefazDfeRepository($pdo);
-$sefazDfeKeyEnv = getenv('PORTAL_DFE_KEY');
-$sefazDfeKeyFromEnv = is_string($sefazDfeKeyEnv) && trim($sefazDfeKeyEnv) !== '';
-$sefazCteDistribuicaoService = new SefazCteDistribuicaoService(
-    $sefazDfeRepository,
-    $sefazDfeKeyFromEnv ? trim($sefazDfeKeyEnv) : 'wct-sefaz-dfe|' . json_encode($config['db']),
-    $sefazDfeKeyFromEnv
+$secretKeyEnv = getenv('PORTAL_DFE_KEY');
+$secretKeyFromEnv = is_string($secretKeyEnv) && trim($secretKeyEnv) !== '';
+$secretBox = new SecretBox(
+    $secretKeyFromEnv ? trim($secretKeyEnv) : 'wct-sefaz-dfe|' . json_encode($config['db']),
+    $secretKeyFromEnv
 );
+$sefazDfeRepository = new SefazDfeRepository($pdo);
+$sefazCteDistribuicaoService = new SefazCteDistribuicaoService($sefazDfeRepository, $secretBox);
+$rockitRepository = new RockitSettingsRepository($pdo);
+$rockitService = new RockitInvoiceService($rockitRepository, $secretBox);
 $portalUserRepository = new PortalUserRepository($pdo);
 $portalAuthService = new PortalAuthService(
     $portalUserRepository,
@@ -210,6 +215,7 @@ return [
     'findCepService' => $findCepService,
     'sefazDfeRepository' => $sefazDfeRepository,
     'sefazCteDistribuicaoService' => $sefazCteDistribuicaoService,
+    'rockitService' => $rockitService,
     'portalUserRepository' => $portalUserRepository,
     'portalAuthService' => $portalAuthService,
 ];
