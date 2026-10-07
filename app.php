@@ -62,6 +62,10 @@ use App\Services\TaskService;
 use App\Services\FindCepService;
 use App\Services\PortalAuthService;
 use App\Services\SefazCteDistribuicaoService;
+use App\Services\SefazNfeDistribuicaoService;
+use App\Services\FiscalDocsService;
+use App\Services\FiscalXmlParser;
+use App\Repositories\FiscalDocsRepository;
 use App\Services\SswTrackingService;
 use App\Services\TokenService;
 
@@ -151,9 +155,18 @@ $secretBox = new SecretBox(
     $secretKeyFromEnv
 );
 $sefazDfeRepository = new SefazDfeRepository($pdo);
-$sefazCteDistribuicaoService = new SefazCteDistribuicaoService($sefazDfeRepository, $secretBox);
 $rockitRepository = new RockitSettingsRepository($pdo);
 $rockitService = new RockitInvoiceService($rockitRepository, $secretBox, (string) ($config['ssw']['cnpj'] ?? ''));
+$fiscalDocsService = new FiscalDocsService(
+    new FiscalDocsRepository($pdo),
+    new FiscalXmlParser(),
+    $sefazDfeRepository,
+    (string) ($config['ssw']['cnpj'] ?? ''),
+    $mlInvoiceBatchService,
+    $rockitService
+);
+$sefazCteDistribuicaoService = new SefazCteDistribuicaoService($sefazDfeRepository, $secretBox, $fiscalDocsService);
+$sefazNfeDistribuicaoService = new SefazNfeDistribuicaoService($sefazDfeRepository, $secretBox, $fiscalDocsService, $sefazCteDistribuicaoService);
 $portalUserRepository = new PortalUserRepository($pdo);
 $portalAuthService = new PortalAuthService(
     $portalUserRepository,
@@ -215,6 +228,8 @@ return [
     'findCepService' => $findCepService,
     'sefazDfeRepository' => $sefazDfeRepository,
     'sefazCteDistribuicaoService' => $sefazCteDistribuicaoService,
+    'sefazNfeDistribuicaoService' => $sefazNfeDistribuicaoService,
+    'fiscalDocsService' => $fiscalDocsService,
     'rockitService' => $rockitService,
     'portalUserRepository' => $portalUserRepository,
     'portalAuthService' => $portalAuthService,

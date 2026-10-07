@@ -260,6 +260,28 @@ class RockitInvoiceService
         ];
     }
 
+    /**
+     * XML das notas (ou dos cancelamentos) dos pedidos, para gravar na central de documentos fiscais.
+     *
+     * @param list<string> $idOrders
+     * @return list<string>
+     */
+    public function fetchXmlForOrders(array $idOrders, bool $canceled = false): array
+    {
+        $idOrders = array_values(array_unique(array_filter(array_map(
+            static fn ($v): string => preg_replace('/\D/', '', (string) $v) ?? '',
+            $idOrders
+        ))));
+        $xmls = [];
+        foreach (array_chunk($idOrders, self::DOWNLOAD_CHUNK) as $chunk) {
+            foreach ($this->fetchXmlFiles($chunk, $canceled) as $file) {
+                $xmls[] = $file['xml'];
+            }
+        }
+
+        return $xmls;
+    }
+
     /** Chama o download para 1 pedido só e guarda a resposta crua no diagnóstico (para ajustar a integração). */
     public function diagnoseDownload(string $idOrder, bool $canceled = false): int
     {

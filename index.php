@@ -385,6 +385,7 @@ $allowedPages = [
     'find-cep',
     'sefaz-cte-dfe',
     'casasbahia-full',
+    'documentos-fiscais',
     'login',
     'forgot-password',
     'reset-password',
@@ -868,6 +869,7 @@ $menuSections = [
         ['id' => 'protheus-consulta-sql', 'label' => 'Consulta SQL'],
     ],
     'Fiscal' => [
+        ['id' => 'documentos-fiscais', 'label' => 'Documentos fiscais (central)'],
         ['id' => 'sefaz-cte-dfe', 'label' => 'CT-e SEFAZ (XML)'],
         ['id' => 'casasbahia-full', 'label' => 'Notas Full Casas Bahia'],
     ],
@@ -969,6 +971,46 @@ if ($page === 'casasbahia-full' && in_array((string) ($_GET['download'] ?? ''), 
     } catch (Throwable $e) {
         header(
             'Location: ' . portal_wct_public_path($baseUrl, 'index.php?page=casasbahia-full&flash_err=' . rawurlencode($e->getMessage())),
+            true,
+            302
+        );
+    }
+    exit;
+}
+
+if ($page === 'documentos-fiscais' && in_array((string) ($_GET['download'] ?? ''), ['xml', 'zip'], true)) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    $fiscalDocs = $app['fiscalDocsService'];
+    try {
+        if ($_GET['download'] === 'xml') {
+            $file = $fiscalDocs->getXmlFile((int) ($_GET['id'] ?? 0));
+            if ($file === null) {
+                http_response_code(404);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo 'Documento não encontrado.';
+                exit;
+            }
+            header('Content-Type: application/xml; charset=utf-8');
+        } else {
+            @set_time_limit(300);
+            $ids = !empty($_GET['todos'])
+                ? $fiscalDocs->repository()->findIds(array_map('strval', array_intersect_key(
+                    $_GET,
+                    array_flip(['origem', 'tipo', 'propria', 'situacao', 'de', 'ate', 'busca'])
+                )))
+                : array_map('intval', is_array($_POST['ids'] ?? null) ? $_POST['ids'] : []);
+            $file = $fiscalDocs->buildZip($ids);
+            header('Content-Type: application/zip');
+        }
+        header('Content-Disposition: attachment; filename="' . $file['filename'] . '"');
+        header('Cache-Control: no-store');
+        header('Content-Length: ' . (string) strlen($file['content']));
+        echo $file['content'];
+    } catch (Throwable $e) {
+        header(
+            'Location: ' . portal_wct_public_path($baseUrl, 'index.php?page=documentos-fiscais&flash_err=' . rawurlencode($e->getMessage())),
             true,
             302
         );

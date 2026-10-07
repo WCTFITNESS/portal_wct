@@ -34,7 +34,8 @@ class SefazCteDistribuicaoService
 
     public function __construct(
         private SefazDfeRepository $repository,
-        private SecretBox $secretBox
+        private SecretBox $secretBox,
+        private ?FiscalDocsService $central = null
     ) {
     }
 
@@ -88,7 +89,10 @@ class SefazCteDistribuicaoService
         $fields = ['cnpj' => $cnpj, 'uf_autor' => $ufCode, 'apelido' => $this->cleanApelido($apelido)];
         if (($current['cnpj'] ?? '') !== '' && $current['cnpj'] !== $cnpj) {
             // NSU é sequencial por CNPJ: trocar de empresa recomeça do zero.
-            $fields += ['ult_nsu' => '0', 'max_nsu' => '0', 'next_sync_at' => null];
+            $fields += [
+                'ult_nsu' => '0', 'max_nsu' => '0', 'next_sync_at' => null,
+                'nfe_ult_nsu' => '0', 'nfe_max_nsu' => '0', 'nfe_next_sync_at' => null,
+            ];
         }
         $this->repository->updateProfile($profileId, $fields);
     }
@@ -189,15 +193,20 @@ class SefazCteDistribuicaoService
      *
      * @return list<array{empresa: string, novos: int, mensagem: string}>
      */
-    public function syncAll(): array
+    public function syncAll(int $maxSeconds = self::TEMPO_MAX_EXECUCAO): array
     {
         $results = [];
+        $deadline = time() + $maxSeconds;
         foreach ($this->listProfilesStatus() as $profile) {
             if (!$profile['has_cert'] || $profile['cert_expired']) {
                 continue;
             }
+            if (time() >= $deadline) {
+                $results[] = ['empresa' => $profile['label'], 'novos' => 0, 'mensagem' => 'Ficou para a próxima busca (tempo esgotado).'];
+                continue;
+            }
             try {
-                $r = $this->sync((int) $profile['id']);
+                $r = $this->sync((int) $profile['id'], max(10, $deadline - time()));
                 $results[] = ['empresa' => $profile['label'], 'novos' => $r['novos'], 'mensagem' => $r['mensagem']];
             } catch (RuntimeException $e) {
                 $results[] = ['empresa' => $profile['label'], 'novos' => 0, 'mensagem' => $e->getMessage()];
@@ -248,7 +257,7 @@ class SefazCteDistribuicaoService
      *
      * @return array{novos: int, lotes: int, mensagem: string, concluido: bool}
      */
-    public function sync(int $profileId): array
+    public function sync(int $profileId, int $maxSeconds = self::TEMPO_MAX_EXECUCAO): array
     {
         $settings = $this->repository->getProfile($profileId);
         if ($settings === null) {
@@ -292,7 +301,7 @@ class SefazCteDistribuicaoService
         $started = time();
 
         try {
-            while ($lotes < self::MAX_LOTES_POR_EXECUCAO && (time() - $started) < self::TEMPO_MAX_EXECUCAO) {
+            while ($lotes < self::MAX_LOTES_POR_EXECUCAO && (time() - $started) < $maxSeconds) {
                 $resp = $this->parseResponse($this->callService($ult, $cnpj, $uf, $certFile, $keyFile));
                 $lotes++;
 
@@ -302,6 +311,7 @@ class SefazCteDistribuicaoService
                         if ($this->repository->insertDocument($profileId, $parsed)) {
                             $novos++;
                         }
+                        $this->central?->store('sefaz_cte', $doc['xml'], $profileId, $doc['nsu']);
                     }
                     $ult = $resp['ultNSU'] !== '' ? $resp['ultNSU'] : $ult;
                     $max = $resp['maxNSU'] !== '' ? $resp['maxNSU'] : $max;

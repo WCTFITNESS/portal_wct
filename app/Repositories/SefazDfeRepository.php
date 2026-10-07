@@ -14,6 +14,7 @@ class SefazDfeRepository
     private const PROFILE_COLUMNS = [
         'apelido', 'cnpj', 'uf_autor', 'cert_blob', 'cert_subject', 'cert_cnpj', 'cert_valid_to',
         'ult_nsu', 'max_nsu', 'last_sync_at', 'next_sync_at', 'last_status',
+        'nfe_ult_nsu', 'nfe_max_nsu', 'nfe_last_sync_at', 'nfe_next_sync_at', 'nfe_last_status',
     ];
 
     private const DOC_COLUMNS = [
@@ -185,6 +186,18 @@ class SefazDfeRepository
         return $stmt->fetchAll();
     }
 
+    /** @return list<array{id: int, settings_id: ?int, nsu: string, xml: string}> */
+    public function listXmlAfter(int $afterId, int $limit): array
+    {
+        $this->ensureTables();
+        $stmt = $this->pdo->prepare(
+            'SELECT id, settings_id, nsu, xml FROM sefaz_dfe_cte_docs WHERE id > :id ORDER BY id ASC LIMIT ' . max(1, min(1000, $limit))
+        );
+        $stmt->execute([':id' => $afterId]);
+
+        return $stmt->fetchAll();
+    }
+
     /**
      * @param array{de?: string, ate?: string, busca?: string, tipo?: string, empresa?: string|int} $filters
      * @return array{0: string, 1: array<string, string|int>}
@@ -296,6 +309,18 @@ class SefazDfeRepository
         // Tabelas criadas pela versão de um certificado só.
         if (!$this->hasColumn('sefaz_dfe_settings', 'apelido')) {
             $this->pdo->exec('ALTER TABLE sefaz_dfe_settings ADD COLUMN apelido VARCHAR(100) NULL');
+        }
+        $nfeColumns = [
+            'nfe_ult_nsu' => "VARCHAR(15) NOT NULL DEFAULT '0'",
+            'nfe_max_nsu' => "VARCHAR(15) NOT NULL DEFAULT '0'",
+            'nfe_last_sync_at' => "{$ts} NULL",
+            'nfe_next_sync_at' => "{$ts} NULL",
+            'nfe_last_status' => 'VARCHAR(500) NULL',
+        ];
+        foreach ($nfeColumns as $column => $definition) {
+            if (!$this->hasColumn('sefaz_dfe_settings', $column)) {
+                $this->pdo->exec("ALTER TABLE sefaz_dfe_settings ADD COLUMN {$column} {$definition}");
+            }
         }
         if (!$this->hasColumn('sefaz_dfe_cte_docs', 'settings_id')) {
             $this->pdo->exec('ALTER TABLE sefaz_dfe_cte_docs ADD COLUMN settings_id BIGINT NULL');

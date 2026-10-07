@@ -41,13 +41,77 @@ class MlInvoiceBatchService
      */
     public function streamZip(string $de, string $ate, array $tipos, bool $incluirPdf): void
     {
+        [$urls, $token, $fileName] = $this->prepare($de, $ate, $tipos, $incluirPdf, self::MAX_DIAS);
+
+        $lastError = '';
+        foreach ($urls as $url) {
+            $result = $this->tryStream($url, $token, $fileName);
+            if ($result === true) {
+                return;
+            }
+            $lastError = $this->describeError($result['status'], $result['body']);
+            if ($result['status'] !== 400) {
+                break;
+            }
+        }
+
+        throw new RuntimeException($lastError);
+    }
+
+    /**
+     * Baixa o ZIP (só XML) para a memória, para importar na central de documentos fiscais.
+     *
+     * @param list<string> $tipos chaves de TIPOS
+     */
+    public function fetchZip(string $de, string $ate, array $tipos, int $maxDias = 31): string
+    {
+        [$urls, $token] = $this->prepare($de, $ate, $tipos, false, $maxDias);
+
+        $lastError = '';
+        foreach ($urls as $url) {
+            $ch = curl_init($url);
+            if ($ch === false) {
+                throw new RuntimeException('Falha ao iniciar a conexão com o Mercado Livre.');
+            }
+            curl_setopt_array($ch, [
+                CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $token],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_CONNECTTIMEOUT => 20,
+                CURLOPT_TIMEOUT => 600,
+            ]);
+            $body = curl_exec($ch);
+            $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $contentType = strtolower((string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE));
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            $body = is_string($body) ? $body : '';
+            if ($status === 200 && str_starts_with($body, 'PK') && !str_contains($contentType, 'json')) {
+                return $body;
+            }
+            $lastError = $this->describeError($status, $body !== '' ? mb_substr($body, 0, 8000) : $curlError);
+            if ($status !== 400) {
+                break;
+            }
+        }
+
+        throw new RuntimeException($lastError);
+    }
+
+    /**
+     * @param list<string> $tipos
+     * @return array{0: list<string>, 1: string, 2: string} URLs a tentar, token e nome do arquivo
+     */
+    private function prepare(string $de, string $ate, array $tipos, bool $incluirPdf, int $maxDias): array
+    {
         $start = $this->parseDate($de, 'inicial');
         $end = $this->parseDate($ate, 'final');
         if ($end < $start) {
             throw new RuntimeException('A data final é anterior à inicial.');
         }
-        if ($start->diff($end)->days > self::MAX_DIAS) {
-            throw new RuntimeException('Escolha um período de no máximo ' . self::MAX_DIAS . ' dias.');
+        if ($start->diff($end)->days > $maxDias) {
+            throw new RuntimeException('Escolha um período de no máximo ' . $maxDias . ' dias.');
         }
 
         $tipos = array_values(array_intersect(array_keys(self::TIPOS), $tipos));
@@ -82,22 +146,13 @@ class MlInvoiceBatchService
             $attempts[] = $base + $selected + array_fill_keys($missing, 'all') + $tail;
         }
 
-        $fileName = 'notas-ml-' . $start->format('Ymd') . '-' . $end->format('Ymd') . '.zip';
-        $lastError = '';
-        foreach ($attempts as $query) {
-            $url = 'https://api.mercadolibre.com/users/' . $sellerId . '/invoices/sites/MLB/batch_request/period/stream?'
-                . http_build_query($query);
-            $result = $this->tryStream($url, $token, $fileName);
-            if ($result === true) {
-                return;
-            }
-            $lastError = $this->describeError($result['status'], $result['body']);
-            if ($result['status'] !== 400) {
-                break;
-            }
-        }
+        $urls = array_map(
+            static fn (array $query): string => 'https://api.mercadolibre.com/users/' . $sellerId
+                . '/invoices/sites/MLB/batch_request/period/stream?' . http_build_query($query),
+            $attempts
+        );
 
-        throw new RuntimeException($lastError);
+        return [$urls, $token, 'notas-ml-' . $start->format('Ymd') . '-' . $end->format('Ymd') . '.zip'];
     }
 
     /** @return true|array{status: int, body: string} */
