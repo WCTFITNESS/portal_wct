@@ -34,6 +34,7 @@ if ($shouldDiagnose) {
         $ch = curl_init($trackingApiBase . '/api/webhook/reprocess-diagnose?codigo=' . rawurlencode($codigo));
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => TrackingReprocessService::trackingInternalHeaders(['Accept: application/json']),
             CURLOPT_TIMEOUT => 60,
         ]);
         $raw = curl_exec($ch);

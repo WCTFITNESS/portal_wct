@@ -27,6 +27,9 @@ $filterPedMarketplace = trim((string) ($_GET['ped_marketplace'] ?? ''));
 $filterCpfCnpj = trim((string) ($_GET['cpf_cnpj'] ?? ''));
 $saidaDe = trim((string) ($_GET['saida_de'] ?? ''));
 $saidaAte = trim((string) ($_GET['saida_ate'] ?? ''));
+$filtroRomaneio = trim((string) ($_GET['romaneio'] ?? ''));
+$filtroEdi = trim((string) ($_GET['edi'] ?? ''));
+$filtroSefaz = trim((string) ($_GET['sefaz'] ?? ''));
 $shouldQuery = isset($_GET['filtrar']);
 
 $monitorService = $app['protheusPedidosMonitorService'];
@@ -34,6 +37,9 @@ $parsedDocs = $monitorService->parseBatchFilter($filterDoc);
 $parsedPedidos = $monitorService->parseBatchFilter($filterPedMarketplace);
 $parsedCpfs = $monitorService->parseCpfCnpjBatchFilter($filterCpfCnpj);
 $marketplaceOptions = [];
+$romaneioOptions = $monitorService->romaneioFilterOptions();
+$ediOptions = $monitorService->ediFilterOptions();
+$sefazOptions = $monitorService->sefazFilterOptions();
 
 if ($settings === null) {
     $feedback = 'Configure o Protheus em Config Protheus antes de consultar.';
@@ -47,6 +53,18 @@ if ($settings === null) {
         if ($marketplace !== '' && !in_array($marketplace, $marketplaceOptions, true)) {
             $marketplace = '';
         }
+        if ($filtroRomaneio !== '' && !in_array($filtroRomaneio, $romaneioOptions, true)) {
+            $filtroRomaneio = '';
+        }
+        if ($filtroEdi === 'Nao') {
+            $filtroEdi = 'Não';
+        }
+        if ($filtroEdi !== '' && !in_array($filtroEdi, $ediOptions, true)) {
+            $filtroEdi = '';
+        }
+        if ($filtroSefaz !== '' && !in_array($filtroSefaz, $sefazOptions, true)) {
+            $filtroSefaz = '';
+        }
     } catch (Throwable $exception) {
         $feedback = 'Erro ao preparar filtros: ' . $exception->getMessage();
         $feedbackClass = 'err';
@@ -57,6 +75,7 @@ function protheus_monitor_query(array $overrides = []): string
 {
     global $baseUrl, $filial, $emissaoDe, $emissaoAte, $perPage, $marketplace;
     global $filterDoc, $filterPedMarketplace, $filterCpfCnpj, $saidaDe, $saidaAte;
+    global $filtroRomaneio, $filtroEdi, $filtroSefaz;
 
     $params = array_merge([
         'page' => 'protheus-monitor-pedidos',
@@ -70,6 +89,9 @@ function protheus_monitor_query(array $overrides = []): string
         'cpf_cnpj' => $filterCpfCnpj,
         'saida_de' => $saidaDe,
         'saida_ate' => $saidaAte,
+        'romaneio' => $filtroRomaneio,
+        'edi' => $filtroEdi,
+        'sefaz' => $filtroSefaz,
         'filtrar' => '1',
     ], $overrides);
 
@@ -87,7 +109,13 @@ function protheus_monitor_query(array $overrides = []): string
 
 $columns = $monitorService::exportColumns();
 $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['protheusConnectionService']->isDriverAvailable()
-    && $monitorService->hasPedidoOrDocBatchFilters($filterDoc, $filterPedMarketplace);
+    && $monitorService->hasAllowedSearchFilters(
+        $filterDoc,
+        $filterPedMarketplace,
+        $filtroRomaneio,
+        $filtroEdi,
+        $filtroSefaz
+    );
 ?>
 <section class="card protheus-monitor-card">
 <style>
@@ -298,6 +326,36 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
                     <?php endforeach; ?>
                 </select>
             </label>
+            <label>Romaneio
+                <select name="romaneio">
+                    <option value="">Todos</option>
+                    <?php foreach ($romaneioOptions as $opt): ?>
+                        <option value="<?= htmlspecialchars($opt) ?>"<?= $filtroRomaneio === $opt ? ' selected' : '' ?>>
+                            <?= htmlspecialchars($opt) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label>EDI
+                <select name="edi">
+                    <option value="">Todos</option>
+                    <?php foreach ($ediOptions as $opt): ?>
+                        <option value="<?= htmlspecialchars($opt) ?>"<?= $filtroEdi === $opt ? ' selected' : '' ?>>
+                            <?= htmlspecialchars($opt === '—' ? 'Sem NF (—)' : $opt) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <label>SEFAZ
+                <select name="sefaz">
+                    <option value="">Todos</option>
+                    <?php foreach ($sefazOptions as $opt): ?>
+                        <option value="<?= htmlspecialchars($opt) ?>"<?= $filtroSefaz === $opt ? ' selected' : '' ?>>
+                            <?= htmlspecialchars($opt === '—' ? 'Sem NF (—)' : $opt) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label class="filter-span-2">CPF / CNPJ
                 <input type="text" name="cpf_cnpj" value="<?= htmlspecialchars($filterCpfCnpj) ?>"
                        placeholder="Ex.: 123.456.789-00, 12.345.678/0001-90 (virgula)">
@@ -320,7 +378,8 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
         </div>
         <p class="filter-hint">
             Clique em <strong>Filtrar</strong> para consultar (a tela abre sem buscar no Protheus).
-            <strong>Obrigatorio:</strong> informe ao menos uma nota (Doc) ou pedido marketplace em lote.
+            <strong>Obrigatorio:</strong> informe nota (Doc), pedido marketplace, <strong>ou</strong> escolha Romaneio / EDI / SEFAZ.
+            Sem nota/pedido, a busca usa o periodo de emissao + filial (pode demorar em periodos longos).
             CPF/CNPJ e datas de saida sao filtros opcionais sobre o resultado.
             Com lista de notas ou pedidos, o periodo de emissao e ignorado para localizar os informados.
             Pedido sem NF emitida ainda aparece (nota em branco), como no Protheus.
@@ -330,8 +389,14 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
 
     <?php
     if ($shouldQuery && $feedback === null && $settings !== null && $app['protheusConnectionService']->isDriverAvailable()) {
-        if (!$monitorService->hasPedidoOrDocBatchFilters($filterDoc, $filterPedMarketplace)) {
-            $feedback = 'Informe pelo menos uma nota (Doc) ou pedido marketplace em lote. Consulta apenas por periodo ou marketplace nao e permitida.';
+        if (!$monitorService->hasAllowedSearchFilters(
+            $filterDoc,
+            $filterPedMarketplace,
+            $filtroRomaneio,
+            $filtroEdi,
+            $filtroSefaz
+        )) {
+            $feedback = 'Informe nota (Doc), pedido marketplace, ou filtre por Romaneio, EDI ou SEFAZ.';
             $feedbackClass = 'err';
         } else {
             echo '<p class="msg ok" id="protheus-pedidos-loading">Consultando Protheus… aguarde.</p>';
@@ -340,7 +405,7 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
             }
             flush();
             try {
-                set_time_limit(90);
+                set_time_limit(120);
                 $result = $monitorService->listPedidos(
                     $filial,
                     $emissaoDe,
@@ -352,7 +417,10 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
                     $filterPedMarketplace,
                     $filterCpfCnpj,
                     $saidaDe,
-                    $saidaAte
+                    $saidaAte,
+                    $filtroRomaneio,
+                    $filtroEdi,
+                    $filtroSefaz
                 );
             } catch (Throwable $exception) {
                 $feedback = 'Erro na consulta: ' . $exception->getMessage();
@@ -383,6 +451,15 @@ $canExport = $shouldQuery && $feedback === null && $settings !== null && $app['p
                 | Pagina <strong><?= (int) $result['page'] ?></strong> de <strong><?= (int) $result['total_pages'] ?></strong>
                 <?php if ($marketplace !== ''): ?>
                     | Marketplace: <strong><?= htmlspecialchars($marketplace) ?></strong>
+                <?php endif; ?>
+                <?php if ($filtroRomaneio !== ''): ?>
+                    | Romaneio: <strong><?= htmlspecialchars($filtroRomaneio) ?></strong>
+                <?php endif; ?>
+                <?php if ($filtroEdi !== ''): ?>
+                    | EDI: <strong><?= htmlspecialchars($filtroEdi === '—' ? 'Sem NF' : $filtroEdi) ?></strong>
+                <?php endif; ?>
+                <?php if ($filtroSefaz !== ''): ?>
+                    | SEFAZ: <strong><?= htmlspecialchars($filtroSefaz === '—' ? 'Sem NF' : $filtroSefaz) ?></strong>
                 <?php endif; ?>
                 <?php if ($parsedCpfs !== []): ?>
                     | CPF/CNPJ: <strong><?= count($parsedCpfs) ?></strong> filtro(s)

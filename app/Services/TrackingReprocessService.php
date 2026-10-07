@@ -266,7 +266,7 @@ final class TrackingReprocessService
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+            CURLOPT_HTTPHEADER => self::trackingInternalHeaders(['Content-Type: application/json', 'Accept: application/json']),
             CURLOPT_POSTFIELDS => $payload,
             CURLOPT_TIMEOUT => 180,
         ]);
@@ -337,5 +337,21 @@ final class TrackingReprocessService
             'ok' => $status >= 200 && $status < 300,
             'body' => is_array($decoded) ? $decoded : $raw,
         ];
+    }
+
+    /**
+     * Headers para rotas internas do Tracking (reprocess/diagnose), com o segredo compartilhado quando configurado.
+     *
+     * @param list<string> $headers
+     * @return list<string>
+     */
+    public static function trackingInternalHeaders(array $headers = []): array
+    {
+        $secret = getenv('TRACKING_SYNC_SECRET');
+        if (is_string($secret) && trim($secret) !== '') {
+            $headers[] = 'X-Tracking-Sync-Secret: ' . trim($secret);
+        }
+
+        return $headers;
     }
 }

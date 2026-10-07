@@ -21,7 +21,7 @@ class ProtheusAdHocQueryService
 
     public const DEFAULT_TOP = 200;
 
-    public const MAX_TOP = 2000;
+    public const MAX_TOP = 3000;
 
     public const MAX_RAW_SQL_LENGTH = 32000;
 

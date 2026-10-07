@@ -71,6 +71,10 @@ class PortalAuthService
                     'protheus-monitor-pedidos-erro', 'protheus-consulta-sql',
                 ],
             ],
+            'fiscal' => [
+                'label' => 'Fiscal',
+                'pages' => ['sefaz-cte-dfe'],
+            ],
             'integracao' => [
                 'label' => 'Integração',
                 'pages' => ['tracking-reprocess', 'find-cep'],
@@ -324,6 +328,10 @@ class PortalAuthService
         }
 
         $modules = $this->sanitizeModules($modules, $isAdmin);
+        if (!$isAdmin && $modules === []) {
+            return ['ok' => false, 'message' => 'Selecione ao menos um módulo ou marque como Administrador.'];
+        }
+
         $id = $this->users->create(
             $name,
             $email,
@@ -370,6 +378,10 @@ class PortalAuthService
         }
 
         $modules = $this->sanitizeModules($modules, $isAdmin);
+        if (!$isAdmin && $modules === []) {
+            return ['ok' => false, 'message' => 'Selecione ao menos um módulo ou marque como Administrador.'];
+        }
+
         $hash = $newPassword !== '' ? password_hash($newPassword, PASSWORD_DEFAULT) : null;
         $this->users->update($id, $name, $email, $isAdmin, $isActive, $modules, $hash);
 

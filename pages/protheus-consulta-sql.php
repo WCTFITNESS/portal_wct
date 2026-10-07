@@ -40,7 +40,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         <h2>Query pronta (SQL completo)</h2>
         <p class="picker-hint" style="margin:0 0 8px;">
             Cole o SELECT enviado pelo consultor (ex.: <code>SELECT COUNT(1) FROM GXL010 WHERE ...</code>).
-            Agregados COUNT/SUM/AVG nao recebem TOP automatico; demais SELECTs sem TOP sao limitados a 2000 linhas.
+            Agregados COUNT/SUM/AVG nao recebem TOP automatico; demais SELECTs sem TOP sao limitados a 3000 linhas.
         </p>
         <label class="sql-ready-title-label">Titulo (ao salvar na biblioteca)
             <input type="text" id="sql-ready-title" placeholder="Ex.: EDI ocorrencias GWD — consultor Joao" maxlength="120">
@@ -67,7 +67,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
                 <div class="sql-query-options">
                     <label id="sql-top-wrap">Limite (TOP)
                         <select id="sql-top" name="top">
-                            <?php foreach ([50, 100, 200, 500, 1000, 2000] as $opt): ?>
+                            <?php foreach ([50, 100, 200, 500, 1000, 2000, 3000] as $opt): ?>
                                 <option value="<?= $opt ?>"<?= $opt === 200 ? ' selected' : '' ?>><?= $opt ?></option>
                             <?php endforeach; ?>
                         </select>
@@ -144,12 +144,14 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
 
     <div id="sql-status" class="sql-status" hidden></div>
 
+    <pre id="sql-preview" class="sql-preview" hidden></pre>
+
     <div id="sql-results-toolbar" class="sql-results-toolbar" hidden>
         <span id="sql-results-count" class="sql-results-count"></span>
-        <a id="sql-export-btn" class="btn-export-xlsx" href="#" hidden>Exportar Excel</a>
+        <div class="sql-results-toolbar-actions">
+            <button type="button" id="sql-export-btn" class="btn-export-xlsx" hidden>Exportar Excel</button>
+        </div>
     </div>
-
-    <pre id="sql-preview" class="sql-preview" hidden></pre>
 
     <div id="sql-results-wrap" class="table-wrap sql-results-wrap" hidden>
         <table class="protheus-table sql-results-table" id="sql-results-table">
@@ -211,7 +213,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
 <style>
     /* Botões WCT (preto + dourado) — toda a tela de consulta SQL */
     .protheus-sql-card button,
-    .protheus-sql-card a.btn-export-xlsx {
+    .protheus-sql-card .btn-export-xlsx {
         box-sizing: border-box;
         margin-top: 0;
         padding: 10px 16px;
@@ -229,7 +231,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         font-family: inherit;
     }
     .protheus-sql-card button:hover:not(:disabled),
-    .protheus-sql-card a.btn-export-xlsx:hover {
+    .protheus-sql-card .btn-export-xlsx:hover:not(:disabled) {
         background: #f5b700;
         color: #111111;
         border-color: #f5b700;
@@ -251,9 +253,12 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         padding: 0;
         font-size: 1.1rem;
     }
-    .protheus-sql-card a.btn-export-xlsx {
+    .protheus-sql-card .btn-export-xlsx {
         display: inline-block;
         white-space: nowrap;
+    }
+    .protheus-sql-card .btn-export-xlsx[hidden] {
+        display: none !important;
     }
 
     .protheus-sql-card > .sql-page-toolbar {
@@ -470,12 +475,25 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         padding: 8px 4px;
     }
     .sql-results-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 40;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
         margin: 10px 0 6px;
+        padding: 10px 12px;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 6px;
+    }
+    .sql-results-toolbar-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
     }
     .sql-results-count {
         font-size: .88rem;
@@ -675,7 +693,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         min-width: 100%;
         border-collapse: collapse;
         font-size: .75rem;
-        table-layout: fixed;
+        table-layout: auto;
     }
     .sql-results-table thead th {
         position: sticky;
@@ -687,9 +705,6 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         text-transform: uppercase;
         padding: 6px 8px;
         border-bottom: 2px solid #cbd5e1;
-        max-width: 11rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
     .sql-results-table tbody tr {
         height: 1.75rem;
@@ -706,16 +721,21 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         text-align: left;
         vertical-align: middle;
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 11rem;
         line-height: 1.35;
         height: 1.75rem;
+        max-width: none;
+    }
+    .sql-results-table td.sql-cell-long {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: .72rem;
     }
     .sql-results-table td.sql-cell-truncated {
         cursor: pointer;
         color: #1d4ed8;
         text-decoration: underline dotted;
+        max-width: 28rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .sql-results-table td.sql-cell-truncated:hover {
         background: #dbeafe;
@@ -818,6 +838,8 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
 
     let abortController = null;
     let lastHistoryId = null;
+    let lastResultColumns = [];
+    let lastResultRows = [];
     let activeQueryId = null;
     let tableDebounce = null;
     let allColumnOptions = [];
@@ -825,7 +847,9 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
     let acItems = [];
     let acIndex = -1;
     let acTargetEl = null;
-    const CELL_CHAR_LIMIT = 20;
+    // Truncar só valores enormes (JSON/XML). Pedidos marketplace (C5_PEDMAR etc.) ficam inteiros.
+    const CELL_CHAR_LIMIT = 120;
+    const FULL_DISPLAY_COLS = /PEDMAR|PEDIDO|TRACK|CHAVE|NFE|DOC|NUM|COD|ID|OBS|MSG|SQL/i;
     const cellFullValues = new Map();
 
     const cellModal = document.getElementById('sql-cell-modal');
@@ -1062,26 +1086,35 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         return selected.join(', ');
     }
 
-    function formatCellDisplay(value) {
+    function formatCellDisplay(value, colName) {
         const full = String(value ?? '').trim();
         if (full === '') {
-            return { display: '—', full: '', truncated: false, empty: true };
+            return { display: '—', full: '', truncated: false, empty: true, long: false };
         }
-        if (full.length <= CELL_CHAR_LIMIT) {
-            return { display: full, full: full, truncated: false, empty: false };
+        const preferFull = FULL_DISPLAY_COLS.test(String(colName || ''));
+        if (preferFull || full.length <= CELL_CHAR_LIMIT) {
+            return {
+                display: full,
+                full: full,
+                truncated: false,
+                empty: false,
+                long: full.length > 24,
+            };
         }
         return {
             display: full.slice(0, CELL_CHAR_LIMIT) + '…',
             full: full,
             truncated: true,
             empty: false,
+            long: true,
         };
     }
 
     function renderCellHtml(col, row, rowIndex) {
-        const cell = formatCellDisplay(row[col]);
+        const cell = formatCellDisplay(row[col], col);
         const classes = ['sql-cell'];
         if (cell.empty) classes.push('sql-cell-empty');
+        if (cell.long) classes.push('sql-cell-long');
         if (cell.truncated) classes.push('sql-cell-truncated');
 
         let attrs = ' class="' + classes.join(' ') + '"';
@@ -1091,7 +1124,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
             attrs += ' role="button" tabindex="0" title="Clique para ver o valor completo"';
             attrs += ' data-col="' + escapeAttr(col) + '"';
             attrs += ' data-cell-key="' + escapeAttr(cellKey) + '"';
-        } else if (!cell.empty && cell.full.length <= 80) {
+        } else if (!cell.empty) {
             attrs += ' title="' + escapeAttr(cell.full) + '"';
         }
 
@@ -1266,14 +1299,54 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     }
 
-    function updateExportLink(historyId) {
-        lastHistoryId = historyId || null;
-        if (!lastHistoryId) {
-            exportBtn.hidden = true;
+    function csvEscape(value) {
+        const s = String(value ?? '');
+        if (/[",\r\n;]/.test(s)) {
+            return '"' + s.replace(/"/g, '""') + '"';
+        }
+        return s;
+    }
+
+    function downloadDisplayedCsv() {
+        if (!lastResultColumns.length) {
+            setStatus('Nao ha resultados para exportar. Execute a consulta primeiro.', 'err');
             return;
         }
-        exportBtn.href = exportBase + '&export=xlsx&history_id=' + encodeURIComponent(String(lastHistoryId));
-        exportBtn.hidden = false;
+        const lines = [];
+        lines.push(lastResultColumns.map(csvEscape).join(';'));
+        lastResultRows.forEach(function (row) {
+            lines.push(lastResultColumns.map(function (col) {
+                return csvEscape(row[col]);
+            }).join(';'));
+        });
+        const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'consulta_sql_' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function updateExportLink(historyId) {
+        lastHistoryId = historyId || null;
+        const hasRows = lastResultRows.length > 0 || lastResultColumns.length > 0;
+        const canExport = hasRows || !!lastHistoryId;
+        exportBtn.hidden = !canExport;
+        exportBtn.disabled = !canExport;
+        exportBtn.title = lastHistoryId
+            ? 'Baixar Excel completo da consulta (servidor)'
+            : 'Baixar CSV com os registros exibidos na tela';
+    }
+
+    function handleExportClick() {
+        if (lastHistoryId) {
+            window.location.href = exportBase + '&export=xlsx&history_id=' + encodeURIComponent(String(lastHistoryId));
+            return;
+        }
+        downloadDisplayedCsv();
     }
 
     function renderHistory(items) {
@@ -1355,7 +1428,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         }
         if (lastHistoryId === id) {
             lastHistoryId = null;
-            exportBtn.hidden = true;
+            updateExportLink(null);
         }
         await loadHistory();
     }
@@ -1434,6 +1507,8 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         cellFullValues.clear();
         const cols = data.columns || [];
         const rows = data.rows || [];
+        lastResultColumns = cols;
+        lastResultRows = rows;
 
         headEl.innerHTML = '<tr><th class="sql-col-num">#</th>' + cols.map(function (c) {
             return '<th title="' + escapeAttr(c) + '">' + escapeHtml(c) + '</th>';
@@ -1452,6 +1527,7 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
         resultsCount.textContent = rows.length
             ? rows.length + ' registro(s) exibido(s) — linhas #1 a #' + rows.length
             : '';
+        updateExportLink(lastHistoryId);
     }
 
     function openCellFromTd(td) {
@@ -1609,8 +1685,8 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
             previewEl.textContent = data.sql || '';
             previewEl.hidden = false;
             renderResults(data);
+            updateExportLink(data.history_id || null);
             if (data.history_id) {
-                updateExportLink(data.history_id);
                 loadHistory();
             }
             let msg = data.row_count + ' linha(s) em ' + data.elapsed_ms + ' ms';
@@ -1627,6 +1703,10 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
             abortController = null;
             setRunning(false);
         }
+    });
+
+    exportBtn.addEventListener('click', function () {
+        handleExportClick();
     });
 
     historyList.addEventListener('click', function (ev) {
@@ -1748,8 +1828,8 @@ $apiBase = portal_wct_public_path($baseUrl, 'index.php?page=protheus-consulta-sq
             previewEl.textContent = data.sql || '';
             previewEl.hidden = false;
             renderResults(data);
+            updateExportLink(data.history_id || null);
             if (data.history_id) {
-                updateExportLink(data.history_id);
                 loadHistory();
             }
             let msg = data.row_count + ' linha(s) em ' + data.elapsed_ms + ' ms';

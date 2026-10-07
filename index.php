@@ -382,6 +382,7 @@ $allowedPages = [
     'tasks',
     'rastreamento-ssw',
     'find-cep',
+    'sefaz-cte-dfe',
     'login',
     'forgot-password',
     'reset-password',
@@ -740,7 +741,11 @@ if ($page === 'protheus-consulta-sql' && ($_GET['export'] ?? '') === 'xlsx') {
             if ($item === null) {
                 throw new RuntimeException('Historico da consulta nao encontrado.');
             }
-            if ($item['table'] === \App\Services\ProtheusAdHocQueryService::RAW_QUERY_MARKER) {
+            // mapRow renomeia __RAW__ para "Query pronta" — usar is_raw / SQL salvo.
+            if (!empty($item['is_raw'])
+                || ($item['table'] ?? '') === \App\Services\ProtheusAdHocQueryService::RAW_QUERY_MARKER
+                || ($item['table'] ?? '') === 'Query pronta'
+            ) {
                 $filePath = $app['protheusAdHocQueryService']->exportRawToXlsx((string) $item['sql']);
                 $fileName = basename($filePath);
                 header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -750,12 +755,17 @@ if ($page === 'protheus-consulta-sql' && ($_GET['export'] ?? '') === 'xlsx') {
                 @unlink($filePath);
                 exit;
             }
-            $table = (string) $item['table'];
+            $table = (string) ($item['table'] ?? '');
+            // Remover sufixo de exibicao do historico ("ZA4010 (COUNT)").
+            if (!empty($item['is_count']) && str_ends_with($table, ' (COUNT)')) {
+                $table = substr($table, 0, -strlen(' (COUNT)'));
+            }
             $where = (string) $item['where'];
             $columns = (string) $item['columns'];
             $top = (int) $item['top'];
             $orderBy = (string) ($item['order_by'] ?? '');
-            $countOnly = ((string) ($item['columns'] ?? '')) === \App\Services\ProtheusAdHocQueryService::COUNT_COLUMNS_MARKER;
+            $countOnly = !empty($item['is_count'])
+                || ((string) ($item['columns'] ?? '')) === \App\Services\ProtheusAdHocQueryService::COUNT_COLUMNS_MARKER;
         } else {
             $table = (string) ($_GET['table'] ?? '');
             $where = (string) ($_GET['where'] ?? '');
@@ -854,6 +864,9 @@ $menuSections = [
         ['id' => 'protheus-monitor-pedidos-erro', 'label' => 'Erros Pedidos ZA4'],
         ['id' => 'protheus-consulta-sql', 'label' => 'Consulta SQL'],
     ],
+    'Fiscal' => [
+        ['id' => 'sefaz-cte-dfe', 'label' => 'CT-e SEFAZ (XML)'],
+    ],
     'Integração' => [
         [
             'id' => 'tracking-wct',
@@ -906,6 +919,48 @@ if ($page === 'repasse-mp' && isset($_GET['download']) && $_GET['download'] !== 
     header('Content-Disposition: attachment; filename="' . $fileName . '"');
     header('Content-Length: ' . (string) filesize($filePath));
     readfile($filePath);
+    exit;
+}
+
+if ($page === 'sefaz-cte-dfe' && in_array((string) ($_GET['download'] ?? ''), ['xml', 'zip'], true)) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    $dfeService = $app['sefazCteDistribuicaoService'];
+    try {
+        if ($_GET['download'] === 'xml') {
+            $file = $dfeService->getXmlFile((int) ($_GET['id'] ?? 0));
+            if ($file === null) {
+                http_response_code(404);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo 'Documento não encontrado.';
+                exit;
+            }
+            header('Content-Type: application/xml; charset=utf-8');
+        } else {
+            @set_time_limit(300);
+            $ids = !empty($_GET['todos'])
+                ? $app['sefazDfeRepository']->findIds([
+                    'de' => (string) ($_GET['de'] ?? ''),
+                    'ate' => (string) ($_GET['ate'] ?? ''),
+                    'busca' => (string) ($_GET['busca'] ?? ''),
+                    'tipo' => (string) ($_GET['tipo'] ?? ''),
+                ])
+                : array_map('intval', is_array($_POST['ids'] ?? null) ? $_POST['ids'] : []);
+            $file = $dfeService->buildZip($ids);
+            header('Content-Type: application/zip');
+        }
+        header('Content-Disposition: attachment; filename="' . $file['filename'] . '"');
+        header('Cache-Control: no-store');
+        header('Content-Length: ' . (string) strlen($file['content']));
+        echo $file['content'];
+    } catch (Throwable $e) {
+        header(
+            'Location: ' . portal_wct_public_path($baseUrl, 'index.php?page=sefaz-cte-dfe&flash_err=' . rawurlencode($e->getMessage())),
+            true,
+            302
+        );
+    }
     exit;
 }
 
@@ -1193,6 +1248,9 @@ if ($page === 'protheus-monitor-pedidos' && ($_GET['export'] ?? '') === 'xlsx') 
         $filterCpfCnpj = trim((string) ($_GET['cpf_cnpj'] ?? ''));
         $saidaDe = trim((string) ($_GET['saida_de'] ?? ''));
         $saidaAte = trim((string) ($_GET['saida_ate'] ?? ''));
+        $filtroRomaneio = trim((string) ($_GET['romaneio'] ?? ''));
+        $filtroEdi = trim((string) ($_GET['edi'] ?? ''));
+        $filtroSefaz = trim((string) ($_GET['sefaz'] ?? ''));
 
         $filePath = $app['protheusPedidosMonitorService']->exportToXlsx(
             $filial,
@@ -1203,7 +1261,10 @@ if ($page === 'protheus-monitor-pedidos' && ($_GET['export'] ?? '') === 'xlsx') 
             $filterPedMarketplace,
             $filterCpfCnpj,
             $saidaDe,
-            $saidaAte
+            $saidaAte,
+            $filtroRomaneio,
+            $filtroEdi,
+            $filtroSefaz
         );
         $fileName = basename($filePath);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

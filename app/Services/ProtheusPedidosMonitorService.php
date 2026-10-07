@@ -40,7 +40,7 @@ class ProtheusPedidosMonitorService
     /** @var list<string> */
     private const EXPORT_HIGHLIGHT_COLUMNS = ['ROMANEIO', 'DT_SAIDA'];
 
-    private const QUERY_TIMEOUT_SEC = 45;
+    private const QUERY_TIMEOUT_SEC = 90;
 
     /** Acima disso usa match completo (lotes grandes). */
     private const PEDIDO_FAST_LOOKUP_MAX = 50;
@@ -144,7 +144,10 @@ class ProtheusPedidosMonitorService
         string $pedidosCsv = '',
         string $cpfCnpj = '',
         string $saidaDe = '',
-        string $saidaAte = ''
+        string $saidaAte = '',
+        string $filtroRomaneio = '',
+        string $filtroEdi = '',
+        string $filtroSefaz = ''
     ): string {
         $pdo = $this->connectionService->connect();
         $this->applyQueryTimeout($pdo);
@@ -157,7 +160,10 @@ class ProtheusPedidosMonitorService
             $pedidosCsv,
             $cpfCnpj,
             $saidaDe,
-            $saidaAte
+            $saidaAte,
+            $filtroRomaneio,
+            $filtroEdi,
+            $filtroSefaz
         );
         $this->assertPedidoOrDocBatchRequired($ctx);
         if (!empty($ctx['batch_ids'])) {
@@ -171,6 +177,7 @@ class ProtheusPedidosMonitorService
                 ? $this->fetchFoundBatchIdentifiersLite($pdo, $ctx)
                 : ['docs' => [], 'pedidos' => [], 'cpfs' => []];
         }
+        $rows = $this->applyStatusFilters($this->enrichRowsWithStatuses($rows), $ctx);
         $missingDocs = ProtheusSqlHelper::missingFromBatch($ctx['docs'], $foundBatch['docs']);
         $missingPedidos = ProtheusSqlHelper::missingFromBatch($ctx['pedidos'], $foundBatch['pedidos']);
         $missingCpfs = ProtheusSqlHelper::missingFromBatch($ctx['cpfs'], $foundBatch['cpfs']);
@@ -187,7 +194,6 @@ class ProtheusPedidosMonitorService
             if (!is_array($row)) {
                 continue;
             }
-            $row = $this->enrichRowWithStatuses($row);
             $line = [];
             foreach (array_keys($columns) as $key) {
                 $text = $this->displayCellText((string) $key, $row[$key] ?? null);
@@ -246,6 +252,25 @@ class ProtheusPedidosMonitorService
     {
         return $this->parseBatchFilter($docsCsv) !== []
             || $this->parseBatchFilter($pedidosCsv) !== [];
+    }
+
+    public function hasStatusSearchFilters(string $filtroRomaneio, string $filtroEdi, string $filtroSefaz): bool
+    {
+        return $this->normalizeRomaneioFilter($filtroRomaneio) !== ''
+            || $this->normalizeEdiFilter($filtroEdi) !== ''
+            || $this->normalizeSefazFilter($filtroSefaz) !== '';
+    }
+
+    /** Nota/pedido em lote OU filtro Romaneio/EDI/SEFAZ. */
+    public function hasAllowedSearchFilters(
+        string $docsCsv,
+        string $pedidosCsv,
+        string $filtroRomaneio = '',
+        string $filtroEdi = '',
+        string $filtroSefaz = ''
+    ): bool {
+        return $this->hasPedidoOrDocBatchFilters($docsCsv, $pedidosCsv)
+            || $this->hasStatusSearchFilters($filtroRomaneio, $filtroEdi, $filtroSefaz);
     }
 
     /**
@@ -337,12 +362,49 @@ WHERE SF2.D_E_L_E_T_ = \' \'
         string $pedidosCsv = '',
         string $cpfCnpj = '',
         string $saidaDe = '',
-        string $saidaAte = ''
+        string $saidaAte = '',
+        string $filtroRomaneio = '',
+        string $filtroEdi = '',
+        string $filtroSefaz = ''
     ): array {
         $pdo = $this->connectionService->connect();
-        $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, $marketplace, $docsCsv, $pedidosCsv, $cpfCnpj, $saidaDe, $saidaAte);
+        $ctx = $this->buildFilterContext(
+            $filial,
+            $emissaoDe,
+            $emissaoAte,
+            $marketplace,
+            $docsCsv,
+            $pedidosCsv,
+            $cpfCnpj,
+            $saidaDe,
+            $saidaAte,
+            $filtroRomaneio,
+            $filtroEdi,
+            $filtroSefaz
+        );
 
-        return $this->fetchAll($pdo, $ctx);
+        return $this->applyStatusFilters(
+            $this->enrichRowsWithStatuses($this->fetchAll($pdo, $ctx)),
+            $ctx
+        );
+    }
+
+    /** @return list<string> */
+    public function romaneioFilterOptions(): array
+    {
+        return ['Sim', 'Não'];
+    }
+
+    /** @return list<string> */
+    public function ediFilterOptions(): array
+    {
+        return ['Sim', 'Não', 'Erro', '—'];
+    }
+
+    /** @return list<string> */
+    public function sefazFilterOptions(): array
+    {
+        return ['Autorizada', 'Rejeitada', 'Pendente', '—'];
     }
 
     /**
@@ -369,7 +431,10 @@ WHERE SF2.D_E_L_E_T_ = \' \'
         string $pedidosCsv = '',
         string $cpfCnpj = '',
         string $saidaDe = '',
-        string $saidaAte = ''
+        string $saidaAte = '',
+        string $filtroRomaneio = '',
+        string $filtroEdi = '',
+        string $filtroSefaz = ''
     ): array {
         $page = max(1, $page);
         $perPage = max(10, min(200, $perPage));
@@ -377,7 +442,20 @@ WHERE SF2.D_E_L_E_T_ = \' \'
 
         $pdo = $this->connectionService->connect();
         $this->applyQueryTimeout($pdo);
-        $ctx = $this->buildFilterContext($filial, $emissaoDe, $emissaoAte, $marketplace, $docsCsv, $pedidosCsv, $cpfCnpj, $saidaDe, $saidaAte);
+        $ctx = $this->buildFilterContext(
+            $filial,
+            $emissaoDe,
+            $emissaoAte,
+            $marketplace,
+            $docsCsv,
+            $pedidosCsv,
+            $cpfCnpj,
+            $saidaDe,
+            $saidaAte,
+            $filtroRomaneio,
+            $filtroEdi,
+            $filtroSefaz
+        );
 
         $this->assertPedidoOrDocBatchRequired($ctx);
 
@@ -385,6 +463,7 @@ WHERE SF2.D_E_L_E_T_ = \' \'
             return $this->listPedidosBatchFast($pdo, $ctx, $page, $perPage);
         }
 
+        // Periodo + Romaneio/EDI/SEFAZ: filtra no SQL e pagina no banco (evita timeout).
         $total = $this->fetchTotal($pdo, $ctx);
         $rows = $this->fetchPage($pdo, $ctx, $offset, $perPage);
 
@@ -434,6 +513,7 @@ WHERE SF2.D_E_L_E_T_ = \' \'
             ? $this->collectFoundBatchFromResultRows($ctx, $allRows)
             : ['docs' => [], 'pedidos' => [], 'cpfs' => []];
 
+        $allRows = $this->applyStatusFilters($this->enrichRowsWithStatuses($allRows), $ctx);
         $total = count($allRows);
         $offset = ($page - 1) * $perPage;
         $rows = array_slice($allRows, $offset, $perPage);
@@ -441,7 +521,7 @@ WHERE SF2.D_E_L_E_T_ = \' \'
         $missingPedidos = ProtheusSqlHelper::missingFromBatch($ctx['pedidos'], $foundBatch['pedidos']);
 
         return [
-            'rows' => $this->enrichRowsWithStatuses($rows),
+            'rows' => $rows,
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
@@ -517,6 +597,96 @@ WHERE SF2.D_E_L_E_T_ = \' \'
         $row['SEFAZ_STATUS'] = $this->resolveSefazLabel($row);
 
         return $row;
+    }
+
+    /**
+     * @param array{
+     *   filtro_romaneio?: string,
+     *   filtro_edi?: string,
+     *   filtro_sefaz?: string
+     * } $ctx
+     */
+    private function hasStatusFilters(array $ctx): bool
+    {
+        return trim((string) ($ctx['filtro_romaneio'] ?? '')) !== ''
+            || trim((string) ($ctx['filtro_edi'] ?? '')) !== ''
+            || trim((string) ($ctx['filtro_sefaz'] ?? '')) !== '';
+    }
+
+    /**
+     * Filtra pelas colunas calculadas Romaneio / EDI / SEFAZ (labels da tela).
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param array{
+     *   filtro_romaneio?: string,
+     *   filtro_edi?: string,
+     *   filtro_sefaz?: string
+     * } $ctx
+     * @return list<array<string, mixed>>
+     */
+    private function applyStatusFilters(array $rows, array $ctx): array
+    {
+        $romaneio = trim((string) ($ctx['filtro_romaneio'] ?? ''));
+        $edi = trim((string) ($ctx['filtro_edi'] ?? ''));
+        $sefaz = trim((string) ($ctx['filtro_sefaz'] ?? ''));
+        if ($romaneio === '' && $edi === '' && $sefaz === '') {
+            return $rows;
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if (!isset($row['TEM_ROMANEIO'], $row['TEM_EDI'], $row['SEFAZ_STATUS'])) {
+                $row = $this->enrichRowWithStatuses($row);
+            }
+            if ($romaneio !== '' && (string) ($row['TEM_ROMANEIO'] ?? '') !== $romaneio) {
+                continue;
+            }
+            if ($edi !== '' && (string) ($row['TEM_EDI'] ?? '') !== $edi) {
+                continue;
+            }
+            if ($sefaz !== '' && (string) ($row['SEFAZ_STATUS'] ?? '') !== $sefaz) {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    private function normalizeRomaneioFilter(string $value): string
+    {
+        $value = trim($value);
+        if ($value === 'Nao') {
+            $value = 'Não';
+        }
+
+        return in_array($value, $this->romaneioFilterOptions(), true) ? $value : '';
+    }
+
+    private function normalizeEdiFilter(string $value): string
+    {
+        $value = trim($value);
+        if ($value === 'Nao') {
+            $value = 'Não';
+        }
+        if ($value === '-' || strcasecmp($value, 'sem nf') === 0) {
+            $value = '—';
+        }
+
+        return in_array($value, $this->ediFilterOptions(), true) ? $value : '';
+    }
+
+    private function normalizeSefazFilter(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '-' || strcasecmp($value, 'sem nf') === 0) {
+            $value = '—';
+        }
+
+        return in_array($value, $this->sefazFilterOptions(), true) ? $value : '';
     }
 
     /**
@@ -717,6 +887,9 @@ WHERE SF2.D_E_L_E_T_ = \' \'
     {
         $sql = 'SELECT COUNT(1) AS total FROM (' . $this->baseSql($ctx, 'sf2', 'or', $pdo) . ') AS q';
         $stmt = $pdo->prepare($sql);
+        if (defined('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')) {
+            $stmt->setAttribute(PDO::SQLSRV_ATTR_QUERY_TIMEOUT, self::QUERY_TIMEOUT_SEC);
+        }
         $stmt->execute($this->queryParams($ctx, $sql));
         $row = $stmt->fetch();
 
@@ -848,6 +1021,9 @@ SQL;
         $bind = $this->queryParams($ctx, $sql);
 
         $stmt = $pdo->prepare($sql);
+        if (defined('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')) {
+            $stmt->setAttribute(PDO::SQLSRV_ATTR_QUERY_TIMEOUT, self::QUERY_TIMEOUT_SEC);
+        }
         foreach ($bind as $key => $value) {
             $stmt->bindValue($key, $value);
         }
@@ -870,6 +1046,9 @@ SQL;
             . ' ORDER BY SF2.F2_EMISSAO DESC, SF2.F2_DOC, SF2.F2_SERIE';
 
         $stmt = $pdo->prepare($sql);
+        if (defined('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')) {
+            $stmt->setAttribute(PDO::SQLSRV_ATTR_QUERY_TIMEOUT, self::QUERY_TIMEOUT_SEC);
+        }
         $stmt->execute($this->queryParams($ctx, $sql));
         $rows = $stmt->fetchAll();
 
@@ -1708,6 +1887,58 @@ ORDER BY SC5.C5_NUM DESC';
             $sql .= ProtheusSqlHelper::marketplaceAndSql($params[':marketplace']);
         }
 
+        $sql .= $this->statusWhereSql($ctx);
+
+        return $sql;
+    }
+
+    /**
+     * Empurra Romaneio / EDI / SEFAZ para o WHERE (evita carregar o periodo inteiro em PHP).
+     *
+     * @param array{filtro_romaneio?: string, filtro_edi?: string, filtro_sefaz?: string} $ctx
+     */
+    private function statusWhereSql(array $ctx): string
+    {
+        $romaneio = trim((string) ($ctx['filtro_romaneio'] ?? ''));
+        $edi = trim((string) ($ctx['filtro_edi'] ?? ''));
+        $sefaz = trim((string) ($ctx['filtro_sefaz'] ?? ''));
+        if ($romaneio === '' && $edi === '' && $sefaz === '') {
+            return '';
+        }
+
+        $sql = '';
+        $nrrom = "RTRIM(ISNULL(GW1.GW1_NRROM, ''))";
+        $sit = "LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(30), GW1.GW1_SITINT), '')))";
+        $fimp = "UPPER(RTRIM(ISNULL(SF2.F2_FIMP, '')))";
+        $chaveLen = "LEN(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(SF2.F2_CHVNFE, '')), ' ', ''), '-', ''), '.', ''), '/', ''), CHAR(9), ''))";
+
+        if ($romaneio === 'Sim') {
+            $sql .= " AND {$nrrom} <> ''";
+        } elseif ($romaneio === 'Não') {
+            $sql .= " AND {$nrrom} = ''";
+        }
+
+        if ($edi === 'Sim') {
+            $sql .= " AND ({$sit} = '1' OR ({$sit} <> '' AND ISNUMERIC({$sit}) = 1 AND ROUND(CONVERT(FLOAT, {$sit}), 0) = 1))";
+        } elseif ($edi === 'Não') {
+            $sql .= " AND ({$sit} = '' OR {$sit} = '0' OR ({$sit} <> '' AND ISNUMERIC({$sit}) = 1 AND ROUND(CONVERT(FLOAT, {$sit}), 0) = 0))";
+        } elseif ($edi === 'Erro') {
+            $sql .= " AND ({$sit} = '2' OR ({$sit} <> '' AND ISNUMERIC({$sit}) = 1 AND ROUND(CONVERT(FLOAT, {$sit}), 0) = 2))";
+        } elseif ($edi === '—') {
+            // Sem NF: caminho SF2 nao tem esses registros.
+            $sql .= ' AND 1 = 0';
+        }
+
+        if ($sefaz === 'Autorizada') {
+            $sql .= " AND {$fimp} NOT IN ('N', 'D') AND {$chaveLen} = 44";
+        } elseif ($sefaz === 'Rejeitada') {
+            $sql .= " AND {$fimp} IN ('N', 'D')";
+        } elseif ($sefaz === 'Pendente') {
+            $sql .= " AND {$fimp} NOT IN ('N', 'D') AND {$chaveLen} <> 44";
+        } elseif ($sefaz === '—') {
+            $sql .= ' AND 1 = 0';
+        }
+
         return $sql;
     }
 
@@ -1742,12 +1973,12 @@ ORDER BY SC5.C5_NUM DESC';
      */
     private function assertPedidoOrDocBatchRequired(array $ctx): void
     {
-        if ($ctx['docs'] !== [] || $ctx['pedidos'] !== []) {
+        if ($ctx['docs'] !== [] || $ctx['pedidos'] !== [] || $this->hasStatusFilters($ctx)) {
             return;
         }
 
         throw new \RuntimeException(
-            'Informe pelo menos uma nota (Doc) ou pedido marketplace em lote. '
+            'Informe nota (Doc), pedido marketplace em lote, ou filtre por Romaneio, EDI ou SEFAZ. '
             . 'Consulta apenas por periodo de emissao, marketplace ou CPF nao e permitida neste monitor.'
         );
     }
@@ -1802,7 +2033,10 @@ ORDER BY SC5.C5_NUM DESC';
         string $pedidosCsv = '',
         string $cpfCnpj = '',
         string $saidaDe = '',
-        string $saidaAte = ''
+        string $saidaAte = '',
+        string $filtroRomaneio = '',
+        string $filtroEdi = '',
+        string $filtroSefaz = ''
     ): array {
         $params = [
             ':filial' => $this->normalizeFilial($filial),
@@ -1843,6 +2077,9 @@ ORDER BY SC5.C5_NUM DESC';
             'cpfs' => $cpfs,
             'saida_filter' => $saidaDeNorm !== '' && $saidaAteNorm !== '',
             'batch_ids' => $docs !== [] || $pedidos !== [],
+            'filtro_romaneio' => $this->normalizeRomaneioFilter($filtroRomaneio),
+            'filtro_edi' => $this->normalizeEdiFilter($filtroEdi),
+            'filtro_sefaz' => $this->normalizeSefazFilter($filtroSefaz),
         ];
     }
 
@@ -2252,6 +2489,8 @@ SQL;
                     . ' OR RTRIM(ZA4.' . $pedmarCol . ') IN (' . implode(', ', $za4Placeholders) . '))';
             }
         }
+
+        $sql .= $this->statusWhereSql($ctx);
 
         return $sql;
     }

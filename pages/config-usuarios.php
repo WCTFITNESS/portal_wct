@@ -14,6 +14,15 @@ $feedbackClass = 'ok';
 $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
 $editUser = $editId > 0 ? $auth->findUser($editId) : null;
 
+if (isset($_GET['ok']) && trim((string) $_GET['ok']) !== '') {
+    $feedback = trim((string) $_GET['ok']);
+    $feedbackClass = 'ok';
+}
+if (isset($_GET['err']) && trim((string) $_GET['err']) !== '') {
+    $feedback = trim((string) $_GET['err']);
+    $feedbackClass = 'err';
+}
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $formType = (string) ($_POST['form_type'] ?? '');
     try {
@@ -27,8 +36,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 !isset($_POST['is_active']) || !empty($_POST['is_active']),
                 $mods
             );
+            if ($result['ok']) {
+                redirect_to('index.php?page=config-usuarios&ok=' . rawurlencode($result['message']));
+            }
             $feedback = $result['message'];
-            $feedbackClass = $result['ok'] ? 'ok' : 'err';
+            $feedbackClass = 'err';
         }
 
         if ($formType === 'user_update') {
@@ -43,21 +55,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 $mods,
                 (string) ($_POST['password'] ?? '')
             );
-            $feedback = $result['message'];
-            $feedbackClass = $result['ok'] ? 'ok' : 'err';
             if ($result['ok']) {
-                $editId = 0;
-                $editUser = null;
-            } else {
-                $editId = $id;
-                $editUser = $auth->findUser($id);
+                redirect_to('index.php?page=config-usuarios&ok=' . rawurlencode($result['message']));
             }
+            $feedback = $result['message'];
+            $feedbackClass = 'err';
+            $editId = $id;
+            $editUser = $auth->findUser($id);
         }
 
         if ($formType === 'user_delete') {
             $result = $auth->deleteUser((int) ($_POST['id'] ?? 0), $currentUser);
+            if ($result['ok']) {
+                redirect_to('index.php?page=config-usuarios&ok=' . rawurlencode($result['message']));
+            }
             $feedback = $result['message'];
-            $feedbackClass = $result['ok'] ? 'ok' : 'err';
+            $feedbackClass = 'err';
             $editId = 0;
             $editUser = null;
         }
@@ -69,6 +82,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
 $users = $auth->listUsers();
 $pageUrl = portal_wct_public_path($baseUrl, 'index.php?page=config-usuarios');
+$dbCfg = is_array($app['config']['db'] ?? null) ? $app['config']['db'] : [];
+$dbDriver = (string) ($dbCfg['driver'] ?? 'mysql');
+$dbName = (string) ($dbCfg['name'] ?? $dbCfg['database'] ?? '');
+$dbHost = (string) ($dbCfg['host'] ?? '');
+$envLabel = (getenv('RENDER') || getenv('RENDER_EXTERNAL_URL')) ? 'Render (produção)' : 'Local';
 ?>
 <style>
     .cfg-grid {
@@ -147,6 +165,15 @@ $pageUrl = portal_wct_public_path($baseUrl, 'index.php?page=config-usuarios');
         display: inline-block;
     }
     .cfg-hint { font-size: .8rem; color: #64748b; margin: 4px 0 0; }
+    .cfg-env {
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 8px;
+        font-size: .85rem;
+        color: #9a3412;
+    }
     @media (max-width: 960px) {
         .cfg-grid { grid-template-columns: 1fr; }
     }
@@ -157,6 +184,11 @@ $pageUrl = portal_wct_public_path($baseUrl, 'index.php?page=config-usuarios');
     <p style="color:#64748b;margin:0 0 14px;">
         Cadastre usuários e defina quais módulos cada um pode acessar.
         Administradores têm acesso a todos os módulos.
+    </p>
+    <p class="cfg-env">
+        Ambiente: <strong><?= htmlspecialchars($envLabel) ?></strong>
+        · Banco: <code><?= htmlspecialchars($dbDriver . (!empty($dbHost) ? '://' . $dbHost : '') . (!empty($dbName) ? '/' . $dbName : '')) ?></code>.
+        Usuários do Render e do localhost são bancos separados — cadastro em um não aparece no outro.
     </p>
 
     <?php if ($feedback !== null): ?>

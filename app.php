@@ -14,6 +14,7 @@ use App\Repositories\ProtheusSettingsRepository;
 use App\Repositories\ProtheusSqlQueryHistoryRepository;
 use App\Repositories\ProtheusSqlSavedQueriesRepository;
 use App\Repositories\RepasseMpJobRepository;
+use App\Repositories\SefazDfeRepository;
 use App\Repositories\TaskRepository;
 use App\Core\TrackingDatabase;
 use App\Repositories\SettingsRepository;
@@ -56,6 +57,7 @@ use App\Services\MailService;
 use App\Services\TaskService;
 use App\Services\FindCepService;
 use App\Services\PortalAuthService;
+use App\Services\SefazCteDistribuicaoService;
 use App\Services\SswTrackingService;
 use App\Services\TokenService;
 
@@ -137,6 +139,14 @@ $taskRepository = new TaskRepository($pdo);
 $taskService = new TaskService($taskRepository, $mailService, (string) ($config['app']['base_url'] ?? '/'));
 $sswTrackingService = new SswTrackingService($config['ssw'] ?? null);
 $findCepService = new FindCepService($findCepSettingsRepository);
+$sefazDfeRepository = new SefazDfeRepository($pdo);
+$sefazDfeKeyEnv = getenv('PORTAL_DFE_KEY');
+$sefazDfeKeyFromEnv = is_string($sefazDfeKeyEnv) && trim($sefazDfeKeyEnv) !== '';
+$sefazCteDistribuicaoService = new SefazCteDistribuicaoService(
+    $sefazDfeRepository,
+    $sefazDfeKeyFromEnv ? trim($sefazDfeKeyEnv) : 'wct-sefaz-dfe|' . json_encode($config['db']),
+    $sefazDfeKeyFromEnv
+);
 $portalUserRepository = new PortalUserRepository($pdo);
 $portalAuthService = new PortalAuthService(
     $portalUserRepository,
@@ -195,6 +205,8 @@ return [
     'sswTrackingService' => $sswTrackingService,
     'findCepSettingsRepository' => $findCepSettingsRepository,
     'findCepService' => $findCepService,
+    'sefazDfeRepository' => $sefazDfeRepository,
+    'sefazCteDistribuicaoService' => $sefazCteDistribuicaoService,
     'portalUserRepository' => $portalUserRepository,
     'portalAuthService' => $portalAuthService,
 ];
