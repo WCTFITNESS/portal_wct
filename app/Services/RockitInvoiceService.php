@@ -263,19 +263,26 @@ class RockitInvoiceService
     /**
      * XML das notas (ou dos cancelamentos) dos pedidos, para gravar na central de documentos fiscais.
      *
+     * Um lote com erro não interrompe os demais; a última mensagem de erro volta em $error.
+     *
      * @param list<string> $idOrders
      * @return list<string>
      */
-    public function fetchXmlForOrders(array $idOrders, bool $canceled = false): array
+    public function fetchXmlForOrders(array $idOrders, bool $canceled = false, ?string &$error = null): array
     {
         $idOrders = array_values(array_unique(array_filter(array_map(
             static fn ($v): string => preg_replace('/\D/', '', (string) $v) ?? '',
             $idOrders
         ))));
         $xmls = [];
+        $error = '';
         foreach (array_chunk($idOrders, self::DOWNLOAD_CHUNK) as $chunk) {
-            foreach ($this->fetchXmlFiles($chunk, $canceled) as $file) {
-                $xmls[] = $file['xml'];
+            try {
+                foreach ($this->fetchXmlFiles($chunk, $canceled) as $file) {
+                    $xmls[] = $file['xml'];
+                }
+            } catch (RuntimeException $e) {
+                $error = $e->getMessage();
             }
         }
 

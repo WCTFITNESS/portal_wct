@@ -67,32 +67,32 @@ class FiscalDocsService
         if ($this->rockit === null) {
             throw new RuntimeException('Integração com a Rock.IT indisponível.');
         }
-        $idsOf = static fn (array $orders): array => array_values(array_filter(array_map(
-            static fn (array $o): string => RockitInvoiceService::summarizeOrder($o)['id_order'],
-            $orders
-        )));
-
-        $emitidas = $idsOf($this->rockit->listOrders($de, $ate, '3')['orders']);
-        $count = $this->importXmlList('rockit', $emitidas !== [] ? $this->rockit->fetchXmlForOrders($emitidas) : []);
-
-        $aviso = '';
+        $todos = [];
         $canceladas = [];
-        try {
-            $canceladas = $idsOf($this->rockit->listOrders($de, $ate, '7')['orders']);
-            if ($canceladas !== []) {
-                $extra = $this->importXmlList('rockit', array_merge(
-                    $this->rockit->fetchXmlForOrders($canceladas),
-                    $this->rockit->fetchXmlForOrders($canceladas, true)
-                ));
-                foreach ($extra as $k => $n) {
-                    $count[$k] += $n;
-                }
+        foreach ($this->rockit->listOrders($de, $ate)['orders'] as $order) {
+            $s = RockitInvoiceService::summarizeOrder($order);
+            if ($s['id_order'] === '') {
+                continue;
             }
-        } catch (RuntimeException $e) {
-            $aviso = 'Notas canceladas não importadas: ' . $e->getMessage();
+            $todos[] = $s['id_order'];
+            $status = mb_strtolower($s['invoice_status']);
+            if ($status === '7' || str_contains($status, 'cancel')) {
+                $canceladas[] = $s['id_order'];
+            }
         }
 
-        return ['pedidos' => count($emitidas) + count($canceladas)] + $count + ['aviso' => $aviso];
+        $erro = '';
+        $xmls = $todos !== [] ? $this->rockit->fetchXmlForOrders($todos, false, $erro) : [];
+        $aviso = $erro !== '' ? 'Parte dos XML não veio: ' . $erro : '';
+        if ($canceladas !== []) {
+            $erroCanc = '';
+            $xmls = array_merge($xmls, $this->rockit->fetchXmlForOrders($canceladas, true, $erroCanc));
+            if ($erroCanc !== '') {
+                $aviso = trim($aviso . ' Cancelamentos: ' . $erroCanc);
+            }
+        }
+
+        return ['pedidos' => count($todos)] + $this->importXmlList('rockit', $xmls) + ['aviso' => $aviso];
     }
 
     /**

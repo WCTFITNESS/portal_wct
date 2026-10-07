@@ -31,6 +31,7 @@ try {
 }
 
 $mlTiposPadrao = ['full_inbound', 'full_retorno', 'full_retirada'];
+$showRockitDiag = false;
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     $formType = (string) ($_POST['form_type'] ?? '');
@@ -61,9 +62,21 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         }
 
         if ($formType === 'fd_import_rockit') {
+            $showRockitDiag = $isPortalAdmin;
             $r = $central->importRockit((string) ($_POST['cb_de'] ?? ''), (string) ($_POST['cb_ate'] ?? ''));
-            $feedback[] = 'Casas Bahia: ' . $r['pedidos'] . ' pedidos, ' . $r['novos'] . ' documentos novos, '
-                . $r['existentes'] . ' já estavam na central.' . ($r['aviso'] !== '' ? ' ' . $r['aviso'] : '');
+            if ($r['pedidos'] === 0) {
+                $feedback[] = 'Casas Bahia: a Rock.IT não devolveu nenhum pedido nesse período para a empresa '
+                    . $rockit->currentCompanyLabel() . '. Se estiver errada, troque em Notas Full Casas Bahia.';
+                $feedbackClass = 'err';
+            } else {
+                $feedback[] = 'Casas Bahia: ' . $r['pedidos'] . ' pedidos, ' . $r['novos'] . ' documentos novos, '
+                    . $r['existentes'] . ' já estavam na central'
+                    . ($r['ignorados'] > 0 ? ', ' . $r['ignorados'] . ' arquivos não reconhecidos' : '') . '.'
+                    . ($r['aviso'] !== '' ? ' ' . $r['aviso'] : '');
+                if ($r['novos'] + $r['existentes'] === 0) {
+                    $feedbackClass = 'err';
+                }
+            }
         }
 
         if ($formType === 'fd_retry_ciencia') {
@@ -170,6 +183,16 @@ $selected = static fn (string $a, string $b): string => $a === $b ? ' selected' 
                 <?php foreach ($feedback as $line): ?><li><?= htmlspecialchars($line) ?></li><?php endforeach; ?>
             </ul>
         </div>
+    <?php endif; ?>
+
+    <?php if ($showRockitDiag && $rockit->diagnostics() !== []): ?>
+        <details open class="fd-box">
+            <summary style="cursor:pointer;color:#2563eb">Resposta da Rock.IT (mande um print disto se não vierem as notas)</summary>
+            <?php foreach ($rockit->diagnostics() as $diag): ?>
+                <p class="fd-hint"><strong><?= htmlspecialchars($diag['label']) ?></strong> — HTTP <?= (int) $diag['status'] ?> — <?= htmlspecialchars($diag['type']) ?></p>
+                <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;background:#f8fafc;padding:8px;font-size:.75rem"><?= htmlspecialchars(mb_substr($diag['body'], 0, 2000)) ?></pre>
+            <?php endforeach; ?>
+        </details>
     <?php endif; ?>
 
     <?php if (!$anyCert): ?>
