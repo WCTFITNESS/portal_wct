@@ -386,6 +386,7 @@ $allowedPages = [
     'sefaz-cte-dfe',
     'casasbahia-full',
     'documentos-fiscais',
+    'renomear-minusculo',
     'login',
     'forgot-password',
     'reset-password',
@@ -872,6 +873,7 @@ $menuSections = [
         ['id' => 'documentos-fiscais', 'label' => 'Documentos fiscais (central)'],
         ['id' => 'sefaz-cte-dfe', 'label' => 'CT-e SEFAZ (XML)'],
         ['id' => 'casasbahia-full', 'label' => 'Notas Full Casas Bahia'],
+        ['id' => 'renomear-minusculo', 'label' => 'Renomear arquivos (minúsculo)'],
     ],
     'Integração' => [
         [
