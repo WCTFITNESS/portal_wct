@@ -91,6 +91,15 @@ function redirect_to(string $path): void
 {
     global $config;
 
-    header('Location: ' . portal_wct_public_path($config['app']['base_url'], ltrim($path, '/')));
+    $url = portal_wct_public_path($config['app']['base_url'], ltrim($path, '/'));
+    if (headers_sent()) {
+        // Páginas que tratam o POST depois que o layout já começou a ser enviado.
+        $safe = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+        echo '<script>window.location.replace(' . json_encode($url, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ');</script>'
+            . '<noscript><meta http-equiv="refresh" content="0;url=' . $safe . '"></noscript>'
+            . '<p><a href="' . $safe . '">Continuar</a></p>';
+        exit;
+    }
+    header('Location: ' . $url);
     exit;
 }
