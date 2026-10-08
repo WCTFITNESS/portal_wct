@@ -146,17 +146,58 @@ class RockitInvoiceService
                 throw new RuntimeException('Informe as datas do período.');
             }
         }
-        // O painel da Rock.it usa page (a partir de 1), limit, datefrom/dateto e IDCompany na URL; a documentação
-        // da API v2 fala em Page (a partir de 0), Limit e DateFrom/DateTo. Mandamos os dois formatos.
-        $query = [
-            'datefrom' => $dateFrom, 'dateto' => $dateTo, 'limit' => self::PAGE_LIMIT,
-            'DateFrom' => $dateFrom, 'DateTo' => $dateTo, 'Limit' => self::PAGE_LIMIT,
+        // O painel da Rock.it usa page (a partir de 1), limit e datefrom/dateto; a documentação da API v2 fala em
+        // Page (a partir de 0), Limit e DateFrom/DateTo. Tenta um formato de cada vez; se nenhum filtro de data
+        // trouxer pedidos, lista tudo sem data e filtra o período aqui.
+        $strategies = [
+            ['label' => 'formato do painel', 'page' => 'page', 'base' => 1, 'query' => ['datefrom' => $dateFrom, 'dateto' => $dateTo, 'limit' => self::PAGE_LIMIT], 'local' => false],
+            ['label' => 'formato da documentação', 'page' => 'Page', 'base' => 0, 'query' => ['DateFrom' => $dateFrom, 'DateTo' => $dateTo, 'Limit' => self::PAGE_LIMIT], 'local' => false],
+            ['label' => 'sem filtro de data', 'page' => 'page', 'base' => 1, 'query' => ['limit' => self::PAGE_LIMIT], 'local' => true],
         ];
 
         $orders = [];
         $truncated = false;
+        foreach ($strategies as $strategy) {
+            [$orders, $truncated] = $this->fetchOrderPages($strategy);
+            if ($orders === []) {
+                continue;
+            }
+            if ($strategy['local']) {
+                $orders = array_values(array_filter($orders, static function (array $o) use ($dateFrom, $dateTo): bool {
+                    $day = substr(self::summarizeOrder($o)['date'], 0, 10);
+
+                    return $day === '' || ($day >= $dateFrom && $day <= $dateTo);
+                }));
+            }
+            break;
+        }
+        if ($invoiceStatus !== '' && isset(self::INVOICE_STATUS[$invoiceStatus])) {
+            $wanted = [$invoiceStatus, mb_strtolower(self::INVOICE_STATUS[$invoiceStatus])];
+            $orders = array_values(array_filter(
+                $orders,
+                static fn (array $o): bool => in_array(mb_strtolower(self::summarizeOrder($o)['invoice_status']), $wanted, true)
+            ));
+        }
+
+        return ['orders' => $orders, 'truncated' => $truncated];
+    }
+
+    /**
+     * @param array{label: string, page: string, base: int, query: array<string, mixed>} $strategy
+     * @return array{0: list<array<string, mixed>>, 1: bool}
+     */
+    private function fetchOrderPages(array $strategy): array
+    {
+        $orders = [];
+        $truncated = false;
         for ($page = 0; $page < self::MAX_PAGES; $page++) {
-            $resp = $this->call('GET', '/orders', $query + ['page' => $page + 1, 'Page' => $page], null, 'Pedidos página ' . ($page + 1));
+            $resp = $this->call(
+                'GET',
+                '/orders',
+                $strategy['query'] + [$strategy['page'] => $page + $strategy['base']],
+                null,
+                'Pedidos (' . $strategy['label'] . ') página ' . ($page + 1)
+            );
             if ($resp['status'] === 404) {
                 break;
             }
@@ -186,16 +227,7 @@ class RockitInvoiceService
             }
         }
 
-        $orders = array_values($orders);
-        if ($invoiceStatus !== '' && isset(self::INVOICE_STATUS[$invoiceStatus])) {
-            $wanted = [$invoiceStatus, mb_strtolower(self::INVOICE_STATUS[$invoiceStatus])];
-            $orders = array_values(array_filter(
-                $orders,
-                static fn (array $o): bool => in_array(mb_strtolower(self::summarizeOrder($o)['invoice_status']), $wanted, true)
-            ));
-        }
-
-        return ['orders' => $orders, 'truncated' => $truncated];
+        return [array_values($orders), $truncated];
     }
 
     /** Campos de exibição de um pedido, tolerando variações de nome. */
@@ -213,9 +245,22 @@ class RockitInvoiceService
             return '';
         };
         $date = '';
-        foreach ($order as $k => $v) {
-            if (is_string($v) && preg_match('/date|data|created/i', (string) $k) && preg_match('/^\d{4}-\d{2}-\d{2}/', $v)) {
+        $lowerOrder = array_change_key_case($order, CASE_LOWER);
+        $preferred = ['dateorder', 'orderdate', 'datepurchase', 'purchasedate', 'datecreated', 'createdat', 'created_at', 'dateinsert'];
+        $candidates = array_merge(
+            array_intersect_key($lowerOrder, array_flip($preferred)),
+            array_filter($lowerOrder, static fn ($v, $k): bool => preg_match('/date|data|created/i', (string) $k) === 1, ARRAY_FILTER_USE_BOTH)
+        );
+        foreach ($candidates as $v) {
+            if (!is_string($v)) {
+                continue;
+            }
+            if (preg_match('/^\d{4}-\d{2}-\d{2}/', $v)) {
                 $date = $v;
+                break;
+            }
+            if (preg_match('#^(\d{2})/(\d{2})/(\d{4})(.*)$#', $v, $m)) {
+                $date = $m[3] . '-' . $m[2] . '-' . $m[1] . $m[4];
                 break;
             }
         }
