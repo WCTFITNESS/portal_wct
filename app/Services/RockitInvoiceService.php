@@ -146,15 +146,17 @@ class RockitInvoiceService
                 throw new RuntimeException('Informe as datas do período.');
             }
         }
-        $query = ['DateFrom' => $dateFrom, 'DateTo' => $dateTo, 'Limit' => self::PAGE_LIMIT];
-        if ($invoiceStatus !== '' && isset(self::INVOICE_STATUS[$invoiceStatus])) {
-            $query['InvoiceStatus'] = $invoiceStatus;
-        }
+        // O painel da Rock.it usa page (a partir de 1), limit, datefrom/dateto e IDCompany na URL; a documentação
+        // da API v2 fala em Page (a partir de 0), Limit e DateFrom/DateTo. Mandamos os dois formatos.
+        $query = [
+            'datefrom' => $dateFrom, 'dateto' => $dateTo, 'limit' => self::PAGE_LIMIT,
+            'DateFrom' => $dateFrom, 'DateTo' => $dateTo, 'Limit' => self::PAGE_LIMIT,
+        ];
 
         $orders = [];
         $truncated = false;
         for ($page = 0; $page < self::MAX_PAGES; $page++) {
-            $resp = $this->call('GET', '/orders', $query + ['Page' => $page], null, 'Pedidos página ' . $page);
+            $resp = $this->call('GET', '/orders', $query + ['page' => $page + 1, 'Page' => $page], null, 'Pedidos página ' . ($page + 1));
             if ($resp['status'] === 404) {
                 break;
             }
@@ -164,17 +166,33 @@ class RockitInvoiceService
                 throw new RuntimeException('A Rock.IT respondeu algo que não é JSON ao listar pedidos.');
             }
             $batch = $this->findList($decoded);
+            $added = 0;
             foreach ($batch as $row) {
-                if (is_array($row)) {
-                    $orders[] = $row;
+                if (!is_array($row)) {
+                    continue;
+                }
+                $id = self::summarizeOrder($row)['id_order'];
+                $key = $id !== '' ? $id : md5(json_encode($row) ?: '');
+                if (!isset($orders[$key])) {
+                    $orders[$key] = $row;
+                    $added++;
                 }
             }
-            if (count($batch) < self::PAGE_LIMIT) {
+            if ($added === 0 || count($batch) < self::PAGE_LIMIT) {
                 break;
             }
             if ($page === self::MAX_PAGES - 1) {
                 $truncated = true;
             }
+        }
+
+        $orders = array_values($orders);
+        if ($invoiceStatus !== '' && isset(self::INVOICE_STATUS[$invoiceStatus])) {
+            $wanted = [$invoiceStatus, mb_strtolower(self::INVOICE_STATUS[$invoiceStatus])];
+            $orders = array_values(array_filter(
+                $orders,
+                static fn (array $o): bool => in_array(mb_strtolower(self::summarizeOrder($o)['invoice_status']), $wanted, true)
+            ));
         }
 
         return ['orders' => $orders, 'truncated' => $truncated];
@@ -207,10 +225,10 @@ class RockitInvoiceService
             'order_from' => $pick($order, ['OrderFrom', 'order_from']),
             'order' => $pick($order, ['Order', 'order']),
             'type' => $pick($order, ['TypeOrder', 'OrderType', 'type_order']),
-            'nfe_number' => $pick($order, ['NfeNumber', 'NFeNumber', 'InvoiceNumber', 'nfe_number']),
-            'chave' => $pick($order, ['ChaveNfe', 'ChaveNFe', 'InvoiceKey', 'chave_nfe']),
-            'invoice_status' => $pick($order, ['InvoiceStatusDescription', 'InvoiceStatusName', 'InvoiceStatus']),
-            'order_status' => $pick($order, ['OrderStatusDescription', 'OrderStatusName', 'OrderStatus']),
+            'nfe_number' => $pick($order, ['NfeNumber', 'NFeNumber', 'InvoiceNumber', 'NumberInvoice', 'nfe_number']),
+            'chave' => $pick($order, ['ChaveNfe', 'ChaveNFe', 'InvoiceKey', 'KeyInvoice', 'AccessKey', 'chave_nfe']),
+            'invoice_status' => $pick($order, ['StatusInvoice', 'InvoiceStatusDescription', 'InvoiceStatusName', 'InvoiceStatus']),
+            'order_status' => $pick($order, ['StatusOrder', 'OrderStatusDescription', 'OrderStatusName', 'OrderStatus', 'IDStatusOrder']),
             'consumer' => $pick($order, ['ConsumerName', 'Consumer', 'ClientName', 'CustomerName']),
             'date' => $date,
         ];
@@ -303,6 +321,13 @@ class RockitInvoiceService
      */
     private function fetchXmlFiles(array $idOrders, bool $canceled): array
     {
+        if (!$canceled) {
+            $files = $this->fetchXmlFilesViaZipLink($idOrders);
+            if ($files !== null) {
+                return $files;
+            }
+        }
+
         $path = $canceled ? '/orders/xml/canceled/download' : '/orders/xml/download';
         $resp = $this->call('POST', $path, [], ['IDOrder' => array_map('intval', $idOrders)], 'Download ' . implode(',', array_slice($idOrders, 0, 3)));
         if ($resp['status'] === 404) {
@@ -312,6 +337,58 @@ class RockitInvoiceService
 
         $out = [];
         $this->collectXml($resp['body'], count($idOrders) === 1 ? 'pedido-' . $idOrders[0] : 'pedido', $out, true);
+
+        return $out;
+    }
+
+    /**
+     * Mesmo caminho do painel da Rock.it: pede um ZIP com os XML e recebe um link temporário para baixar.
+     * Devolve null quando esse caminho não está disponível, para tentar o download antigo.
+     *
+     * @param list<string> $idOrders
+     * @return list<array{hint: string, xml: string}>|null
+     */
+    private function fetchXmlFilesViaZipLink(array $idOrders): ?array
+    {
+        $resp = $this->call('POST', '/orders/invoices/xml-files', [], ['IDOrder' => array_map('intval', $idOrders)], 'XML (link do ZIP) ' . implode(',', array_slice($idOrders, 0, 3)));
+        if ($resp['status'] < 200 || $resp['status'] >= 300) {
+            return null;
+        }
+        $decoded = json_decode($resp['body'], true);
+        $data = is_array($decoded['data']['data'] ?? null) ? $decoded['data']['data'] : (is_array($decoded['data'] ?? null) ? $decoded['data'] : (array) $decoded);
+        $zipUrl = (string) ($data['zipUrl'] ?? $data['ZipUrl'] ?? $data['url'] ?? '');
+        if ($zipUrl === '' || !preg_match('#^https://#i', $zipUrl)) {
+            return null;
+        }
+
+        $ch = curl_init($zipUrl);
+        if ($ch === false) {
+            return null;
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_CONNECTTIMEOUT => 20,
+            CURLOPT_TIMEOUT => 300,
+            CURLOPT_HTTPHEADER => ['User-Agent: Mozilla/5.0 (compatible; WCT-Portal/1.0)'],
+        ]);
+        $zip = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $type = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        curl_close($ch);
+        $zip = is_string($zip) ? $zip : '';
+        $this->diagnostics[] = [
+            'label' => 'Download do ZIP',
+            'status' => $status,
+            'type' => $type,
+            'body' => str_starts_with($zip, 'PK') ? 'ZIP com ' . strlen($zip) . ' bytes' : mb_substr($zip, 0, 2000),
+        ];
+        if ($status < 200 || $status >= 300 || $zip === '') {
+            return null;
+        }
+
+        $out = [];
+        $this->collectXml($zip, count($idOrders) === 1 ? 'pedido-' . $idOrders[0] : 'pedido', $out, true);
 
         return $out;
     }
@@ -460,6 +537,7 @@ class RockitInvoiceService
             $idCompany = (string) (($this->repository->get() ?? [])['id_company'] ?? '');
             if ($idCompany !== '') {
                 $headers[] = 'IDCompany: ' . $idCompany;
+                $query = ['IDCompany' => $idCompany] + $query;
             }
         }
 

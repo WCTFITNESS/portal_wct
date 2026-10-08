@@ -50,7 +50,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 $status = $rockit->getStatus();
 $de = (string) ($_GET['de'] ?? date('Y-m-d', strtotime('-7 days')));
 $ate = (string) ($_GET['ate'] ?? date('Y-m-d'));
-$invoiceStatus = (string) ($_GET['status_nf'] ?? '3');
+$invoiceStatus = (string) ($_GET['status_nf'] ?? '');
 $tipoFiltro = trim((string) ($_GET['tipo'] ?? ''));
 $orders = [];
 $truncated = false;
